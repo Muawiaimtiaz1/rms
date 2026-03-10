@@ -1,0 +1,3 @@
+✅ Default admin user created (admin / admin123)
+✅ POS System running at http://localhost:4000
+   Login: admin / admin123
