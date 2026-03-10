@@ -35,9 +35,9 @@ app.get('/dashboard', (req, res) => {
 // Static assets (js, css, etc.) served after named routes
 app.use(express.static(path.join(__dirname, 'public')));
 
-// const PORT = process.env.PORT || 4000;
-// app.listen(PORT, () => {
-//     console.log(`✅ POS System running at http://localhost:${PORT}`);
-//     console.log('   Login: admin / admin123');
-// });
-export default app;
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => {
+    console.log(`✅ POS System running at http://localhost:${PORT}`);
+    console.log('   Login: admin / admin123');
+});
+// export default app;
