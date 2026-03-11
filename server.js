@@ -35,13 +35,9 @@ app.get('/dashboard', (req, res) => {
 // Static assets (js, css, etc.) served after named routes
 app.use(express.static(path.join(__dirname, 'public')));
 
-const serverless = require('serverless-http');
-
 const PORT = process.env.PORT || 4000;
-if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, () => {
-        console.log(`✅ POS System running at http://localhost:${PORT}`);
-    });
-}
-
-module.exports.handler = serverless(app);
+app.listen(PORT, () => {
+    console.log(`✅ POS System running at http://localhost:${PORT}`);
+    console.log('   Login: admin / admin123');
+});
+// export default app;
