@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
+  allowed_panels TEXT, -- JSON array of panel IDs
   created_at TEXT DEFAULT (datetime('now'))
 );
 

@@ -14,7 +14,7 @@ router.post('/login', (req, res) => {
     const valid = bcrypt.compareSync(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-    req.session.user = { id: user.id, name: user.name, username: user.username, role: user.role };
+    req.session.user = { id: user.id, name: user.name, username: user.username, role: user.role, allowed_panels: user.allowed_panels ? JSON.parse(user.allowed_panels) : [] };
     res.json({ ok: true, user: req.session.user });
 });
 

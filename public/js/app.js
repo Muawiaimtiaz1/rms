@@ -17,6 +17,14 @@ let allProducts = [];
 let _expenseView = 'list';
 let _expenseMonth = new Date().toISOString().slice(0, 7);
 let _expensePage = 1;
+const AVAILABLE_PANELS = [
+  { id: 'dashboard', name: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { id: 'brands', name: 'Brands', icon: 'M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z' },
+  { id: 'products', name: 'Products', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
+  { id: 'pos', name: 'POS / Checkout', icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
+  { id: 'sales-history', name: 'Sales History', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
+  { id: 'expenses', name: 'Expenses', icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' }
+];
 
 // ─── Init ────────────────────────────────────────────────────────────
 async function init() {
@@ -28,16 +36,47 @@ async function init() {
     document.getElementById('user-name-sidebar').textContent = currentUser.name || currentUser.username;
     document.getElementById('user-role-sidebar').textContent = currentUser.role;
     document.getElementById('user-avatar').textContent = (currentUser.name || currentUser.username)[0].toUpperCase();
+
+    // Panel visibility
+    AVAILABLE_PANELS.forEach(p => {
+      const el = document.getElementById(`nav-${p.id}`);
+      if (el) {
+        if (currentUser.role === 'admin' || currentUser.allowed_panels.includes(p.id)) {
+          el.style.display = 'flex';
+        } else {
+          el.style.display = 'none';
+        }
+      }
+    });
+    // Side badges depend on Products and Sales
+    if (currentUser.role !== 'admin') {
+      if (!currentUser.allowed_panels.includes('products')) document.getElementById('nav-products-low-stock').style.display = 'none';
+      if (!currentUser.allowed_panels.includes('sales-history')) document.getElementById('nav-sales-pending').style.display = 'none';
+    }
+
     if (currentUser.role === 'admin') document.getElementById('nav-users-wrap').classList.remove('hidden');
     setInterval(() => {
       document.getElementById('header-time').textContent = new Date().toLocaleString();
     }, 1000);
-    navigate(localStorage.getItem('pos_page') || 'dashboard');
-  } catch { window.location.href = '/'; }
+
+    let startPage = localStorage.getItem('pos_page') || 'dashboard';
+    if (currentUser.role !== 'admin' && !currentUser.allowed_panels.includes(startPage)) {
+      startPage = currentUser.allowed_panels[0] || 'dashboard';
+    }
+    navigate(startPage);
+  } catch (e) { console.error(e); window.location.href = '/'; }
 }
 
 // ─── Router ──────────────────────────────────────────────────────────
 function navigate(page) {
+  if (currentUser.role !== 'admin' && !AVAILABLE_PANELS.map(p => p.id).includes(page)) {
+    // Check sub-pages
+    const parentMap = { 'products-low-stock': 'products', 'sales-pending': 'sales-history' };
+    const parent = parentMap[page];
+    if (parent && !currentUser.allowed_panels.includes(parent)) return false;
+    if (!parent && !currentUser.allowed_panels.includes(page)) return false;
+  }
+
   localStorage.setItem('pos_page', page);
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
   const navEl = document.getElementById(`nav-${page}`);
@@ -1145,7 +1184,7 @@ async function renderUsers() {
   if (currentUser.role !== 'admin') { $c('page-content').innerHTML = '<p class="text-slate-500">Access denied.</p>'; return; }
   const users = await api('/api/users');
   $c('page-content').innerHTML = `
-    < div class="flex justify-between items-center mb-6" >
+    <div class="flex justify-between items-center mb-6" >
       <p class="text-slate-400 text-sm">${users.length} user(s)</p>
       <button onclick="openCreateUser()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all">+ Create User</button>
     </div >
@@ -1169,7 +1208,7 @@ async function renderUsers() {
               <td class="px-5 py-4 text-slate-500 dark:text-slate-400">${u.email || '—'}</td>
               <td class="px-5 py-4"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${u.role === 'admin' ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'}">${u.role}</span></td>
               <td class="px-5 py-4 text-right space-x-1">
-                <button onclick="openEditUser(${u.id},'${(u.name || '').replace(/'/g, "\\'")}','${u.username}','${u.email || ''}','${u.phone || ''}','${u.role}')" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all">Edit</button>
+                <button onclick="openEditUser(${u.id},'${(u.name || '').replace(/'/g, "\\'")}','${u.username}','${u.email || ''}','${u.phone || ''}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, '&quot;')})" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all">Edit</button>
                 ${u.id !== currentUser.id ? `<button onclick="deleteUser(${u.id})" class="px-2 py-1 text-xs rounded-lg bg-red-100 dark:bg-red-900/30 text-rose-700 dark:text-rose-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all">Del</button>` : ''}
               </td>
             </tr>`).join('')}
@@ -1209,16 +1248,41 @@ function userFormHtml(u = {}) {
             <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
           </select>
         </div>
+        <div class="col-span-2">
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-3 font-bold uppercase tracking-wider">Allowed Panels</label>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="panel-picker">
+            ${AVAILABLE_PANELS.map(p => {
+    const isSelected = (u.allowed_panels || []).includes(p.id);
+    return `
+                <div onclick="togglePanelSelection(this, '${p.id}')" data-id="${p.id}" data-selected="${isSelected}"
+                  class="panel-tile cursor-pointer p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-indigo-300'}">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${p.icon}"/></svg>
+                  <span class="text-[10px] font-bold uppercase tracking-tight text-center">${p.name}</span>
+                </div>`;
+  }).join('')}
+          </div>
+        </div>
       </div>
     </div>`;
+}
+
+function togglePanelSelection(el, id) {
+  const isSelected = el.dataset.selected === 'true';
+  if (isSelected) {
+    el.dataset.selected = 'false';
+    el.className = 'panel-tile cursor-pointer p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-indigo-300';
+  } else {
+    el.dataset.selected = 'true';
+    el.className = 'panel-tile cursor-pointer p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20';
+  }
 }
 
 function openCreateUser() {
   openModal('Create User', userFormHtml() + `<button onclick="saveUser()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Create User</button>`);
 }
 
-function openEditUser(id, name, username, email, phone, role) {
-  openModal('Edit User', userFormHtml({ id, name, username, email, phone, role }) + `<button onclick="saveUser(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update User</button>`);
+function openEditUser(id, name, username, email, phone, role, allowed_panels) {
+  openModal('Edit User', userFormHtml({ id, name, username, email, phone, role, allowed_panels }) + `<button onclick="saveUser(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update User</button>`);
 }
 
 async function saveUser(id) {
@@ -1228,7 +1292,8 @@ async function saveUser(id) {
     password: $c('uf-password').value,
     phone: $c('uf-phone').value.trim(),
     email: $c('uf-email').value.trim(),
-    role: $c('uf-role').value
+    role: $c('uf-role').value,
+    allowed_panels: Array.from(document.querySelectorAll('.panel-tile[data-selected="true"]')).map(el => el.dataset.id)
   };
   if (!payload.name) return toast('Name required', 'error');
   if (!id && !payload.password) return toast('Password required for new user', 'error');
