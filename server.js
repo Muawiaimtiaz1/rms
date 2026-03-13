@@ -22,6 +22,9 @@ app.use('/api/products', require('./routes/products'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/shops', require('./routes/shops'));
+app.use('/api/subscriptions', require('./routes/subscriptions'));
+
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get('/', (req, res) => {

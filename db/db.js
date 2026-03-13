@@ -11,8 +11,14 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-// Initialize tables from schema
-const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-db.exec(schema);
+// Initialize tables from schema only if they don't exist
+const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shops'").get();
+if (!tableExists) {
+    console.log('🌱 Initializing fresh database...');
+    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
+    db.exec(schema);
+    console.log('✅ Database initialized.');
+}
+
 
 module.exports = db;

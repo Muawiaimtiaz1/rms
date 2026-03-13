@@ -2,33 +2,80 @@ const db = require('./db');
 const bcrypt = require('bcryptjs');
 
 function seed() {
-    // Create admin user
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
-    if (!existing) {
+    console.log('🧹 Clearing database...');
+
+    // Clear all tables in correct order
+    const tables = [
+        'brand_expense_payments',
+        'sale_items',
+        'sales',
+        'expenses',
+        'products',
+        'brands',
+        'users',
+        'shops'
+    ];
+
+    db.transaction(() => {
+        tables.forEach(table => {
+            db.prepare(`DELETE FROM ${table}`).run();
+            // Reset autoincrement
+            db.prepare(`DELETE FROM sqlite_sequence WHERE name = ?`).run(table);
+        });
+
+        console.log('🌱 Seeding fresh data...');
+
         const hash = bcrypt.hashSync('admin123', 10);
-        const adminId = db.prepare(
-            'INSERT INTO users (name, email, phone, username, password_hash, role) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run('System Admin', 'admin@pos.local', '0000000000', 'admin', hash, 'admin').lastInsertRowid;
 
-        // Create sample brands for admin
-        const brand1Id = db.prepare('INSERT INTO brands (name, user_id) VALUES (?, ?)').run('Tormaline Events', adminId).lastInsertRowid;
-        const brand2Id = db.prepare('INSERT INTO brands (name, user_id) VALUES (?, ?)').run('Mavi Altin', adminId).lastInsertRowid;
-        const brand3Id = db.prepare('INSERT INTO brands (name, user_id) VALUES (?, ?)').run('Guzel Meraki', adminId).lastInsertRowid;
-
-        // Create sample products
+        // 1. Create Super Admin
         db.prepare(
-            'INSERT INTO products (sku, name, category, description, brand_id, user_id, buying_price, stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run('SKU-A-001', 'Sample Product A', 'General', 'A sample product', brand1Id, adminId, 50, 100, 10);
+            'INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)'
+        ).run('Global Owner', 'owner', hash, 'superadmin', null);
 
+        // 2. Create Shops
+        const allPanels = JSON.stringify(['dashboard', 'brands', 'products', 'pos', 'sales-history', 'expenses']);
+        const shop1Id = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)').run('Alpha Store', allPanels).lastInsertRowid;
+        const shop2Id = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)').run('Beta Electronics', allPanels).lastInsertRowid;
+
+        // 3. Create Shop Admins
+        const admin1Id = db.prepare(
+            'INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)'
+        ).run('Alpha Admin', 'admin1', hash, 'admin', shop1Id);
+
+        const admin2Id = db.prepare(
+            'INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)'
+        ).run('Beta Admin', 'admin2', hash, 'admin', shop2Id);
+
+        // 4. Create Shop Users (Staff)
         db.prepare(
-            'INSERT INTO products (sku, name, category, description, brand_id, user_id, buying_price, stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run('SKU-B-001', 'Sample Product B', 'General', 'Another sample product', brand2Id, adminId, 120, 50, 5);
+            'INSERT INTO users (name, username, password_hash, role, shop_id, allowed_panels) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run('Alpha Staff', 'staff1', hash, 'user', shop1Id, JSON.stringify(['pos', 'dashboard']));
 
-        console.log('✅ Seeded admin user (username: admin, password: admin123)');
-        console.log('✅ Seeded 3 brands and 2 products');
-    } else {
-        console.log('ℹ️  Admin user already exists, skipping seed.');
-    }
+        // 5. Create Brands for Shop 1
+        const b1s1 = db.prepare('INSERT INTO brands (name, user_id, shop_id) VALUES (?, ?, ?)').run('Nike', admin1Id.lastInsertRowid, shop1Id).lastInsertRowid;
+        const b2s1 = db.prepare('INSERT INTO brands (name, user_id, shop_id) VALUES (?, ?, ?)').run('Adidas', admin1Id.lastInsertRowid, shop1Id).lastInsertRowid;
+
+        // 6. Create Brands for Shop 2
+        const b1s2 = db.prepare('INSERT INTO brands (name, user_id, shop_id) VALUES (?, ?, ?)').run('Sony', admin2Id.lastInsertRowid, shop2Id).lastInsertRowid;
+        const b2s2 = db.prepare('INSERT INTO brands (name, user_id, shop_id) VALUES (?, ?, ?)').run('Apple', admin2Id.lastInsertRowid, shop2Id).lastInsertRowid;
+
+        // 7. Create Products for Shop 1
+        db.prepare(
+            'INSERT INTO products (sku, name, category, brand_id, user_id, shop_id, buying_price, stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run('SHOE-001', 'Air Max', 'Footwear', b1s1, admin1Id.lastInsertRowid, shop1Id, 5000, 20, 5);
+
+        // 8. Create Products for Shop 2
+        db.prepare(
+            'INSERT INTO products (sku, name, category, brand_id, user_id, shop_id, buying_price, stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run('IPH-15', 'iPhone 15', 'Mobile', b2s2, admin2Id.lastInsertRowid, shop2Id, 150000, 10, 2);
+
+        console.log('✅ Seeding Complete!');
+        console.log('-----------------------------------');
+        console.log('Super Admin: owner / admin123');
+        console.log('Alpha Admin: admin1 / admin123');
+        console.log('Beta Admin:  admin2 / admin123');
+        console.log('-----------------------------------');
+    })();
 }
 
 seed();

@@ -5,12 +5,29 @@ const router = express.Router();
 
 // GET /api/analytics
 router.get('/', requireAuth, (req, res) => {
-  const userId = req.session.user.id;
+  const shopId = req.session.user.shop_id;
 
-  const totalRevenue = db.prepare('SELECT COALESCE(SUM(total), 0) as val FROM sales WHERE user_id = ?').get(userId).val;
-  const totalSales = db.prepare('SELECT COUNT(*) as val FROM sales WHERE user_id = ?').get(userId).val;
-  const totalExpenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as val FROM expenses WHERE user_id = ?').get(userId).val;
-  const totalProducts = db.prepare('SELECT COUNT(*) as val FROM products WHERE user_id = ?').get(userId).val;
+  if (req.session.user.role === 'superadmin') {
+    const totalShops = db.prepare('SELECT COUNT(*) as val FROM shops').get().val;
+    const activeShops = db.prepare('SELECT COUNT(*) as val FROM shops WHERE status = \'active\'').get().val;
+    const totalUsers = db.prepare('SELECT COUNT(*) as val FROM users').get().val;
+    const totalRevenueAcrossAll = db.prepare('SELECT COALESCE(SUM(total), 0) as val FROM sales').get().val;
+
+    return res.json({
+      isGlobal: true,
+      totalShops,
+      activeShops,
+      totalUsers,
+      totalRevenue: totalRevenueAcrossAll,
+      revenueByDay: db.prepare("SELECT date(created_at) as day, SUM(total) as revenue FROM sales WHERE created_at >= date('now', '-7 days') GROUP BY day ORDER BY day ASC").all(),
+      recentSales: db.prepare('SELECT s.*, sh.name as shop_name FROM sales s JOIN shops sh ON s.shop_id = sh.id ORDER BY s.created_at DESC LIMIT 10').all()
+    });
+  }
+
+  const totalRevenue = db.prepare('SELECT COALESCE(SUM(total), 0) as val FROM sales WHERE shop_id = ?').get(shopId).val;
+  const totalSales = db.prepare('SELECT COUNT(*) as val FROM sales WHERE shop_id = ?').get(shopId).val;
+  const totalExpenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as val FROM expenses WHERE shop_id = ?').get(shopId).val;
+  const totalProducts = db.prepare('SELECT COUNT(*) as val FROM products WHERE shop_id = ?').get(shopId).val;
 
   // Calculate COGS to compute profit from sales directly
   const totalCOGSQuery = db.prepare(`
@@ -18,8 +35,8 @@ router.get('/', requireAuth, (req, res) => {
     FROM sale_items si 
     JOIN products p ON si.product_id = p.id
     JOIN sales s ON si.sale_id = s.id
-    WHERE s.user_id = ?
-  `).get(userId).val;
+    WHERE s.shop_id = ?
+  `).get(shopId).val;
 
   const netProfit = totalRevenue - totalCOGSQuery;
 
@@ -27,9 +44,9 @@ router.get('/', requireAuth, (req, res) => {
   const revenueByDay = db.prepare(`
     SELECT date(created_at) as day, SUM(total) as revenue
     FROM sales
-    WHERE user_id = ? AND created_at >= date('now', '-7 days')
+    WHERE shop_id = ? AND created_at >= date('now', '-7 days')
     GROUP BY day ORDER BY day ASC
-  `).all(userId);
+  `).all(shopId);
 
   // Top products by quantity sold
   const topProducts = db.prepare(`
@@ -37,21 +54,21 @@ router.get('/', requireAuth, (req, res) => {
     FROM sale_items si
     JOIN products p ON si.product_id = p.id
     JOIN sales s ON si.sale_id = s.id
-    WHERE s.user_id = ?
+    WHERE s.shop_id = ?
     GROUP BY si.product_id
     ORDER BY qty_sold DESC
     LIMIT 5
-  `).all(userId);
+  `).all(shopId);
 
   // Expenses by category
   const expByCategory = db.prepare(`
     SELECT category, SUM(amount) as total
-    FROM expenses WHERE user_id = ?
+    FROM expenses WHERE shop_id = ?
     GROUP BY category ORDER BY total DESC
-  `).all(userId);
+  `).all(shopId);
 
   // Recent sales
-  const recentSales = db.prepare('SELECT * FROM sales WHERE user_id = ? ORDER BY created_at DESC LIMIT 10').all(userId);
+  const recentSales = db.prepare('SELECT * FROM sales WHERE shop_id = ? ORDER BY created_at DESC LIMIT 10').all(shopId);
 
   res.json({ totalRevenue, totalSales, totalExpenses, totalProducts, netProfit, revenueByDay, topProducts, expByCategory, recentSales });
 });
