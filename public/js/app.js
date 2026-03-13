@@ -259,40 +259,22 @@ async function renderDashboard() {
 
 function renderGlobalDashboard(data) {
   $c('page-content').innerHTML = `
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-      ${statCard('Total Shops', data.totalShops, `${data.activeShops} active`, 'indigo')}
-      ${statCard('Total Users', data.totalUsers, 'Across all shops', 'blue')}
-      ${statCard('Global Revenue', 'Rs. ' + Number(data.globalRevenue || data.totalRevenue || 0).toLocaleString(), 'System-wide', 'emerald')}
-      ${statCard('Blocked Shops', Number(data.totalShops) - Number(data.activeShops), 'Action Required', 'rose')}
-    </div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="glass rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300">
-        <h3 class="font-bold text-gray-700 dark:text-gray-200 mb-5 flex items-center gap-2 uppercase tracking-widest text-[10px]">
-          <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-          Recent System Sales
+    <div class="max-w-4xl mx-auto mt-10">
+      <div class="glass rounded-2xl p-8 shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300">
+         <h3 class="font-bold text-gray-700 dark:text-gray-200 mb-6 flex items-center gap-2 uppercase tracking-widest text-[12px]">
+          <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          System Owner Quick Actions
         </h3>
-        ${(data.recentGlobalSales || data.recentSales || []).length ? `<div class="space-y-3">${(data.recentGlobalSales || data.recentSales).map(s => `
-          <div class="flex items-center justify-between py-2 border-b border-slate-50 dark:border-slate-800/50 last:border-0">
-            <div>
-              <div class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-tighter">${s.shop_name}</div>
-              <div class="text-[10px] text-slate-400 capitalize tabular-nums font-mono">${new Date(s.created_at).toLocaleString()}</div>
-            </div>
-            <div class="text-sm font-black text-slate-800 dark:text-white font-mono">Rs. ${Number(s.total).toLocaleString()}</div>
-          </div>`).join('')}</div>` : '<p class="text-gray-400 text-sm italic">No sales recorded yet.</p>'}
-      </div>
-      <div class="glass rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300">
-         <h3 class="font-bold text-gray-700 dark:text-gray-200 mb-5 flex items-center gap-2 uppercase tracking-widest text-[10px]">
-          <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Quick Actions
-        </h3>
-        <div class="grid grid-cols-1 gap-3">
-          <button onclick="navigate('shops')" class="flex items-center justify-between p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-            <span class="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-widest">Manage Stores</span>
-            <svg class="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button onclick="window.location.href = '/admin/store-monitoring'" class="flex flex-col items-start p-6 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all group shadow-sm hover:shadow-md h-full text-left">
+            <svg class="w-8 h-8 text-indigo-500 mb-4 bg-indigo-100 dark:bg-indigo-900/30 p-1.5 rounded-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            <span class="block text-base font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-widest mb-2">SaaS Command Center</span>
+            <span class="block text-sm text-slate-500 dark:text-slate-400">Monitor all stores, view growth charts, and manage tenants and statuses</span>
           </button>
-           <button onclick="navigate('subscriptions')" class="flex items-center justify-between p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-            <span class="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-widest">Track Payments</span>
-            <svg class="w-4 h-4 text-slate-300 group-hover:text-emerald-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+           <button onclick="navigate('subscriptions')" class="flex flex-col items-start p-6 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/10 transition-all group shadow-sm hover:shadow-md h-full text-left">
+            <svg class="w-8 h-8 text-emerald-500 mb-4 bg-emerald-100 dark:bg-emerald-900/30 p-1.5 rounded-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="block text-base font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-2">Track Payments</span>
+            <span class="block text-sm text-slate-500 dark:text-slate-400">Manage shop subscriptions, view due payments and update plans</span>
           </button>
         </div>
       </div>

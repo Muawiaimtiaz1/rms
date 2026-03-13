@@ -24,7 +24,7 @@ app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
-
+app.use('/api/admin', require('./routes/admin'));
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get('/', (req, res) => {
@@ -33,6 +33,10 @@ app.get('/', (req, res) => {
 
 app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+app.get('/admin/store-monitoring', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'store-monitoring.html'));
 });
 
 // Static assets (js, css, etc.) served after named routes
