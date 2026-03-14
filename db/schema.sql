@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS products (
   buying_price REAL NOT NULL DEFAULT 0,
   stock INTEGER NOT NULL DEFAULT 0,
   min_stock_level INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
   FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE,

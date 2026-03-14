@@ -9,7 +9,7 @@ router.get('/', requireAuth, (req, res) => {
     SELECT p.*, b.name as brand_name
     FROM products p
     LEFT JOIN brands b ON p.brand_id = b.id
-    WHERE p.shop_id = ?
+    WHERE p.shop_id = ? AND p.is_deleted = 0
     ORDER BY p.name ASC
   `).all(req.session.user.shop_id);
     res.json(products);
@@ -46,22 +46,6 @@ router.put('/:id', requireAuth, (req, res) => {
     res.json({ ok: true });
 });
 
-// DELETE /api/products/:id
-router.delete('/:id', requireAuth, (req, res) => {
-    const productId = parseInt(req.params.id);
-    const product = db.prepare('SELECT * FROM products WHERE id = ? AND shop_id = ?').get(productId, req.session.user.shop_id);
-    if (!product) return res.status(404).json({ error: 'Product not found' });
-
-    // Prevent deletion if product has sales history
-    const hasSales = db.prepare('SELECT 1 FROM sale_items WHERE product_id = ? LIMIT 1').get(productId);
-    if (hasSales) {
-        return res.status(400).json({ error: 'Cannot delete product with sales history. Please archive it or zero out stock instead.' });
-    }
-
-    db.prepare('DELETE FROM products WHERE id = ? AND shop_id = ?').run(productId, req.session.user.shop_id);
-    res.json({ ok: true });
-
-});
 
 // PATCH /api/products/:id/stock
 router.patch('/:id/stock', requireAuth, (req, res) => {

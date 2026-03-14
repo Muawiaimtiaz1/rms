@@ -151,12 +151,17 @@ async function logout() {
 // ─── Helpers ─────────────────────────────────────────────────────────
 const $c = document.getElementById.bind(document);
 
-function api(url, method = 'GET', body) {
-  return fetch(url, {
+async function api(url, method = 'GET', body) {
+  const res = await fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined
-  }).then(r => r.json());
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'API Error');
+  }
+  return data;
 }
 
 function updateLowStockBadge(productsArray) {
@@ -194,13 +199,35 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.remove(), 3200);
 }
 
-function openModal(title, bodyHtml, sizeClass = 'max-w-lg') {
+function openModal(title, bodyHtml, sizeClass = 'max-w-lg', isStatic = false) {
+  const modal = document.getElementById('modal');
+  const closeBtn = modal.querySelector('button[onclick="closeModal()"]');
+
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
   document.getElementById('modal-box').className = `glass rounded-2xl w-full shadow-xl transition-all ${sizeClass}`;
-  document.getElementById('modal').classList.remove('hidden');
+
+  if (isStatic) {
+    if (closeBtn) closeBtn.classList.add('hidden');
+    modal.dataset.static = "true";
+  } else {
+    if (closeBtn) closeBtn.classList.remove('hidden');
+    delete modal.dataset.static;
+  }
+
+  modal.classList.remove('hidden');
 }
-function closeModal() { $c('modal').classList.add('hidden'); }
+
+function closeModal() {
+  $c('modal').classList.add('hidden');
+}
+
+// Click outside to close modal (if not static)
+document.getElementById('modal').addEventListener('click', function (e) {
+  if (e.target === this && this.dataset.static !== "true") {
+    closeModal();
+  }
+});
 
 function statCard(label, value, sub, color = 'blue') {
   const themes = {
@@ -221,14 +248,24 @@ function statCard(label, value, sub, color = 'blue') {
 // ─── Dashboard state ──────────────────────────────────────────────────────────
 let _dashPeriod = 'all';
 let _dashBrandId = '';
+let _dashFrom = '';
+let _dashTo = '';
 
-async function renderDashboard(period, brandId) {
+async function renderDashboard(period, brandId, from, to) {
   if (period !== undefined) _dashPeriod = period;
   if (brandId !== undefined) _dashBrandId = brandId;
+  if (from !== undefined) _dashFrom = from;
+  if (to !== undefined) _dashTo = to;
 
   // Build query string
   const qs = new URLSearchParams();
-  if (_dashPeriod && _dashPeriod !== 'all') qs.set('period', _dashPeriod);
+  if (_dashFrom || _dashTo) {
+    if (_dashFrom) qs.set('from', _dashFrom);
+    if (_dashTo) qs.set('to', _dashTo);
+  } else if (_dashPeriod && _dashPeriod !== 'all') {
+    qs.set('period', _dashPeriod);
+  }
+
   if (_dashBrandId && _dashBrandId !== '') qs.set('brand_id', _dashBrandId);
   const url = '/api/analytics' + (qs.toString() ? '?' + qs.toString() : '');
 
@@ -251,15 +288,23 @@ async function renderDashboard(period, brandId) {
       ${PERIOD_OPTS.map(o => `<option value="${o.val}" ${_dashPeriod === o.val ? 'selected' : ''}>${o.label}</option>`).join('')}
     </select>`;
 
+  const fromInput = `
+    <input type="date" id="dash-from-filter" value="${_dashFrom || ''}" onchange="renderDashboard(undefined, undefined, this.value, undefined)"
+      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-2 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">`;
+
+  const toInput = `
+    <input type="date" id="dash-to-filter" value="${_dashTo || ''}" onchange="renderDashboard(undefined, undefined, undefined, this.value)"
+      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-2 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">`;
+
   const brandSelect = brands.length > 1 ? `
-    <select id="dash-brand-filter" onchange="renderDashboard(document.getElementById('dash-period-filter')?.value, this.value)"
+    <select id="dash-brand-filter" onchange="renderDashboard(undefined, this.value)"
       class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">
       <option value="">All Brands</option>
       ${brands.map(b => `<option value="${b.id}" ${String(_dashBrandId) === String(b.id) ? 'selected' : ''}>${b.name}</option>`).join('')}
     </select>` : '';
 
   // Determine whether any filter is active for a subtle badge
-  const isFiltered = _dashPeriod !== 'all' || (_dashBrandId !== '' && _dashBrandId !== null);
+  const isFiltered = _dashPeriod !== 'all' || (_dashBrandId !== '' && _dashBrandId !== null) || _dashFrom !== '' || _dashTo !== '';
 
   $c('page-content').innerHTML = `
     <!-- Filter Bar -->
@@ -276,11 +321,19 @@ async function renderDashboard(period, brandId) {
           <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Time Period</span>
           ${periodSelect}
         </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">From</span>
+          ${fromInput}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">To</span>
+          ${toInput}
+        </div>
         ${brandSelect ? `<div class="flex items-center gap-2">
           <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Brand</span>
           ${brandSelect}
         </div>` : ''}
-        ${isFiltered ? `<button onclick="renderDashboard('all', '')" class="text-xs font-semibold text-gray-500 hover:text-rose-600 dark:hover:text-rose-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-rose-200 dark:hover:border-rose-800 transition-all flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>Clear</button>` : ''}
+        ${isFiltered ? `<button onclick="_dashFrom='';_dashTo='';renderDashboard('all', '')" class="text-xs font-semibold text-gray-500 hover:text-rose-600 dark:hover:text-rose-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-rose-200 dark:hover:border-rose-800 transition-all flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>Clear</button>` : ''}
       </div>
     </div>
 
@@ -556,7 +609,6 @@ async function renderProducts(onlyLowStock = false) {
               <td class="px-5 py-4 text-right space-x-1">
                 <button onclick="adjustStock(${p.id},'${p.name.replace(/'/g, "\\'")}',${p.stock})" class="px-2 py-1 text-xs rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-all border border-slate-200 dark:border-transparent">Stock</button>
                 <button onclick="openEditProduct(${p.id})" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all border border-indigo-200 dark:border-transparent">Edit</button>
-                <button onclick="deleteProduct(${p.id})" class="px-2 py-1 text-xs rounded-lg bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all border border-red-200 dark:border-transparent">Del</button>
               </td>
             </tr>`).join('') : `<tr><td colspan="7" class="px-6 py-12 text-center text-slate-500">No products. Add brands first, then products.</td></tr>`}
         </tbody>
@@ -567,25 +619,46 @@ async function renderProducts(onlyLowStock = false) {
 
 function productFormHtml(p = {}, brands = []) {
   const brandOptions = brands.map(b => `<option value="${b.id}" ${p.brand_id == b.id ? 'selected' : ''}>${b.name}</option>`).join('');
+
+  // Helper for numeric inputs with +/- buttons
+  const numInput = (id, label, value, placeholder = '') => `
+    <div class="col-span-2 sm:col-span-1">
+      <label class="block text-xs text-slate-400 mb-1">${label}</label>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="this.nextElementSibling.stepDown()" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xl font-bold">-</button>
+        <input id="${id}" type="number" value="${value}" class="flex-1 w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="${placeholder}" />
+        <button type="button" onclick="this.previousElementSibling.stepUp()" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xl font-bold">+</button>
+      </div>
+    </div>`;
+
   return `
-    <div class="space-y-3">
-      <div class="grid grid-cols-2 gap-3">
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div class="col-span-2 sm:col-span-1 border-b border-slate-100 dark:border-slate-800 pb-2 mb-2">
+          <h4 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Basic Information</h4>
+        </div>
+        <div class="col-span-2 sm:col-span-1 border-b border-slate-100 dark:border-slate-800 pb-2 mb-2 hidden sm:block"></div>
+
         <div class="col-span-2 sm:col-span-1"><label class="block text-xs text-slate-400 mb-1">SKU *</label>
-          <input id="pf-sku" value="${p.sku || ''}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="Unique code" /></div>
+          <input id="pf-sku" value="${p.sku || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Unique code" /></div>
         <div class="col-span-2 sm:col-span-1"><label class="block text-xs text-slate-400 mb-1">Category *</label>
-          <input id="pf-category" value="${p.category || ''}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="e.g. Electronics" /></div>
+          <input id="pf-category" value="${p.category || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="e.g. Electronics" /></div>
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Product Name *</label>
-          <input id="pf-name" value="${p.name || ''}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="Product name" /></div>
+          <input id="pf-name" value="${p.name || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Product name" /></div>
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Brand *</label>
-          <select id="pf-brand" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all"><option value="">Select brand</option>${brandOptions}</select></div>
+          <select id="pf-brand" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm"><option value="">Select brand</option>${brandOptions}</select></div>
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Description</label>
-          <input id="pf-desc" value="${p.description || ''}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="Optional description" /></div>
-        <div><label class="block text-xs text-slate-400 mb-1">Cost Price</label>
-          <input id="pf-buy" type="number" value="${p.buying_price || 0}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" /></div>
-        <div><label class="block text-xs text-slate-400 mb-1">Initial Stock</label>
-          <input id="pf-stock" type="number" value="${p.stock || 0}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" /></div>
-        <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Minimum Stock Level</label>
-          <input id="pf-min-stock" type="number" value="${p.min_stock_level || 0}" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="Alert threshold" /></div>
+          <input id="pf-desc" value="${p.description || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Optional description" /></div>
+        
+        <div class="col-span-2 border-b border-slate-100 dark:border-slate-800 pb-2 mt-4 mb-2">
+          <h4 class="text-sm font-semibold text-slate-700 dark:text-slate-300">Pricing & Inventory</h4>
+        </div>
+
+        ${numInput('pf-buy', 'Cost Price', p.buying_price || 0)}
+        ${numInput('pf-stock', 'Initial Stock', p.stock || 0)}
+        <div class="col-span-2">
+           ${numInput('pf-min-stock', 'Minimum Stock Level', p.min_stock_level || 0, 'Alert threshold')}
+        </div>
       </div>
     </div>`;
 }
@@ -619,11 +692,6 @@ async function saveProduct(id) {
   closeModal(); toast('Product saved!'); renderProducts();
 }
 
-async function deleteProduct(id) {
-  if (!confirm('Delete this product?')) return;
-  await api(`/api/products/${id}`, 'DELETE');
-  toast('Product deleted'); renderProducts();
-}
 
 function adjustStock(id, name, current) {
   openModal(`Stock: ${name}`, `
@@ -664,16 +732,26 @@ async function renderPOS() {
       <div class="glass rounded-2xl p-5 flex flex-col shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
         <h3 class="font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
           <svg class="w-5 h-5 text-indigo-500 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17"/></svg>
-          Cart
+          Cart Items
         </h3>
         <div id="cart-items" class="flex-1 space-y-2 overflow-y-auto min-h-20"></div>
         <div class="border-t border-slate-200 dark:border-slate-700 mt-4 pt-4 space-y-4">
           <div class="grid grid-cols-2 gap-4 text-base">
              <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Discount (Rs)</label>
-             <input id="pos-discount" type="number" min="0" value="0" oninput="calculateCartTotal()" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base font-medium shadow-sm" /></div>
+               <div class="flex items-center gap-1">
+                 <button type="button" onclick="$c('pos-discount').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">-</button>
+                 <input id="pos-discount" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-medium shadow-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                 <button type="button" onclick="$c('pos-discount').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">+</button>
+               </div>
+             </div>
              
              <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Tax (%)</label>
-             <input id="pos-tax" type="number" min="0" value="0" oninput="calculateCartTotal()" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base font-medium shadow-sm" /></div>
+               <div class="flex items-center gap-1">
+                 <button type="button" onclick="$c('pos-tax').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">-</button>
+                 <input id="pos-tax" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-medium shadow-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                 <button type="button" onclick="$c('pos-tax').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">+</button>
+               </div>
+             </div>
           </div>
           
           <div class="grid grid-cols-2 gap-4 text-base pb-4 border-b border-slate-200 dark:border-slate-700">
@@ -702,7 +780,12 @@ async function renderPOS() {
              </select></div>
 
              <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Amount Received <span id="req-recv" class="text-rose-500 hidden">*</span></label>
-             <input id="pos-received" type="number" min="0" value="0" oninput="calculateRemaining()" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base font-medium shadow-sm" /></div>
+               <div class="flex items-center gap-1">
+                 <button type="button" onclick="$c('pos-received').stepDown();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">-</button>
+                 <input id="pos-received" type="number" min="0" value="0" oninput="calculateRemaining()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-medium shadow-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                 <button type="button" onclick="$c('pos-received').stepUp();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">+</button>
+               </div>
+             </div>
           </div>
 
           <div class="flex justify-between text-lg font-bold mt-2">
@@ -724,12 +807,38 @@ function renderPOSProducts(products) {
   const el = $c('pos-products');
   el.innerHTML = products.map(p => `
     <button onclick="addToCart(${p.id})" ${p.stock === 0 ? 'disabled' : ''}
-      class="glass rounded-xl p-4 text-left border border-slate-200 dark:border-slate-800 transition-all hover:border-indigo-500 dark:hover:border-indigo-600/40 hover:bg-slate-50 dark:hover:bg-indigo-900/10 ${p.stock === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:scale-[1.02] cursor-pointer shadow-sm'}">
-      <div class="font-medium text-slate-800 dark:text-slate-200 text-sm truncate uppercase tracking-tight">${p.name}</div>
-      <div class="text-[10px] text-slate-500 truncate">${p.brand_name || ''}</div>
-      <div class="mt-2 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wide cursor-pointer hover:underline">Select Price</div>
-      <div class="text-[10px] ${p.stock > 10 ? 'text-slate-400 dark:text-slate-500' : p.stock > 0 ? 'text-yellow-600 dark:text-yellow-500' : 'text-rose-600 dark:text-rose-500'} mt-0.5">${p.stock} in stock</div>
-    </button>`).join('') || '<p class="text-slate-500 col-span-3">No products found.</p>';
+      class="product-card bg-white dark:bg-slate-900 rounded-2xl p-4 text-left flex flex-col ${p.stock === 0 ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'} transition-all">
+      <div>
+        <!-- Product Name -->
+        <h2 class="text-lg font-medium text-slate-900 dark:text-white uppercase tracking-tight mb-1 truncate">
+          ${p.name}
+        </h2>
+        
+        <!-- Brand Info -->
+        <div class="flex items-center gap-1.5 text-indigo-500 dark:text-indigo-400 mb-4">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+          </svg>
+          <span class="text-sm font-semibold">${p.brand_name || 'No Brand'}</span>
+        </div>
+
+        <!-- SKU Badge -->
+        <div class="inline-flex items-center px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800 mb-4">
+          <span class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mr-2">SKU:</span>
+          <span class="text-sm font-bold text-indigo-600 dark:text-indigo-400 font-mono">${p.sku}</span>
+        </div>
+      </div>
+
+      <!-- Stock Available -->
+      <div class="flex items-end justify-between">
+        <div class="flex flex-col">
+          <span class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Available Stock</span>
+          <span class="text-3xl font-black ${p.stock > 10 ? 'text-emerald-600 dark:text-emerald-400' : p.stock > 0 ? 'text-amber-600 dark:text-amber-500' : 'text-rose-600 dark:text-rose-500'}">
+            ${p.stock}
+          </span>
+        </div>
+      </div>
+    </button>`).join('') || '<p class="text-slate-500 dark:text-slate-400 col-span-3 py-10 text-center italic text-lg">No products matched your search.</p>';
 }
 
 function filterPOSProducts() {
@@ -737,53 +846,172 @@ function filterPOSProducts() {
   renderPOSProducts(allProducts.filter(p => p.name.toLowerCase().includes(q) || (p.brand_name || '').toLowerCase().includes(q)));
 }
 
+/**
+ * Prompts user for quantity and selling price before adding to cart
+ */
 function addToCart(productId) {
   const product = allProducts.find(p => p.id === productId);
   if (!product) return;
+  if (product.stock <= 0) return toast('Out of stock', 'error');
+
+  const content = `
+    <div class="space-y-6 py-2">
+      <div class="flex items-center gap-4 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+        <div class="w-12 h-12 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+        </div>
+        <div>
+          <div class="font-bold text-slate-900 dark:text-white">${product.name}</div>
+          <div class="text-[10px] font-mono text-indigo-500 dark:text-indigo-400 mt-0.5">SKU: ${product.sku} | In Stock: ${product.stock}</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div class="space-y-2">
+          <label class="block text-sm font-bold text-slate-700 dark:text-slate-300">Quantity</label>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="$c('add-cart-qty').stepDown()" class="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 text-slate-600 dark:text-slate-400 font-black">-</button>
+            <input id="add-cart-qty" type="number" value="1" min="1" max="${product.stock}" class="flex-1 w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-center text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+            <button type="button" onclick="$c('add-cart-qty').stepUp()" class="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 text-slate-600 dark:text-slate-400 font-black">+</button>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <label class="block text-sm font-bold text-slate-700 dark:text-slate-300">Selling Price (Rs)</label>
+          <input id="add-cart-price" type="number" value="${product.buying_price || 0}" min="0" class="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-center text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+        </div>
+      </div>
+
+      <div class="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+        <button onclick="closeModal()" class="flex-1 py-3 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 font-bold transition-all">Cancel</button>
+        <button onclick="commitAddCart(${productId})" class="flex-[2] py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all">Add to Cart</button>
+      </div>
+    </div>
+  `;
+  openModal('Add to Cart', content, 'max-w-md');
+  setTimeout(() => $c('add-cart-qty').focus(), 100);
+}
+
+function commitAddCart(productId) {
+  const qtyInput = $c('add-cart-qty');
+  const priceInput = $c('add-cart-price');
+  const qty = parseInt(qtyInput.value);
+  const price = parseFloat(priceInput.value);
+  const product = allProducts.find(p => p.id === productId);
+
+  if (isNaN(qty) || qty <= 0) return toast('Invalid quantity', 'error');
+  if (isNaN(price) || price < 0) return toast('Invalid price', 'error');
+  if (qty > product.stock) return toast(`Only ${product.stock} items available`, 'error');
 
   const existing = cart.find(c => c.product_id === productId);
   if (existing) {
-    if (existing.quantity >= product.stock) return toast('Max stock reached', 'error');
-    existing.quantity++;
-    renderCart();
+    if (existing.quantity + qty > product.stock) return toast('Exceeds available stock', 'error');
+    existing.quantity += qty;
+    existing.selling_price = price; // Update to latest price
   } else {
-    // Note: in a real UX, a custom modal is better, but prompt is simple and effective here.
-    const priceStr = prompt(`Enter selling price for "${product.name}" (Cost: Rs. ${product.buying_price}):`, product.buying_price || 0);
-    if (priceStr === null) return; // cancelled
-    const price = parseFloat(priceStr);
-    if (isNaN(price) || price < 0) return toast('Invalid selling price', 'error');
-
-    cart.push({ product_id: productId, quantity: 1, selling_price: price, product });
-    renderCart();
+    cart.push({ product_id: productId, quantity: qty, selling_price: price, product });
   }
+
+  closeModal();
+  renderCart();
+  toast('Item added to cart', 'success');
 }
 
 function updateCartQty(productId, qty) {
   const product = allProducts.find(p => p.id === productId);
-  if (qty > product.stock) return toast('Exceeds stock', 'error');
-  if (qty <= 0) { cart = cart.filter(c => c.product_id !== productId); }
-  else { cart.find(c => c.product_id === productId).quantity = qty; }
+  if (product && qty > product.stock) return toast('Exceeds stock', 'error');
+
+  // Don't allow qty < 1. User must use delete button to remove.
+  if (qty < 1) return toast('Quantity cannot be less than 1', 'warning');
+
+  const item = cart.find(c => c.product_id === productId);
+  if (item) item.quantity = qty;
+
+  renderCart();
+}
+
+function removeFromCart(productId) {
+  cart = cart.filter(c => c.product_id !== productId);
   renderCart();
 }
 
 function renderCart() {
   const cartEl = $c('cart-items');
-  if (!cart.length) {
-    cartEl.innerHTML = '<p class="text-slate-600 text-sm text-center py-4">Cart is empty</p>';
-    calculateCartTotal();
-    return;
-  }
-  cartEl.innerHTML = cart.map(item => `
-    <div class="flex items-center gap-2 py-3 border-b border-slate-100 dark:border-slate-800 last:border-0">
-      <div class="flex-1 min-w-0"><div class="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">${item.product.name}</div>
-        <div class="text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">Rs. ${(item.selling_price * item.quantity).toFixed(0)}</div></div>
-      <div class="flex items-center gap-1">
-        <button onclick="updateCartQty(${item.product_id}, ${item.quantity - 1})" class="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-white text-xs transition-all border border-slate-200 dark:border-transparent">−</button>
-        <span class="text-sm text-slate-700 dark:text-slate-300 w-6 text-center font-medium">${item.quantity}</span>
-        <button onclick="updateCartQty(${item.product_id}, ${item.quantity + 1})" class="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-white text-xs transition-all border border-slate-200 dark:border-transparent">+</button>
+  const count = cart.reduce((a, b) => a + b.quantity, 0);
+
+  // Show a simplified view instead of a long list
+  cartEl.innerHTML = `
+    <div class="flex flex-col items-center justify-center py-3 px-4 bg-slate-50/50 dark:bg-slate-900/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+      <div class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 italic">Short Summary</div>
+      <div class="text-xl font-black text-slate-900 dark:text-white mb-3">
+        ${count} <span class="text-xs font-medium text-slate-400">Products</span>
       </div>
-    </div>`).join('');
+      <button onclick="showCartModal()" class="w-full py-2 px-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 text-sm font-bold hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:border-indigo-200 dark:hover:border-indigo-800 transition-all flex items-center justify-center gap-2 group shadow-sm">
+        <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+        Expand Cart & Manage
+      </button>
+    </div>`;
+
   calculateCartTotal();
+}
+
+/**
+ * Opens a large modal to manage cart items details (useful for long carts)
+ */
+function showCartModal() {
+  if (!cart.length) return toast('Cart is empty', 'info');
+
+  const content = `
+    <div class="max-h-[65vh] overflow-y-auto custom-scrollbar pr-2">
+      <table class="w-full text-left border-collapse">
+        <thead class="sticky top-0 bg-white dark:bg-slate-900 z-10">
+          <tr class="text-[10px] uppercase text-slate-400 dark:text-slate-500 font-extrabold tracking-widest border-b border-slate-100 dark:border-slate-800">
+            <th class="py-3 px-2">Product Info</th>
+            <th class="py-3 px-2">Unit Price</th>
+            <th class="py-3 px-2 text-center">Quantity</th>
+            <th class="py-3 px-2 text-right">Total</th>
+            <th class="py-3 px-2"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-50 dark:divide-slate-800/50">
+          ${cart.map(item => `
+            <tr class="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
+              <td class="py-4 px-2">
+                <div class="font-bold text-slate-800 dark:text-slate-200">${item.product.name}</div>
+                <div class="text-[10px] font-mono text-indigo-500 dark:text-indigo-400 mt-0.5">${item.product.sku}</div>
+              </td>
+              <td class="py-4 px-2 text-slate-600 dark:text-slate-400 font-medium">Rs. ${item.selling_price}</td>
+              <td class="py-4 px-2">
+                <div class="flex items-center justify-center gap-3">
+                  <button onclick="if(${item.quantity} > 1) { updateCartQty(${item.product_id}, ${item.quantity - 1}); showCartModal(); } else { toast('Use delete button to remove', 'info'); }" 
+                    class="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-slate-600 dark:text-slate-400 hover:text-rose-600 transition-all font-bold group-hover:shadow-sm">−</button>
+                  <span class="w-6 text-center text-sm font-black text-slate-900 dark:text-slate-100">${item.quantity}</span>
+                  <button onclick="updateCartQty(${item.product_id}, ${item.quantity + 1}); showCartModal();" 
+                    class="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-slate-600 dark:text-slate-400 hover:text-emerald-600 transition-all font-bold group-hover:shadow-sm">+</button>
+                </div>
+              </td>
+              <td class="py-4 px-2 text-right font-black text-indigo-600 dark:text-indigo-400">
+                Rs. ${(item.selling_price * item.quantity).toFixed(0)}
+              </td>
+              <td class="py-4 px-2 text-right">
+                <button onclick="removeFromCart(${item.product_id}); cart.length ? showCartModal() : closeModal();" 
+                  class="p-2 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all" title="Remove">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 -mx-6 -mb-6 p-6 rounded-b-2xl">
+       <div class="text-sm text-slate-500 dark:text-slate-400">Total Items: <span class="font-bold text-slate-900 dark:text-slate-100">${cart.reduce((a, b) => a + b.quantity, 0)}</span></div>
+       <div class="text-xl font-black text-slate-900 dark:text-white flex items-baseline gap-2">
+         <span class="text-sm font-bold text-slate-400 uppercase tracking-wider">Net Total:</span>
+         Rs. ${cart.reduce((a, b) => a + (b.selling_price * b.quantity), 0).toFixed(0)}
+       </div>
+    </div>
+  `;
+  openModal('Detailed Cart Management', content, 'max-w-4xl');
 }
 
 function calculateCartTotal() {
@@ -870,12 +1098,12 @@ async function checkout() {
         <button onclick="printBill(${r.saleId})" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">🖨 Print Bill</button>
         <button onclick="closeModal();renderPOS();" class="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium transition-all">New Sale</button>
       </div>
-    </div>`);
+    </div>`, 'max-w-md', true);
 }
 
 async function printBill(saleId) {
   const data = await api(`/api/sales/${saleId}/bill`);
-  const { sale, items, seller } = data;
+  const { sale, items, seller, shop } = data;
 
   const grandTotal = Number(sale.total);
   const discount = Number(sale.discount || 0);
@@ -890,38 +1118,106 @@ async function printBill(saleId) {
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><title>Bill #${sale.id}</title>
   <style>
-    body{font-family:Arial,sans-serif;max-width:320px;margin:20px auto;color:#000;padding:0 10px;} h1{font-size:20px;text-align:center;} h2{font-size:14px;text-align:center;color:#555;font-weight:normal;margin-top:4px;}
-    .divider{border:none;border-top:1px dashed #999;margin:12px 0;}
-    table{width:100%;border-collapse:collapse;font-size:13px;}th{text-align:left;font-size:11px;color:#666;padding:4px 0;}
-    td{padding:4px 0;border-bottom:1px solid #f0f0f0;} .right{text-align:right;} .total{font-size:16px;font-weight:bold;} .footer{text-align:center;font-size:11px;color:#999;margin-top:16px;}
+    @page { margin: 0; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f0f0f0; /* Light gray background to see the receipt clearly in preview */
+    }
+    .receipt { 
+      font-family: 'Courier New', Courier, monospace; 
+      width: 80mm; 
+      margin: 0 auto; 
+      padding: 4mm; 
+      color: #000; 
+      font-size: 12px;
+      line-height: 1.2;
+      background: #fff;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    @media print {
+      html, body { background: #fff; }
+      .receipt { margin: 0; width: 100%; min-height: auto; }
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .bold { font-weight: bold; }
+    h1 { font-size: 18px; margin: 0; text-transform: uppercase; }
+    h2 { font-size: 14px; margin: 2px 0; }
+    .divider { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 5px 0; }
+    th { text-align: left; font-size: 10px; border-bottom: 1px solid #000; padding: 2px 0; }
+    td { padding: 3px 0; vertical-align: top; }
+    .total-row { font-size: 14px; }
+    .footer { font-size: 10px; margin-top: 10px; }
   </style></head><body>
-  <h1>🛒 Sales Receipt</h1>
-  <h2>${seller ? seller.name : 'POS System'}</h2>
-  <hr class="divider" />
-  <p style="font-size:12px;color:#666;line-height:1.4;">
-    <strong>Bill #:</strong> ${sale.id}<br>
-    <strong>Date:</strong> ${new Date(sale.created_at).toLocaleString()}<br>
-    <strong>Customer:</strong> ${sale.customer_name || 'Walk-in'}<br>
-    ${sale.customer_phone ? `<strong>Phone:</strong> ${sale.customer_phone}` : ''}
-  </p>
-  <hr class="divider" />
-  <table><thead><tr><th>Item</th><th>Qty</th><th class="right">Price</th><th class="right">Total</th></tr></thead>
-  <tbody>${items.map(i => `<tr><td>${i.product_name}<br><small style="color:#888">${i.brand_name || ''}</small></td><td>${i.quantity}</td><td class="right">Rs.${i.price_at_sale}</td><td class="right">Rs.${(i.quantity * i.price_at_sale).toFixed(2)}</td></tr>`).join('')}</tbody></table>
-  <hr class="divider" />
-  <div class="right" style="font-size:12px; margin-bottom:4px;">Subtotal: Rs. ${subtotal.toFixed(2)}</div>
-  ${discount > 0 ? `<div class="right" style="font-size:12px; margin-bottom:4px; color:#d97706;">Discount: -Rs. ${discount.toFixed(2)}</div>` : ''}
-  ${taxPct > 0 ? `<div class="right" style="font-size:12px; margin-bottom:4px;">Tax (${taxPct}%): Rs. ${taxAmt.toFixed(2)}</div>` : ''}
-  <div class="total right" style="margin-top:8px;">Grand Total: Rs. ${grandTotal.toFixed(2)}</div>
-  <hr class="divider" />
-  <div style="font-size:11px; color:#555; line-height: 1.6;">
-    <div><strong>Method:</strong> ${method}</div>
-    <div><strong>Received:</strong> Rs. ${received.toFixed(2)}</div>
-    ${remaining > 0 ? `<div style="color:#d97706;"><strong>Due:</strong> Rs. ${remaining.toFixed(2)}</div>` : ''}
-    ${remaining < 0 ? `<div style="color:#10b981;"><strong>Change:</strong> Rs. ${Math.abs(remaining).toFixed(2)}</div>` : ''}
+  <div class="receipt">
+    <div class="text-center">
+      <h1>${shop ? shop.name : 'STORE'}</h1>
+      <div class="bold">Sales Receipt</div>
+    </div>
+    
+    <hr class="divider" />
+    
+    <div style="font-size: 11px;">
+      <strong>Bill #:</strong> ${sale.id}<br>
+      <strong>Date:</strong> ${new Date(sale.created_at).toLocaleString()}<br>
+      <strong>Seller:</strong> ${seller ? seller.name : 'Staff'}<br>
+      <strong>Customer:</strong> ${sale.customer_name || 'Walk-in'}<br>
+      ${sale.customer_phone ? `<strong>Phone:</strong> ${sale.customer_phone}` : ''}
+    </div>
+    
+    <hr class="divider" />
+    
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 50%;">Item</th>
+          <th class="text-center">Qty</th>
+          <th class="text-right">Price</th>
+          <th class="text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(i => `
+          <tr>
+            <td>${i.product_name}</td>
+            <td class="text-center">${i.quantity}</td>
+            <td class="text-right">${i.price_at_sale}</td>
+            <td class="text-right">${(i.quantity * i.price_at_sale).toFixed(0)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <hr class="divider" />
+    
+    <div class="text-right">
+      <div>Subtotal: Rs. ${subtotal.toFixed(0)}</div>
+      ${discount > 0 ? `<div>Discount: -Rs. ${discount.toFixed(0)}</div>` : ''}
+      ${taxPct > 0 ? `<div>Tax (${taxPct}%): Rs. ${taxAmt.toFixed(0)}</div>` : ''}
+      <div class="bold total-row" style="margin-top: 4px;">GRAND TOTAL: Rs. ${grandTotal.toFixed(0)}</div>
+    </div>
+    
+    <hr class="divider" />
+    
+    <div style="font-size: 11px;">
+      <div><strong>Method:</strong> ${method}</div>
+      <div><strong>Received:</strong> Rs. ${received.toFixed(0)}</div>
+      ${remaining > 0 ? `<div class="bold"><strong>Due:</strong> Rs. ${remaining.toFixed(0)}</div>` : ''}
+      ${remaining < 0 ? `<div class="bold"><strong>Change:</strong> Rs. ${Math.abs(remaining).toFixed(0)}</div>` : ''}
+    </div>
+    
+    <hr class="divider" />
+    
+    <div class="footer text-center">
+      Thank you for your purchase!<br>
+      ${shop ? shop.name : ''}
+    </div>
   </div>
-  <hr class="divider" />
-  <div class="footer">Thank you for your purchase!</div>
-  <script>window.onload=()=>{window.print();}<\/script>
+  
+  <script>window.onload=()=>{window.print();window.close();}<\/script>
   </body></html>`);
   win.document.close();
 }
@@ -931,94 +1227,175 @@ async function printBill(saleId) {
 
 let _allSalesCache = [];
 let _salesPendingFilter = false;
+let _salesPage = 1;
+const _salesPageSize = 25;
 
 async function renderSalesHistory(onlyPendingDues = false) {
-  _allSalesCache = await api('/api/sales');
-  updatePendingDuesBadge(_allSalesCache);
-  _salesPendingFilter = onlyPendingDues;
+  try {
+    _allSalesCache = await api('/api/sales');
+    if (!Array.isArray(_allSalesCache)) _allSalesCache = [];
+    updatePendingDuesBadge(_allSalesCache);
+    _salesPendingFilter = onlyPendingDues;
+    _salesPage = 1;
 
-  const listTitle = onlyPendingDues ? 'pending due(s)' : 'paid slip(s)';
+    const today = new Date().toISOString().split('T')[0];
+    const statusLabel = onlyPendingDues ? 'PENDING DUES' : 'PAID SLIPS';
+    const statusColor = onlyPendingDues ? 'text-rose-500' : 'text-emerald-500';
 
-  $c('page-content').innerHTML = `
-    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
-      <div class="flex items-center gap-3">
-        <p class="text-slate-500 dark:text-slate-400 text-sm"><span id="sales-count" class="font-bold">0</span> ${listTitle}</p>
-        ${onlyPendingDues ? `<button onclick="navigate('sales-history')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1.5 rounded-full font-medium border border-indigo-100 dark:border-transparent">Clear Filter</button>` : ''}
+    $c('page-content').innerHTML = `
+    <div class="flex flex-col gap-6 mb-6">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 class="text-2xl font-bold ${statusColor} mb-1">${statusLabel}</h2>
+          <p class="text-slate-500 dark:text-slate-400 text-sm">Showing <span id="sales-count" class="font-bold">0</span> records</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
+            <label class="text-[10px] uppercase font-bold text-slate-400">From</label>
+            <input type="date" id="sales-from" value="${today}" onchange="_renderSalesTable()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
+          </div>
+          <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
+            <label class="text-[10px] uppercase font-bold text-slate-400">To</label>
+            <input type="date" id="sales-to" value="${today}" onchange="_renderSalesTable()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
+          </div>
+          ${onlyPendingDues ? `<button onclick="navigate('sales-history')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors bg-indigo-50 dark:bg-indigo-500/10 px-4 py-2 rounded-xl font-medium border border-indigo-100 dark:border-transparent">View Paid Slips</button>` : ''}
+        </div>
       </div>
-      <div class="flex-1 md:max-w-md w-full">
+      
+      <div class="w-full">
         <input id="sales-search" oninput="_renderSalesTable()" placeholder="Search by Bill ID, Name, or Phone..."
           class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all text-sm shadow-sm" />
       </div>
     </div>
+
     <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse">
         <thead class="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-slate-700"><tr>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Inv #</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Date</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Customer</th>
-          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Grand Total</th>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Total</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Received</th>
-          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Status</th>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Served By</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase text-right">Actions</th>
         </tr></thead>
         <tbody id="sales-table-body" class="divide-y divide-slate-800">
         </tbody></table>
       </div>
+      <div id="sales-pagination" class="bg-slate-50/50 dark:bg-black/20 px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      </div>
     </div>`;
 
-  _renderSalesTable();
+    _renderSalesTable();
+  } catch (err) {
+    console.error('Sales History Error:', err);
+    $c('page-content').innerHTML = `<div class="p-10 text-center text-rose-500 font-bold">Failed to load sales: ${err.message}</div>`;
+  }
 }
 
 function _renderSalesTable() {
-  const query = ($c('sales-search').value || '').toLowerCase().trim();
+  try {
+    const searchInput = $c('sales-search');
+    const fromInput = $c('sales-from');
+    const toInput = $c('sales-to');
+    if (!searchInput || !fromInput || !toInput) return;
 
-  let displayList = _salesPendingFilter
-    ? _allSalesCache.filter(s => (s.total - s.amount_received) > 0.01)
-    : _allSalesCache.filter(s => (s.total - s.amount_received) <= 0.01);
+    const query = (searchInput.value || '').toLowerCase().trim();
+    const fromDate = fromInput.value;
+    const toDate = toInput.value;
 
-  if (query) {
-    displayList = displayList.filter(s =>
-      s.id.toString() === query ||
-      (s.customer_name && s.customer_name.toLowerCase().includes(query)) ||
-      (s.customer_phone && s.customer_phone.toLowerCase().includes(query))
-    );
+    console.log('Rendering table. Cache:', _allSalesCache.length, 'Filter:', _salesPendingFilter, 'Range:', fromDate, 'to', toDate);
+
+    // Initial filter by Status (Paid/Pending)
+    let displayList = _salesPendingFilter
+      ? _allSalesCache.filter(s => (Number(s.total || 0) - Number(s.amount_received || 0)) > 0.01)
+      : _allSalesCache.filter(s => (Number(s.total || 0) - Number(s.amount_received || 0)) <= 0.01);
+
+    // Filter by Date Range
+    if (fromDate || toDate) {
+      displayList = displayList.filter(s => {
+        const sDate = s.created_at.split(' ')[0]; // Extract YYYY-MM-DD
+        if (fromDate && sDate < fromDate) return false;
+        if (toDate && sDate > toDate) return false;
+        return true;
+      });
+    }
+
+    // Filter by Search Query
+    if (query) {
+      displayList = displayList.filter(s => {
+        const id = (s.id || '').toString().toLowerCase();
+        const name = (s.customer_name || '').toLowerCase();
+        const phone = (s.customer_phone || '').toLowerCase();
+        const sellerName = (s.served_by_name || '').toLowerCase();
+        const sellerUser = (s.served_by_username || '').toLowerCase();
+        return id === query || name.includes(query) || phone.includes(query) || sellerName.includes(query) || sellerUser.includes(query);
+      });
+    }
+
+    $c('sales-count').textContent = displayList.length;
+
+    const totalPages = Math.ceil(displayList.length / _salesPageSize) || 1;
+    if (_salesPage > totalPages) _salesPage = 1;
+
+    const startIdx = (_salesPage - 1) * _salesPageSize;
+    const pageItems = displayList.slice(startIdx, startIdx + _salesPageSize);
+
+    $c('sales-table-body').innerHTML = pageItems.length ? pageItems.map(s => {
+      const due = Number(s.total || 0) - Number(s.amount_received || 0);
+      const isPending = due > 0.01;
+
+      return `
+        <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors border-b border-slate-100 dark:border-slate-800 last:border-0">
+          <td class="px-5 py-4 font-bold text-indigo-600 dark:text-indigo-400">#${s.id}</td>
+          <td class="px-5 py-4">
+             <div class="font-medium text-slate-700 dark:text-slate-200 text-sm mb-1">${new Date(s.created_at).toLocaleDateString()}</div>
+             <div class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+          </td>
+          <td class="px-5 py-4">
+             <div class="font-bold text-slate-800 dark:text-slate-200">${s.customer_name || '<span class="text-slate-400 dark:text-slate-500 italic font-normal">Walk-in</span>'}</div>
+             <div class="text-xs ${s.customer_phone ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400 dark:text-slate-600 italic'} mt-1 flex items-center gap-1">
+               <svg class="w-3.5 h-3.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg> 
+               ${s.customer_phone || 'No phone'}
+             </div>
+          </td>
+          <td class="px-5 py-4 text-slate-700 dark:text-slate-200 font-bold">Rs. ${parseFloat(s.total || 0).toFixed(0)}</td>
+          <td class="px-5 py-4 text-emerald-600 dark:text-emerald-400 font-medium">Rs. ${parseFloat(s.amount_received || 0).toFixed(0)}</td>
+          <td class="px-5 py-4">
+            <span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[11px] font-bold border border-slate-200 dark:border-slate-700 uppercase">${s.served_by_name || s.served_by_username || 'Staff'}</span>
+          </td>
+          <td class="px-5 py-4 text-right">
+            <div class="flex items-center justify-end gap-2">
+              ${isPending ? `<button onclick="markSalePaid(${s.id}, ${s.total}, ${s.amount_received})" class="p-1.5 rounded bg-amber-100 dark:bg-amber-500/10 hover:bg-amber-200 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 transition-colors" title="Edit / Collect Dues"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>` : ''}
+              <button onclick="printBill(${s.id})" class="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-400 transition-colors" title="Print Bill">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>`;
+    }).join('') : `<tr><td colspan="7" class="px-5 py-10 text-center text-slate-400 dark:text-slate-600 text-sm italic border-t border-slate-100 dark:border-slate-800">No sales found for this filter.</td></tr>`;
+
+
+    $c('sales-pagination').innerHTML = totalPages > 1 ? `
+      <div class="text-xs text-slate-500 font-medium">
+        Showing <span class="font-bold text-slate-900 dark:text-slate-200">${pageItems.length}</span> of <span class="font-bold text-slate-900 dark:text-slate-200">${displayList.length}</span> sales
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="changeSalesPage(${_salesPage - 1})" ${_salesPage <= 1 ? 'disabled' : ''} class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">Previous</button>
+        <span class="text-xs font-bold text-slate-500 px-2">Page ${_salesPage} of ${totalPages}</span>
+        <button onclick="changeSalesPage(${_salesPage + 1})" ${_salesPage >= totalPages ? 'disabled' : ''} class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">Next</button>
+      </div>
+    ` : '';
+  } catch (err) {
+    console.error('Table Render Error:', err);
   }
+}
 
-  $c('sales-count').textContent = displayList.length;
 
-  $c('sales-table-body').innerHTML = displayList.length ? displayList.map(s => {
-    const due = s.total - s.amount_received;
-    const isPending = due > 0.01;
-    const statusHtml = isPending
-      ? `<span class="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 text-[10px] font-bold">Pending Rs. ${due.toFixed(2)}</span>`
-      : `<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">Paid</span>`;
-
-    return `
-      <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
-        <td class="px-5 py-4">
-           <div class="font-medium text-slate-700 dark:text-slate-200 text-sm mb-1">${new Date(s.created_at).toLocaleDateString()}</div>
-           <div class="text-[10px] text-slate-500">${new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-        </td>
-        <td class="px-5 py-4">
-           <div class="font-bold text-slate-800 dark:text-slate-200">${s.customer_name || '<span class="text-slate-400 dark:text-slate-500 italic font-normal">Walk-in</span>'}</div>
-           <div class="text-xs ${s.customer_phone ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400 dark:text-slate-600 italic'} mt-1 flex items-center gap-1">
-             <svg class="w-3.5 h-3.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg> 
-             ${s.customer_phone || 'No phone'}
-           </div>
-        </td>
-        <td class="px-5 py-4 text-slate-700 dark:text-slate-200 font-medium">Rs. ${parseFloat(s.total).toFixed(0)}</td>
-        <td class="px-5 py-4 text-emerald-600 dark:text-emerald-400 font-medium">Rs. ${parseFloat(s.amount_received).toFixed(0)}</td>
-        <td class="px-5 py-4">${statusHtml}</td>
-        <td class="px-5 py-4 text-right">
-          <div class="flex items-center justify-end gap-2">
-            ${isPending ? `<button onclick="markSalePaid(${s.id}, ${s.total}, ${s.amount_received})" class="p-1.5 rounded bg-amber-100 dark:bg-amber-500/10 hover:bg-amber-200 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 transition-colors" title="Edit / Collect Dues"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>` : ''}
-            <button onclick="printBill(${s.id})" class="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-400 transition-colors" title="Print Bill">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-            </button>
-          </div>
-        </td>
-      </tr>`;
-  }).join('') : `<tr><td colspan="6" class="px-5 py-10 text-center text-slate-400 dark:text-slate-600 text-sm border-t border-slate-100 dark:border-slate-800 italic">No sales found.</td></tr>`;
+function changeSalesPage(page) {
+  _salesPage = page;
+  _renderSalesTable();
 }
 
 async function markSalePaid(saleId, grandTotal, currentReceived) {
@@ -2360,8 +2737,13 @@ async function deleteShop(id) {
   await api(`/api/shops/${id}`, 'DELETE');
   toast('Shop deleted'); renderHierarchy();
 }
-// ─── Close modal on backdrop click ───────────────────────────────────
-$c('modal').addEventListener('click', e => { if (e.target === $c('modal')) closeModal(); });
+// ─── Close modal on backdrop click (prevent if static) ───────────────────
+$c('modal').addEventListener('click', e => {
+  if (e.target === $c('modal')) {
+    if ($c('modal').dataset.static === "true") return;
+    closeModal();
+  }
+});
 
 // ─── Support Hub (Shop Owner & Shared) ──────────────────────────────────
 async function renderSupportHub() {

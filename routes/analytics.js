@@ -15,6 +15,28 @@ function periodToDateFilter(period) {
   return map[period] || null;
 }
 
+function getDateClause(from, to, period) {
+  if (from || to) {
+    let clauses = [];
+    let params = [];
+    if (from) {
+      clauses.push("s.created_at >= ?");
+      params.push(`${from} 00:00:00`);
+    }
+    if (to) {
+      clauses.push("s.created_at <= ?");
+      params.push(`${to} 23:59:59`);
+    }
+    return { clause: "AND " + clauses.join(" AND "), params };
+  }
+
+  const dateOffset = periodToDateFilter(period);
+  if (dateOffset) {
+    return { clause: `AND s.created_at >= date('now', '${dateOffset}')`, params: [] };
+  }
+  return { clause: "", params: [] };
+}
+
 // GET /api/analytics
 router.get('/', requireAuth, (req, res) => {
   const user = req.session.user;
@@ -45,9 +67,9 @@ router.get('/', requireAuth, (req, res) => {
   // ── Shop analytics ──
   const period = req.query.period || 'all';
   const brandId = req.query.brand_id ? parseInt(req.query.brand_id, 10) : null;
+  const { from, to } = req.query;
 
-  const dateOffset = periodToDateFilter(period);
-  const dateClause = dateOffset ? `AND s.created_at >= date('now', '${dateOffset}')` : '';
+  const { clause: dateClause, params: dateParams } = getDateClause(from, to, period);
 
   const totalProducts = brandId
     ? db.prepare('SELECT COUNT(*) as val FROM products WHERE shop_id = ? AND brand_id = ?').get(shopId, brandId).val
@@ -68,7 +90,7 @@ router.get('/', requireAuth, (req, res) => {
       JOIN products p ON si.product_id = p.id
       JOIN sales    s ON si.sale_id    = s.id
       WHERE s.shop_id = ? AND p.brand_id = ? ${dateClause}
-    `).get(shopId, brandId);
+    `).get(shopId, brandId, ...dateParams);
 
     totalRevenue = agg.revenue;
     totalCOGS = agg.cogs;
@@ -79,7 +101,7 @@ router.get('/', requireAuth, (req, res) => {
       SELECT COALESCE(SUM(total), 0) as val, COUNT(*) as cnt
       FROM sales s
       WHERE s.shop_id = ? ${dateClause}
-    `).get(shopId);
+    `).get(shopId, ...dateParams);
 
     const cogs = db.prepare(`
       SELECT COALESCE(SUM(si.quantity * p.buying_price), 0) as val
@@ -87,7 +109,7 @@ router.get('/', requireAuth, (req, res) => {
       JOIN products p ON si.product_id = p.id
       JOIN sales    s ON si.sale_id    = s.id
       WHERE s.shop_id = ? ${dateClause}
-    `).get(shopId);
+    `).get(shopId, ...dateParams);
 
     totalRevenue = rev.val;
     totalSalesCount = rev.cnt;
@@ -112,7 +134,7 @@ router.get('/', requireAuth, (req, res) => {
       GROUP BY si.product_id
       ORDER BY qty_sold DESC
       LIMIT 5
-    `).all(shopId, brandId);
+    `).all(shopId, brandId, ...dateParams);
   } else {
     topProducts = db.prepare(`
       SELECT p.name, b.name as brand_name,
@@ -127,7 +149,7 @@ router.get('/', requireAuth, (req, res) => {
       GROUP BY si.product_id
       ORDER BY qty_sold DESC
       LIMIT 5
-    `).all(shopId);
+    `).all(shopId, ...dateParams);
   }
 
   // ── Recent Sales ──
@@ -141,14 +163,14 @@ router.get('/', requireAuth, (req, res) => {
       WHERE s.shop_id = ? AND p.brand_id = ? ${dateClause}
       ORDER BY s.created_at DESC
       LIMIT 10
-    `).all(shopId, brandId);
+    `).all(shopId, brandId, ...dateParams);
   } else {
     recentSales = db.prepare(`
       SELECT * FROM sales s
       WHERE s.shop_id = ? ${dateClause}
       ORDER BY s.created_at DESC
       LIMIT 10
-    `).all(shopId);
+    `).all(shopId, ...dateParams);
   }
 
   // ── All brands for this shop's products (show filter if >1 brand) ──
@@ -169,7 +191,7 @@ router.get('/', requireAuth, (req, res) => {
     topProducts,
     recentSales,
     brands,
-    activeFilters: { period, brand_id: brandId }
+    activeFilters: { period, brand_id: brandId, from, to }
   });
 });
 

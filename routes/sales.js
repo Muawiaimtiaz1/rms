@@ -55,7 +55,15 @@ router.post('/', requireAuth, (req, res) => {
 
 // GET /api/sales — list sales for current shop
 router.get('/', requireAuth, (req, res) => {
-    const sales = db.prepare('SELECT * FROM sales WHERE shop_id = ? ORDER BY created_at DESC LIMIT 100').all(req.session.user.shop_id);
+    console.log(`[DEBUG] Fetching sales for shop_id: ${req.session.user.shop_id}`);
+    const sales = db.prepare(`
+        SELECT s.*, u.name as served_by_name, u.username as served_by_username 
+        FROM sales s 
+        LEFT JOIN users u ON s.user_id = u.id 
+        WHERE s.shop_id = ? 
+        ORDER BY s.created_at DESC
+    `).all(req.session.user.shop_id);
+    console.log(`[DEBUG] Found ${sales.length} sales`);
     res.json(sales);
 });
 
@@ -87,8 +95,9 @@ router.get('/:id/bill', requireAuth, (req, res) => {
   `).all(saleId);
 
     const seller = db.prepare('SELECT name FROM users WHERE id = ?').get(sale.user_id);
+    const shop = db.prepare('SELECT * FROM shops WHERE id = ?').get(sale.shop_id);
 
-    res.json({ sale, items, seller });
+    res.json({ sale, items, seller, shop });
 });
 
 module.exports = router;
