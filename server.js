@@ -25,6 +25,7 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/support', require('./routes/support')); // API for Shop Owner Requests //
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get('/', (req, res) => {

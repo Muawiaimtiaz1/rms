@@ -70,6 +70,29 @@
             background: rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(6px);
         }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            /* IE and Edge */
+            scrollbar-width: none;
+            /* Firefox */
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
     </style>
 </head>
 
@@ -122,89 +145,215 @@
         </div>
     </header>
 
-    <main class="p-6 lg:p-10 max-w-[1600px] mx-auto space-y-8">
-        <!-- Top Stats Panel -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6" id="stats-panel">
-            <!-- Populated by JS -->
+    <!-- Secondary Navigation / Tabs -->
+    <div
+        class="border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm sticky top-[73px] z-20">
+        <div class="max-w-[1600px] mx-auto px-6 lg:px-10">
+            <nav class="flex space-x-8 overflow-x-auto hide-scrollbar" aria-label="Tabs" id="dashboard-tabs">
+                <button onclick="switchTab('overview')"
+                    class="tab-btn active border-indigo-500 text-indigo-600 dark:text-indigo-400 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    Platform Overview
+                </button>
+                <button onclick="switchTab('tenants')"
+                    class="tab-btn border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                    Tenant Management
+                </button>
+                <button onclick="switchTab('activity')"
+                    class="tab-btn border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    System Logs
+                </button>
+                <button onclick="switchTab('health')"
+                    class="tab-btn border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                    </svg>
+                    Server Health
+                </button>
+                <button onclick="switchTab('tickets')"
+                    class="tab-btn border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                    </svg>
+                    Support Hub
+                </button>
+            </nav>
         </div>
+    </div>
 
-        <!-- Analytics Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <main class="p-6 lg:p-10 max-w-[1600px] mx-auto space-y-8 relative">
 
-            <!-- Main Chart: Store Growth -->
-            <div class="glass rounded-2xl p-6 lg:col-span-2 flex flex-col items-center justify-center min-h-[350px]">
-                <div class="w-full flex justify-between items-center mb-4">
-                    <h3 class="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                        <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-                        </svg>
-                        Store Enrollment Trends
-                    </h3>
-                </div>
-                <div class="w-full h-[300px] relative">
-                    <canvas id="growthChart"></canvas>
-                </div>
+        <!-- ==================== VIEW 1: PLATFORM OVERVIEW ==================== -->
+        <div id="view-overview" class="view-section block space-y-8 animate-[fadeIn_0.3s_ease-out]">
+            <!-- Top Stats Panel -->
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6" id="stats-panel">
+                <!-- Populated by JS -->
             </div>
 
-            <!-- Side Chart: Top Stores by Users -->
-            <div class="glass rounded-2xl p-6 flex flex-col min-h-[350px]">
-                <div class="w-full flex justify-between items-center mb-4">
-                    <h3 class="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                        Top Stores (User Density)
-                    </h3>
-                </div>
-                <div class="w-full h-full relative flex items-center justify-center">
-                    <canvas id="userDensityChart"></canvas>
-                </div>
-            </div>
-        </div>
+            <!-- Analytics Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        <!-- Unified Data View (Stores & Actions) -->
-        <div
-            class="glass rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col">
-            <div
-                class="p-6 border-b border-gray-100 dark:border-gray-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div>
-                    <h3 class="font-bold text-gray-800 dark:text-white text-lg">Tenant Directory & Management</h3>
-                    <p class="text-sm text-gray-500 mt-1">Operational view of all platform tenants. Financial data is
-                        masked.</p>
+                <!-- Main Chart: Store Growth -->
+                <div
+                    class="glass rounded-2xl p-6 lg:col-span-2 flex flex-col items-center justify-center min-h-[350px]">
+                    <div class="w-full flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                            </svg>
+                            Store Enrollment Trends
+                        </h3>
+                    </div>
+                    <div class="w-full h-[300px] relative">
+                        <canvas id="growthChart"></canvas>
+                    </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <div class="relative">
-                        <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none"
-                            stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                        <input id="store-search" type="text" placeholder="Search tenants..."
-                            class="pl-9 pr-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:border-indigo-500 w-full lg:w-64 transition-all">
+
+                <!-- Side Chart: Top Stores by Users -->
+                <div class="glass rounded-2xl p-6 flex flex-col min-h-[350px]">
+                    <div class="w-full flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            Top Stores (User Density)
+                        </h3>
+                    </div>
+                    <div class="w-full h-full relative flex items-center justify-center">
+                        <canvas id="userDensityChart"></canvas>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead
-                        class="text-xs text-gray-500 uppercase bg-gray-50 dark:bg-gray-800/50 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800">
-                        <tr>
-                            <th class="px-6 py-4 font-medium">Store Name & Owner</th>
-                            <th class="px-6 py-4 font-medium">Status & Plan</th>
-                            <th class="px-6 py-4 font-medium">Data Storage (Items)</th>
-                            <th class="px-6 py-4 font-medium">Joined</th>
-                            <th class="px-6 py-4 font-medium text-right">Operational Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="store-table-body" class="divide-y divide-gray-100 dark:divide-gray-800">
-                        <!-- Populated by JS -->
-                    </tbody>
-                </table>
+        <!-- ==================== VIEW 2: TENANT MANAGEMENT ==================== -->
+        <div id="view-tenants" class="view-section hidden space-y-8 animate-[fadeIn_0.3s_ease-out]">
+            <div
+                class="glass rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col">
+                <div
+                    class="p-6 border-b border-gray-100 dark:border-gray-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div>
+                        <h3 class="font-bold text-gray-800 dark:text-white text-lg lg:text-xl">Tenant Directory &
+                            Management</h3>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Operational view of all platform
+                            tenants. Critical controls available via settings menu per store.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="relative">
+                            <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none"
+                                stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <input id="store-search" type="text" placeholder="Search tenants..."
+                                class="pl-9 pr-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:border-indigo-500 w-full lg:w-64 transition-all focus:ring-2 focus:ring-indigo-500/20">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto min-h-[400px]">
+                    <table class="w-full text-sm text-left">
+                        <thead
+                            class="text-[11px] font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-800/80 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 tracking-wider">
+                            <tr>
+                                <th class="px-6 py-4">Store Identity</th>
+                                <th class="px-6 py-4">Status & Plan</th>
+                                <th class="px-6 py-4">Scale Metrics</th>
+                                <th class="px-6 py-4">Joined Timestamp</th>
+                                <th class="px-6 py-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="store-table-body"
+                            class="divide-y divide-gray-100 dark:divide-gray-800/60 transition-all">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
+
+        <!-- ==================== VIEW 3: SYSTEM LOGS ==================== -->
+        <div id="view-activity" class="view-section hidden space-y-8 animate-[fadeIn_0.3s_ease-out]">
+            <div
+                class="glass rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col">
+                <div class="p-6 border-b border-gray-100 dark:border-gray-800">
+                    <h3 class="font-bold text-gray-800 dark:text-white text-lg">System Audit Logs</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Immutable ledger of superadmin actions
+                        (suspensions, resets, creations) across all tenants.</p>
+                </div>
+                <div class="overflow-x-auto min-h-[400px] p-6">
+                    <div id="logs-feed" class="space-y-4">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== VIEW 4: SERVER HEALTH ==================== -->
+        <div id="view-health" class="view-section hidden space-y-8 animate-[fadeIn_0.3s_ease-out]">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" id="health-cards-container">
+                <!-- Populated by JS -->
+            </div>
+
+            <div
+                class="glass rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col p-6 text-center text-gray-500 italic py-16">
+                <svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-700 mb-4" fill="none" stroke="currentColor"
+                    viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z">
+                    </path>
+                </svg>
+                To view detailed historic telemetry metrics, connect a system monitoring tool like Prometheus or
+                Grafana.
+            </div>
+        </div>
+
+        <!-- ==================== VIEW 5: SUPPORT TICKETS ==================== -->
+        <div id="view-tickets" class="view-section hidden space-y-8 animate-[fadeIn_0.3s_ease-out]">
+            <div
+                class="glass rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col">
+                <div class="p-6 border-b border-gray-100 dark:border-gray-800">
+                    <h3 class="font-bold text-gray-800 dark:text-white text-lg">Support Command</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage active support requests originating
+                        from tenant stores.</p>
+                </div>
+                <div class="overflow-x-auto min-h-[400px]">
+                    <table class="w-full text-sm text-left">
+                        <thead
+                            class="text-[11px] font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-800/80 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 tracking-wider">
+                            <tr>
+                                <th class="px-6 py-4">Ticket ID</th>
+                                <th class="px-6 py-4">Reporting Store</th>
+                                <th class="px-6 py-4">Issue Priority</th>
+                                <th class="px-6 py-4">Status</th>
+                                <th class="px-6 py-4">Assigned To</th>
+                                <th class="px-6 py-4 text-right">Age</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tickets-table-body"
+                            class="divide-y divide-gray-100 dark:divide-gray-800/60 transition-all">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
     </main>
 
     <!-- Modal Base -->

@@ -109,3 +109,30 @@ CREATE TABLE IF NOT EXISTS brand_expense_payments (
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  type TEXT NOT NULL DEFAULT 'help', -- bug, feature, help
+  priority TEXT NOT NULL DEFAULT 'medium', -- low, medium, high
+  subject TEXT NOT NULL,
+  description TEXT NOT NULL,
+  attachment_url TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open, in_progress, resolved, closed
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ticket_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  comment TEXT NOT NULL,
+  is_internal INTEGER DEFAULT 0, -- 1 for internal notes (superadmin only)
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

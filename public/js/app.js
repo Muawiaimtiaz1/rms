@@ -18,14 +18,15 @@ let _expenseView = 'list';
 let _expenseMonth = new Date().toISOString().slice(0, 7);
 let _expensePage = 1;
 let shops = [];
-let managedShopId = null; // Master Admin managing a specific shop
+let managedShopId = null; // ─── Setup ────────────────────────────────────────────────────────
 const AVAILABLE_PANELS = [
-  { id: 'dashboard', name: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-  { id: 'brands', name: 'Brands', icon: 'M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z' },
-  { id: 'products', name: 'Products', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
-  { id: 'pos', name: 'POS / Checkout', icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
-  { id: 'sales-history', name: 'Sales History', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
-  { id: 'expenses', name: 'Expenses', icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' }
+  { id: 'dashboard', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>', label: 'Dashboard' },
+  { id: 'pos', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>', label: 'POS Terminal' },
+  { id: 'brands', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>', label: 'Brand Management' },
+  { id: 'products', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>', label: 'Products & Inventory' },
+  { id: 'sales-history', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>', label: 'Sales Operations' },
+  { id: 'expenses', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>', label: 'Expense Management' },
+  { id: 'support', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>', label: 'Support Hub' }
 ];
 
 // ─── Init ────────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ async function init() {
         if (currentUser.role === 'superadmin') {
           // Master Admin only sees Dashboard (Global stats later)
           el.style.display = p.id === 'dashboard' ? 'flex' : 'none';
-        } else if (currentUser.allowed_panels && currentUser.allowed_panels.includes(p.id)) {
+        } else if (p.id === 'support' || (currentUser.allowed_panels && currentUser.allowed_panels.includes(p.id))) {
           el.style.display = 'flex';
         } else {
           el.style.display = 'none';
@@ -89,7 +90,7 @@ function navigate(page) {
     const parentMap = { 'products-low-stock': 'products', 'sales-pending': 'sales-history' };
     const parent = parentMap[page];
     if (parent && (!currentUser.allowed_panels || !currentUser.allowed_panels.includes(parent))) return false;
-    if (!parent && (!currentUser.allowed_panels || !currentUser.allowed_panels.includes(page))) return false;
+    if (!parent && page !== 'support' && page !== 'users' && (!currentUser.allowed_panels || !currentUser.allowed_panels.includes(page))) return false;
   }
 
   localStorage.setItem('pos_page', page);
@@ -105,7 +106,8 @@ function navigate(page) {
     expenses: 'Expenses',
     users: 'Users (Admin)',
     subscriptions: 'Subscription Tracking',
-    hierarchy: 'Master Platform Hierarchy'
+    hierarchy: 'Master Platform Hierarchy',
+    support: 'Support Hub'
   };
   if (page === 'dashboard' && currentUser.role === 'superadmin') titles.dashboard = 'System Overview (Master Admin)';
   document.getElementById('page-title').textContent = titles[page] || page;
@@ -122,7 +124,8 @@ function navigate(page) {
     expenses: renderExpenses,
     users: renderUsers,
     subscriptions: renderSubscriptions,
-    hierarchy: renderHierarchy
+    hierarchy: renderHierarchy,
+    support: renderSupportHub
   };
   if (pages[page]) pages[page]();
 
@@ -214,45 +217,126 @@ function statCard(label, value, sub, color = 'blue') {
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────
-async function renderDashboard() {
-  const data = await api('/api/analytics');
+// ─── Dashboard state ──────────────────────────────────────────────────────────
+let _dashPeriod = 'all';
+let _dashBrandId = '';
+
+async function renderDashboard(period, brandId) {
+  if (period !== undefined) _dashPeriod = period;
+  if (brandId !== undefined) _dashBrandId = brandId;
+
+  // Build query string
+  const qs = new URLSearchParams();
+  if (_dashPeriod && _dashPeriod !== 'all') qs.set('period', _dashPeriod);
+  if (_dashBrandId && _dashBrandId !== '') qs.set('brand_id', _dashBrandId);
+  const url = '/api/analytics' + (qs.toString() ? '?' + qs.toString() : '');
+
+  const data = await api(url);
   if (data.isGlobal) return renderGlobalDashboard(data);
 
+  const brands = data.brands || [];
+
+  const PERIOD_OPTS = [
+    { val: 'all', label: 'All Time' },
+    { val: '1m', label: 'Last 1 Month' },
+    { val: '2m', label: 'Last 2 Months' },
+    { val: '6m', label: 'Last 6 Months' },
+    { val: '1y', label: 'Last Year' },
+  ];
+
+  const periodSelect = `
+    <select id="dash-period-filter" onchange="renderDashboard(this.value, document.getElementById('dash-brand-filter')?.value)"
+      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">
+      ${PERIOD_OPTS.map(o => `<option value="${o.val}" ${_dashPeriod === o.val ? 'selected' : ''}>${o.label}</option>`).join('')}
+    </select>`;
+
+  const brandSelect = brands.length > 1 ? `
+    <select id="dash-brand-filter" onchange="renderDashboard(document.getElementById('dash-period-filter')?.value, this.value)"
+      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">
+      <option value="">All Brands</option>
+      ${brands.map(b => `<option value="${b.id}" ${String(_dashBrandId) === String(b.id) ? 'selected' : ''}>${b.name}</option>`).join('')}
+    </select>` : '';
+
+  // Determine whether any filter is active for a subtle badge
+  const isFiltered = _dashPeriod !== 'all' || (_dashBrandId !== '' && _dashBrandId !== null);
+
   $c('page-content').innerHTML = `
+    <!-- Filter Bar -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6 p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
+        </svg>
+        <span class="text-sm font-semibold text-gray-700 dark:text-gray-200">Filter Sales</span>
+        ${isFiltered ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800">ACTIVE</span>' : ''}
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Time Period</span>
+          ${periodSelect}
+        </div>
+        ${brandSelect ? `<div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Brand</span>
+          ${brandSelect}
+        </div>` : ''}
+        ${isFiltered ? `<button onclick="renderDashboard('all', '')" class="text-xs font-semibold text-gray-500 hover:text-rose-600 dark:hover:text-rose-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-rose-200 dark:hover:border-rose-800 transition-all flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>Clear</button>` : ''}
+      </div>
+    </div>
+
+    <!-- Metric Cards -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-      ${statCard('Total Revenue', 'Rs. ' + Number(data.totalRevenue).toLocaleString(), `${data.totalSales} transactions`, 'blue')}
-      ${statCard('Total Expenses', 'Rs. ' + Number(data.totalExpenses).toLocaleString(), 'All categories', 'rose')}
-      ${statCard('Profit from Sales', 'Rs. ' + Number(data.netProfit).toLocaleString(), 'Revenue − Cost of Goods', 'emerald')}
+      ${statCard('Total Revenue', 'Rs. ' + Number(data.totalRevenue).toLocaleString(), `${data.totalSales} transaction${data.totalSales !== 1 ? 's' : ''}`, 'blue')}
+      ${statCard('Cost of Goods Sold', 'Rs. ' + Number(data.totalCOGS).toLocaleString(), 'Sum of buying prices', 'rose')}
+      ${statCard('Gross Profit', 'Rs. ' + Number(data.netProfit).toLocaleString(), 'Revenue − COGS', 'emerald')}
       ${statCard('Products', data.totalProducts, 'in catalog', 'amber')}
     </div>
+
+    <!-- Tables -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="glass rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300">
-        <h3 class="font-bold text-gray-700 dark:text-gray-200 mb-5 flex items-center gap-2">
-          <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
-          Top Products
-        </h3>
-        ${data.topProducts.length ? `<div class="space-y-3">${data.topProducts.map((p, i) => `
-          <div class="flex items-center justify-between py-1">
-            <div class="flex items-center gap-3">
-              <span class="w-5 h-5 text-center text-xs font-bold text-gray-400 dark:text-gray-600">${i + 1}</span>
-              <div class="text-sm text-gray-700 dark:text-gray-300 font-medium">${p.name}</div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2.5 py-0.5 rounded-full font-semibold">${p.qty_sold} sold</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400 font-mono">Rs. ${Number(p.revenue).toLocaleString()}</span>
-            </div>
-          </div>`).join('')}</div>` : '<p class="text-gray-400 text-sm italic">No sales yet.</p>'}
+      <!-- Top Products -->
+      <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
+          <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Top Products by Sales</h3>
+        </div>
+        <div class="p-4">
+          ${data.topProducts.length ? `
+            <div class="space-y-1">
+              ${data.topProducts.map((p, i) => `
+                <div class="flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+                  <span class="w-6 h-6 flex-shrink-0 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center justify-center">${i + 1}</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm text-gray-800 dark:text-gray-200 font-semibold truncate">${p.name}</div>
+                    ${p.brand_name ? `<div class="text-[10px] text-gray-400 uppercase tracking-wider font-medium">${p.brand_name}</div>` : ''}
+                  </div>
+                  <div class="flex items-center gap-2 flex-shrink-0">
+                    <span class="text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-semibold">${p.qty_sold} sold</span>
+                    <div class="text-right">
+                      <div class="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">Rs. ${Number(p.revenue).toLocaleString()}</div>
+                      <div class="text-[10px] text-rose-500 font-mono">COGS: Rs. ${Number(p.cogs || 0).toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>`).join('')}
+            </div>` : '<p class="text-gray-400 text-sm italic text-center py-8">No sales in this period.</p>'}
+        </div>
       </div>
-      <div class="glass rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300">
-        <h3 class="font-bold text-gray-700 dark:text-gray-200 mb-5 flex items-center gap-2">
+
+      <!-- Recent Sales -->
+      <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
           <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-          Recent Sales
-        </h3>
-        ${data.recentSales.length ? `<div class="space-y-1">${data.recentSales.map(s => `
-          <div class="flex items-center justify-between py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
-            <div class="text-xs text-gray-500 dark:text-gray-400">${new Date(s.created_at).toLocaleString()}</div>
-            <div class="font-bold text-emerald-600 dark:text-emerald-400 font-mono">Rs. ${Number(s.total).toLocaleString()}</div>
-          </div>`).join('')}</div>` : '<p class="text-gray-400 text-sm italic">No sales yet.</p>'}
+          <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Recent Sales</h3>
+        </div>
+        <div class="p-4">
+          ${data.recentSales.length ? `
+            <div class="space-y-0.5">
+              ${data.recentSales.map(s => `
+                <div class="flex items-center justify-between py-2.5 px-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors border-b border-gray-50 dark:border-gray-800/50 last:border-0">
+                  <div class="text-xs text-gray-500 dark:text-gray-400">${new Date(s.created_at).toLocaleString()}</div>
+                  <div class="font-bold text-emerald-600 dark:text-emerald-400 font-mono text-sm">Rs. ${Number(s.total).toLocaleString()}</div>
+                </div>`).join('')}
+            </div>` : '<p class="text-gray-400 text-sm italic text-center py-8">No sales in this period.</p>'}
+        </div>
       </div>
     </div>`;
 }
@@ -1311,18 +1395,67 @@ async function updateExpense(id) {
 async function renderUsers() {
   const users = await api('/api/users');
   const isMaster = currentUser.role === 'superadmin';
-  const isShopAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
 
+  // ── Shop Admin: Card view (read + edit only, no create/delete) ──
+  if (!isMaster) {
+    const ROLE_COLORS = {
+      admin: { bg: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' },
+      pos_user: { bg: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
+      manager: { bg: 'bg-amber-500', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
+    };
+    const getColor = (role) => ROLE_COLORS[role] || { bg: 'bg-slate-400', badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400' };
+
+    const cardsHtml = users.map(u => {
+      const initials = (u.name || u.username).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+      const { bg, badge } = getColor(u.role);
+      const statusOk = !u.status || u.status === 'active';
+      return `
+        <div class="glass rounded-2xl p-6 border border-gray-200 dark:border-gray-800 hover:shadow-xl hover:-translate-y-1 transition-all bg-white dark:bg-gray-900 flex flex-col gap-4">
+          <div class="flex flex-col items-center text-center gap-3">
+            <div class="w-16 h-16 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold shadow-lg relative">
+              ${initials}
+              <span class="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-900 ${statusOk ? 'bg-emerald-400' : 'bg-red-400'}"></span>
+            </div>
+            <div>
+              <div class="font-bold text-gray-900 dark:text-white text-base">${u.name}</div>
+              <div class="text-xs text-gray-400 dark:text-gray-500">@${u.username}</div>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${badge}">${u.role.replace('_', ' ')}</span>
+          </div>
+          <div class="mt-auto pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center">
+            <div class="text-xs text-gray-400">${u.email || '—'}</div>
+            <button onclick="openEditUser(${u.id},'${(u.name || '').replace(/'/g, "\\'")}','${u.username}','${u.email || ''}','${u.phone || ''}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, '&quot;')}, ${u.shop_id}, '${u.status || 'active'}')"
+              class="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all" title="Edit User">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+
+    $c('page-content').innerHTML = `
+      <div class="flex items-end justify-between gap-4 mb-8">
+        <div>
+          <h3 class="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">Your Team</h3>
+          <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">${users.length} staff member${users.length !== 1 ? 's' : ''} in your shop</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+        ${cardsHtml || `<div class="col-span-full py-24 text-center text-gray-400 italic">No staff members found.</div>`}
+      </div>`;
+    return;
+  }
+
+  // ── Superadmin: full table view ──
   $c('page-content').innerHTML = `
-    <div class="flex justify-between items-center mb-6" >
+    <div class="flex justify-between items-center mb-6">
       <p class="text-slate-400 text-sm">${users.length} user(s)</p>
       <button onclick="openCreateUser()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all">+ Create User</button>
-    </div >
+    </div>
     <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
       <table class="w-full text-sm">
         <thead><tr class="border-b border-slate-200 dark:border-slate-800 text-left bg-slate-50 dark:bg-black/20">
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Name</th>
-          ${isMaster ? '<th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop</th>' : ''}
+          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Username</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Role</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
@@ -1332,13 +1465,10 @@ async function renderUsers() {
           ${users.map(u => `
             <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group">
               <td class="px-5 py-4 font-medium text-slate-700 dark:text-slate-200">${u.name}</td>
-              ${isMaster ? `<td class="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 font-medium">${u.shop_name || '<span class="italic text-slate-400">System</span>'}</td>` : ''}
+              <td class="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 font-medium">${u.shop_name || '<span class="italic text-slate-400">System</span>'}</td>
               <td class="px-5 py-4 text-slate-500 dark:text-slate-400">@${u.username}</td>
               <td class="px-5 py-4">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-center justify-center min-w-[60px] ${u.role === 'superadmin' ? 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30' :
-      u.role === 'admin' ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300' :
-        'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-    }">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-center justify-center min-w-[60px] ${u.role === 'superadmin' ? 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30' : u.role === 'admin' ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'}">
                   ${u.role.toUpperCase().replace('_', ' ')}
                 </span>
               </td>
@@ -1349,7 +1479,7 @@ async function renderUsers() {
               </td>
               <td class="px-5 py-4 text-right space-x-1">
                 <button onclick="openEditUser(${u.id},'${(u.name || '').replace(/'/g, "\\'")}','${u.username}','${u.email || ''}','${u.phone || ''}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, '&quot;')}, ${u.shop_id}, '${u.status || 'active'}')" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all">Edit</button>
-                ${u.id !== currentUser.id && (isMaster || u.role !== 'admin' && u.role !== 'superadmin') ? `
+                ${u.id !== currentUser.id ? `
                   <button onclick="deleteUser(${u.id})" class="px-2 py-1 text-xs rounded-lg bg-red-100 dark:bg-red-900/30 text-rose-700 dark:text-rose-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all">Del</button>
                 ` : ''}
               </td>
@@ -1865,110 +1995,270 @@ async function saveSubscriptionPayment() {
 
 
 // ─── Hierarchy View ──────────────────────────────────────────────
+// Global State for Hierarchy UI
+let hierarchyData = { systemUsers: [], shops: [], users: [], brands: [] };
+let hierarchySearchQuery = '';
+
 async function renderHierarchy() {
-  const [shops, users] = await Promise.all([api('/api/shops'), api('/api/users')]);
-  const usersByShop = {};
-  users.forEach(u => {
-    const sid = u.shop_id || 'system';
-    if (!usersByShop[sid]) usersByShop[sid] = [];
-    usersByShop[sid].push(u);
-  });
+  const result = await api('/api/admin/hierarchy-data');
+  if (result.error) return toast(result.error, 'error');
+
+  hierarchyData = result;
+  renderHierarchyUI();
+}
+
+function renderHierarchyUI() {
+  const q = hierarchySearchQuery.toLowerCase();
+
+  // Filter logic
+  const filteredShops = hierarchyData.shops.filter(s =>
+    s.store_name.toLowerCase().includes(q) ||
+    hierarchyData.users.some(u => u.shop_id === s.id && (u.name.toLowerCase().includes(q) || u.role.toLowerCase().includes(q))) ||
+    hierarchyData.brands.some(b => b.shop_id === s.id && b.name.toLowerCase().includes(q))
+  );
 
   let html = `
-    <div class="space-y-8">
-      <div class="flex justify-between items-center">
+    <div class="space-y-8 animate-[fadeIn_0.3s_ease-out]">
+      <!-- Header Area -->
+      <div class="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div>
-          <h3 class="text-xl font-bold text-slate-800 dark:text-white mb-1">Platform Hierarchy</h3>
-          <p class="text-sm text-slate-500 dark:text-slate-400">Multi-tenant view of all shops and their assigned personnel</p>
+          <h3 class="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Master Platform Hierarchy</h3>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Multi-tenant view of all shops, assigned admins, staff, and parters.</p>
         </div>
-        <button onclick="openCreateShop()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all shadow-md shadow-indigo-600/20">
-          + Launch New Shop
-        </button>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="relative">
+            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            <input type="text" id="hierarchySearch" value="${hierarchySearchQuery}" placeholder="Search tenants, users, roles..." class="pl-9 pr-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 w-full sm:w-64 transition-all shadow-sm">
+          </div>
+          <button onclick="openCreateShop()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-md flex items-center gap-2 justify-center">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            New Tenant
+          </button>
+        </div>
       </div>
   `;
 
-  const systemUsers = usersByShop['system'] || [];
-  html += renderHierarchyBlock('Platform Engine (Master Owner)', systemUsers, 'indigo', null, true);
+  // System Core Node (Master Owner)
+  html += renderHierarchyBlock('Platform Engine (Master Core)', hierarchyData.systemUsers, [], 'indigo', null, true);
 
-  shops.forEach(s => {
-    const shopUsers = usersByShop[s.id] || [];
-    html += renderHierarchyBlock(s.name, shopUsers, 'blue', s);
-  });
+  if (filteredShops.length === 0) {
+    html += `<div class="p-10 text-center glass rounded-2xl"><p class="text-slate-500 dark:text-slate-400 italic">No tenants matched your search query "${hierarchySearchQuery}".</p></div>`;
+  } else {
+    // Render Shops as Parent Nodes
+    filteredShops.forEach(s => {
+      const shopUsers = hierarchyData.users.filter(u => u.shop_id === s.id);
+      const shopBrands = hierarchyData.brands.filter(b => b.shop_id === s.id);
+      html += renderHierarchyBlock(s.store_name, shopUsers, shopBrands, 'blue', s);
+    });
+  }
 
   html += '</div>';
   $c('page-content').innerHTML = html;
+
+  // Re-bind search event listener after DOM replace
+  const searchInput = document.getElementById('hierarchySearch');
+  if (searchInput) {
+    // Focus preserving trick
+    const val = searchInput.value;
+    searchInput.value = '';
+    searchInput.value = val;
+    searchInput.focus();
+
+    searchInput.addEventListener('input', (e) => {
+      hierarchySearchQuery = e.target.value;
+      // Debounce slightly to prevent jarring UI jumps
+      clearTimeout(window.hierarchySearchTimeout);
+      window.hierarchySearchTimeout = setTimeout(renderHierarchyUI, 200);
+    });
+  }
 }
 
-function renderHierarchyBlock(name, users, color, shop = null, isGlobal = false) {
+function renderHierarchyBlock(name, users, brands = [], color, shop = null, isGlobal = false) {
   const colorMap = {
-    indigo: { text: 'text-indigo-600 dark:text-indigo-400', border: 'border-indigo-500' },
-    blue: { text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500' }
+    indigo: { text: 'text-indigo-600 dark:text-indigo-400', border: 'border-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-900/20', iconBg: 'bg-indigo-100 dark:bg-indigo-900/40' },
+    blue: { text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20', iconBg: 'bg-blue-100 dark:bg-blue-900/40' }
   };
   const c = colorMap[color] || colorMap.blue;
 
-  return `
-    <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
-      <div class="px-6 py-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
-        <h4 class="font-black text-xs uppercase tracking-[0.2em] ${c.text}">${name}</h4>
-        <div class="flex items-center gap-3">
-          ${isGlobal ? '' : (shop && shop.allowed_panels) ? `
-            ${shop.allowed_panels.includes('brands') ? `
-              <button onclick="renderBrands(${shop.id})" class="text-[10px] font-bold text-emerald-600 hover:text-emerald-500 transition-colors uppercase tracking-widest">Manage Brands</button>
-              <div class="w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
-              <button onclick="managedShopId=${shop.id}; openAddBrand()" class="text-[10px] font-bold text-emerald-600 hover:text-emerald-500 transition-colors uppercase tracking-widest">+ Brand</button>
-              <div class="w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
-            ` : ''}
-            <button onclick="openCreateUser(${shop.id})" class="text-[10px] font-bold text-indigo-600 hover:text-indigo-500 transition-colors uppercase tracking-widest">+ User</button>
-            <div class="w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
-            <button onclick="openEditShop(${shop.id})" class="text-[10px] font-bold text-slate-500 hover:text-indigo-500 transition-colors uppercase tracking-widest">Edit Shop</button>
+  // KPIs
+  const userCount = users.length;
+  const brandCount = brands.length;
+  const productCount = shop ? shop.product_count : 0;
+  const plan = shop && shop.subscription_plan ? shop.subscription_plan.replace('_', ' ') : (isGlobal ? 'SYSTEM' : 'NONE');
 
-            <button onclick="toggleShopStatus(${shop.id}, '${shop.status}')" class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase transition-all ${shop.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}">
-              ${shop.status}
-            </button>
-          ` : ''}
+  // Collapse state identifier
+  const collapseId = `collapse - node - ${shop ? shop.id : 'global'} `;
+
+  // Role rendering helper
+  const renderUserCard = (u) => {
+    let roleColor = 'text-slate-500 bg-slate-100 dark:text-slate-400 dark:bg-slate-800';
+    let roleIcon = '👤';
+    if (u.role === 'superadmin') { roleColor = 'text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800'; roleIcon = '🌟'; }
+    if (u.role === 'admin') { roleColor = 'text-emerald-600 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800'; roleIcon = '🧑‍💼'; }
+    if (u.role === 'user') { roleColor = 'text-slate-600 bg-slate-100 dark:text-slate-400 dark:bg-slate-800 border border-slate-200 dark:border-slate-700'; roleIcon = '👷'; }
+
+    return `
+      <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800/60 hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-all group bg-white dark:bg-slate-900/50 relative overflow-hidden">
+        <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${u.role === 'admin' ? 'from-emerald-400 to-emerald-300' : u.role === 'superadmin' ? 'from-blue-500 to-indigo-500' : 'from-slate-200 to-slate-100 dark:from-slate-700 dark:to-slate-800'} opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold shadow-sm ${roleColor}">
+            ${roleIcon}
+          </div>
+          <div class="min-w-0">
+            <div class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">${u.name}</div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span class="text-[9px] uppercase font-black tracking-widest ${roleColor} px-1.5 py-0.5 rounded-md leading-none">${u.role.replace('_', ' ')}</span>
+              ${u.email ? `<span class="text-[10px] text-slate-400 font-medium truncate">${u.username}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 ml-2 opacity-10 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+          <!-- Edit button -->
+          <button onclick="openEditUser(${u.id},'${(u.name || '').replace(/'/g, "\\'")}', '${u.username}', '${u.email || ''}', '${u.phone || ''}', '${u.role}', ${JSON.stringify(u.allowed_panels || []).replace(/"/g, '&quot;')}, ${u.shop_id || 'null'}, '${u.status || 'active'}')" 
+            class="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 flex items-center justify-center transition-transform hover:scale-110 shadow-sm" title="Edit Profile">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+          </button>
+          ${u.role === 'superadmin' ? '' : `
+          <!-- Suspend button -->
+          <button onclick="toggleUserStatus(${u.id}, '${u.status || 'active'}')" class="w-7 h-7 rounded-lg flex items-center justify-center border ${u.status === 'active' || !u.status ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600'} transition-all hover:scale-110 shadow-sm" title="${u.status === 'active' || !u.status ? 'Suspend User' : 'Reactivate User'}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${u.status === 'active' || !u.status ? 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' : 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z'}"/></svg>
+          </button>
+          `}
+        </div>
+      </div>
+      `;
+  };
+
+  const renderPartnerCard = (b) => {
+    return `
+      <div class="flex items-center justify-between p-3 rounded-xl border border-purple-100 dark:border-purple-900/30 hover:border-purple-300 dark:hover:border-purple-500/50 transition-all group bg-purple-50/30 dark:bg-purple-900/10">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold shadow-sm bg-purple-100 border border-purple-200 text-purple-600 dark:bg-purple-900/40 dark:border-purple-800 dark:text-purple-400">
+            🤝
+          </div>
+          <div class="min-w-0">
+            <div class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">${b.name}</div>
+            <div class="text-[9px] uppercase font-black tracking-widest text-purple-600 dark:text-purple-400 mt-0.5 border border-purple-200 dark:border-purple-800/50 px-1 inline-block rounded">Partner Brand</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 ml-2 opacity-10 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+          <!-- View button -->
+          <button onclick="managedShopId=${b.shop_id}; renderBrands(${b.shop_id})" class="w-7 h-7 rounded-lg bg-purple-50 border border-purple-200 text-purple-600 dark:bg-purple-900/30 dark:border-purple-800 dark:text-purple-400 flex items-center justify-center transition-transform hover:scale-110 shadow-sm" title="View Partner Details">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+          </button>
+        </div>
+      </div>
+      `;
+  };
+
+  return `
+      <details class="group glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all mb-4" ${isGlobal || hierarchySearchQuery !== '' ? 'open' : ''}>
+      <summary class="px-6 py-5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/80 cursor-pointer list-none flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
+        
+        <!-- Parent Node Identity -->
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 rounded-2xl shadow-inner flex items-center justify-center font-bold text-lg border ${c.border} ${c.iconBg} ${c.text}">
+            ${isGlobal ? '⚙️' : (name || 'S').substring(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h4 class="font-black text-lg text-slate-900 dark:text-white tracking-tight">${name}</h4>
+              ${isGlobal ? '' : `<span class="w-2 h-2 rounded-full ${shop.status === 'active' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]'}"></span>`}
+            </div>
+            
+            <!-- Quick KPI Pills -->
+            <div class="flex flex-wrap items-center gap-2 mt-2">
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                ${userCount} Personnel
+              </span>
+              ${!isGlobal ? `
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                ${brandCount} Partners
+              </span>
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                ${productCount} Products
+              </span>
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${c.text} ${c.bg} px-2 py-0.5 rounded-md">
+                Tier: ${plan}
+              </span>
+              ` : ''}
+            </div>
+          </div>
         </div>
 
-
-      </div>
-      <div class="p-4">
-        ${users.length ? `
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            ${users.map(u => `
-              <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:${c.border} transition-all group bg-white dark:bg-slate-900">
-                <div class="flex items-center gap-3 min-w-0">
-                  <div class="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 group-hover:bg-indigo-600 group-hover:text-white transition-all capitalize">
-                    ${(u.name || 'U')[0]}
-                  </div>
-                  <div class="min-w-0">
-                    <div class="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">${u.name}</div>
-                    <div class="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-tighter">${u.role.replace('_', ' ')}</div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-1.5 ml-2">
-                  <button onclick="openEditUser(${u.id},'${(u.name || '').replace(/'/g, "\\'")}','${u.username}','${u.email || ''}','${u.phone || ''}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, '&quot;')}, ${u.shop_id || 'null'}, '${u.status || 'active'}')" 
-                    class="w-5 h-5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center transition-all hover:scale-110 shadow-sm" title="Edit Metadata">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                  </button>
-                  ${u.role === 'superadmin' ? '' : `
-                  <button onclick="toggleUserStatus(${u.id}, '${u.status || 'active'}')" class="w-5 h-5 rounded-md flex items-center justify-center border ${u.status === 'active' || !u.status ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-rose-50 border-rose-200 text-rose-600'} transition-all hover:scale-110 shadow-sm" title="Toggle Status">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${u.status === 'active' || !u.status ? 'M5 13l4 4L19 7' : 'M6 18L18 6M6 6l12 12'}"/></svg>
-                  </button>
-                  `}
-                </div>
-              </div>
-            `).join('')}
+        <!-- Inline Actions -->
+        <div class="flex items-center gap-2">
+          ${isGlobal ? '' : (shop && shop.allowed_panels) ? `
+            ${shop.allowed_panels.includes('brands') ? `
+              <button onclick="event.preventDefault(); event.stopPropagation(); managedShopId=${shop.id}; openAddBrand()" class="p-2 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded-xl transition-all border border-transparent hover:border-purple-200 dark:hover:border-purple-800 flex items-center justify-center group/btn" title="Add Partner">
+                <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              </button>
+            ` : ''}
+            <button onclick="event.preventDefault(); event.stopPropagation(); openCreateUser(${shop.id})" class="p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-xl transition-all border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800 flex items-center justify-center group/btn" title="Add User">
+              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+            </button>
+            <div class="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
+            <button onclick="event.preventDefault(); event.stopPropagation(); openEditShop(${shop.id})" class="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 rounded-xl transition-all flex items-center justify-center group/btn" title="Edit Store Settings">
+              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            </button>
+            <button onclick="event.preventDefault(); event.stopPropagation(); toggleShopStatus(${shop.id}, '${shop.status}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn ${shop.status === 'active' ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 hover:border-rose-200 dark:hover:border-rose-800' : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:border-emerald-200 dark:hover:border-emerald-800'}" title="${shop.status === 'active' ? 'Suspend Store' : 'Reactivate Store'}">
+              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${shop.status === 'active' ? 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636' : 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'}"></path></svg>
+            </button>
+          ` : ''}
+          <div class="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 group-open:rotate-180 transition-transform bg-white dark:bg-slate-800 ml-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
           </div>
-        ` : '<p class="text-xs text-slate-400 italic py-2 px-2">No users assigned to this shop.</p>'}
+        </div>
+      </summary>
+      
+      <!--Expanded Body(Children Nodes)-- >
+      <div class="p-6 bg-slate-50/50 dark:bg-slate-900/20 border-t border-slate-100 dark:border-slate-800">
+
+        ${users.length === 0 && brands.length === 0 ? `
+          <div class="py-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+            <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No personnel or partners attached to this node.</p>
+          </div>
+        ` : ''}
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+
+          <!-- Users Section -->
+          ${users.length ? `
+          <div class="${users.length > 3 ? 'md:col-span-2 xl:col-span-2' : ''}">
+            <h5 class="text-xs font-bold text-slate-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+              Assigned Personnel
+            </h5>
+            <div class="grid grid-cols-1 ${users.length > 1 ? 'sm:grid-cols-2' : ''} gap-3">
+              ${users.map(u => renderUserCard(u)).join('')}
+            </div>
+          </div>
+          ` : ''}
+
+          <!-- Brands (Partners) Section -->
+          ${brands.length ? `
+          <div>
+            <h5 class="text-xs font-bold text-purple-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+              Partner Networks
+            </h5>
+            <div class="grid grid-cols-1 gap-3">
+              ${brands.map(b => renderPartnerCard(b)).join('')}
+            </div>
+          </div>
+          ` : ''}
+
+        </div>
       </div>
-    </div>
-  `;
+    </details>
+      `;
 }
 
 async function toggleShopStatus(id, current) {
   const next = current === 'active' ? 'blocked' : 'active';
   const r = await api(`/api/shops/${id}`, 'PATCH', { status: next });
   if (r.error) return toast(r.error, 'error');
-  toast(`Shop ${next === 'active' ? 'Activated' : 'Blocked'}`);
+  toast(`Shop ${next === 'active' ? 'Activated' : 'Blocked'} `);
   renderHierarchy();
 }
 
@@ -1982,7 +2272,7 @@ async function toggleUserStatus(id, current) {
 
   const r = await api(`/api/users/${id}`, 'PUT', payload);
   if (r.error) return toast(r.error, 'error');
-  toast(`User ${next === 'active' ? 'Activated' : 'Blocked'}`);
+  toast(`User ${next === 'active' ? 'Activated' : 'Blocked'} `);
   renderHierarchy();
 }
 
@@ -2003,7 +2293,7 @@ function shopFormHtml(shop = null) {
   const shopPanels = shop && shop.allowed_panels ? (Array.isArray(shop.allowed_panels) ? shop.allowed_panels : JSON.parse(shop.allowed_panels)) : [];
 
   return `
-    <div class="space-y-4">
+      <div class="space-y-4">
       <div>
         <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Shop Name</label>
         <input id="shop-name" type="text" value="${shop ? shop.name : ''}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-indigo-500 transition-all">
@@ -2029,9 +2319,10 @@ function shopFormHtml(shop = null) {
           <input id="shop-admin-username" type="text" placeholder="Admin Username" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
           <input id="shop-admin-password" type="password" placeholder="Admin Password" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
         </div>
-      </div>` : ''}
+      </div>` : ''
+    }
     </div>
-  `;
+      `;
 }
 
 async function saveShop(id) {
@@ -2075,6 +2366,397 @@ async function deleteShop(id) {
 }
 // ─── Close modal on backdrop click ───────────────────────────────────
 $c('modal').addEventListener('click', e => { if (e.target === $c('modal')) closeModal(); });
+
+// ─── Support Hub (Shop Owner & Shared) ──────────────────────────────────
+async function renderSupportHub() {
+  const content = document.getElementById('page-content');
+  content.innerHTML = '<div class="flex justify-center p-12 text-slate-400">Loading support dashboard...</div>';
+
+  try {
+    const tickets = await api('/api/support/tickets');
+
+    let html = `
+      <div class="mb-6 flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
+        <div>
+          <h2 class="text-xl font-bold text-slate-800 dark:text-white mb-1">Support Hub</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Track and manage your requests and bugs.</p>
+        </div>
+        ${currentUser.role !== 'superadmin' ? `
+          <button onclick="openCreateSupportTicket()" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm shadow-indigo-200 dark:shadow-none">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+            Create Request
+          </button>
+        ` : ''}
+      </div>
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ticket ID</th>
+                ${currentUser.role === 'superadmin' ? `<th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Shop</th>` : ''}
+                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Subject</th>
+                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type & Priority</th>
+                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+    `;
+
+    if (tickets.length === 0) {
+      html += `
+        <tr>
+          <td colspan="${currentUser.role === 'superadmin' ? '7' : '6'}" class="p-8 text-center text-slate-500 dark:text-slate-400">
+            No support requests found.
+          </td>
+        </tr>
+      `;
+    } else {
+      tickets.forEach(t => {
+        const statusColors = {
+          'open': 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+          'in_progress': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+          'resolved': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+          'closed': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
+        };
+        const priorityColors = {
+          'low': 'text-slate-500',
+          'medium': 'text-amber-500',
+          'high': 'text-rose-500 font-semibold'
+        };
+        const badgeClass = statusColors[t.status] || statusColors['open'];
+        const prioClass = priorityColors[t.priority] || priorityColors['medium'];
+
+        html += `
+          <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors group cursor-pointer" onclick="openTicketDetail(${t.id})">
+            <td class="p-4 text-sm font-medium text-slate-900 dark:text-slate-200">#${t.id}</td>
+            ${currentUser.role === 'superadmin' ? `<td class="p-4 text-sm text-slate-600 dark:text-slate-300">${t.shop_name}</td>` : ''}
+            <td class="p-4">
+              <div class="text-sm font-medium text-slate-900 dark:text-white capitalize">${t.subject}</div>
+              <div class="text-xs text-slate-500 truncate max-w-xs mt-0.5">${t.description}</div>
+            </td>
+            <td class="p-4">
+              <div class="text-sm text-slate-700 dark:text-slate-300 capitalize">${t.type}</div>
+              <div class="text-xs ${prioClass} capitalize mt-0.5">${t.priority} Priority</div>
+            </td>
+            <td class="p-4">
+              <span class="px-2.5 py-1 text-xs rounded-full font-medium capitalize ${badgeClass}">
+                ${t.status.replace('_', ' ')}
+              </span>
+            </td>
+            <td class="p-4 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">
+              ${new Date(t.created_at).toLocaleDateString()}
+            </td>
+            <td class="p-4 text-right">
+              <button class="p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="View Details" onclick="event.stopPropagation(); openTicketDetail(${t.id})">
+                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+              </button>
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    content.innerHTML = html;
+  } catch (e) {
+    console.error('Render Support Hub error:', e);
+    content.innerHTML = `<div class="p-6 text-red-500 bg-red-50 rounded-xl">Error loading tickets: ${e.message}</div>`;
+  }
+}
+
+function openCreateSupportTicket() {
+  const modal = document.createElement('div');
+  modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-slide-up">
+      <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
+        <h3 class="text-lg font-bold text-slate-800 dark:text-white">Create Support Request</h3>
+        <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      
+      <form id="create-ticket-form" class="p-6" onsubmit="submitSupportTicket(event, this)">
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Request Type</label>
+            <select name="type" required class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
+              <option value="help">General Help / Support</option>
+              <option value="bug">Report a Bug</option>
+              <option value="feature">Feature Request</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Priority</label>
+            <select name="priority" required class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
+              <option value="low">Low - Nice to have</option>
+              <option value="medium" selected>Medium - Needs attention</option>
+              <option value="high">High - Urgent / Blocking</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Subject</label>
+          <input type="text" name="subject" required placeholder="Brief summary of the issue" class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
+        </div>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
+          <textarea name="description" required rows="4" placeholder="Provide as much detail as possible..." class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none"></textarea>
+        </div>
+
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Attachment (Optional)</label>
+          <input type="file" name="attachment" accept="image/*,.pdf,.doc,.docx" class="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-400">
+          <p class="text-xs text-slate-400 mt-1">Accepts images, PDFs, or Word docs (Max 10MB).</p>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
+          <button type="button" onclick="this.closest('.fixed').remove()" class="px-5 py-2.5 rounded-xl font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors">Cancel</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-200 dark:shadow-none transition-all flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+            Submit Request
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function submitSupportTicket(e, form) {
+  e.preventDefault();
+  const btn = form.querySelector('button[type="submit"]');
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<svg class="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+
+  try {
+    const formData = new FormData(form);
+
+    // Use standard fetch directly because our global api() wrapper sets headers
+    // But FormData handles multipart/form-data boundary automatically. 
+    // Do not set Content-Type header when using FormData.
+    const res = await fetch('/api/support/tickets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('pos_token')}`
+      },
+      body: formData
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create ticket');
+
+    toast('Support ticket submitted successfully!', 'success');
+    form.closest('.fixed').remove();
+    renderSupportHub();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
+async function openTicketDetail(id) {
+  const modal = document.createElement('div');
+  modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex justify-end';
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 w-full max-w-xl h-full shadow-2xl animate-slide-left flex flex-col">
+      <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900">
+        <h3 class="text-lg font-bold text-slate-800 dark:text-white" id="ticket-detail-title">Loading Ticket #${id}...</h3>
+        <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      
+      <div class="flex-1 overflow-y-auto p-6" id="ticket-detail-content">
+        <div class="flex justify-center text-slate-400 my-10"><svg class="animate-spin h-8 w-8" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
+      </div>
+      
+      <div class="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900" id="ticket-detail-reply-box" style="display: none;">
+        <form onsubmit="submitTicketComment(event, this, ${id})" class="relative">
+          <textarea name="comment" required rows="2" placeholder="Write a reply..." class="w-full border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none text-sm pr-12"></textarea>
+          <button type="submit" class="absolute right-2 bottom-3 p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-full transition-colors">
+            <svg class="w-5 h-5 -rotate-90" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path></svg>
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  try {
+    const data = await api(`/api/support/tickets/${id}`);
+    const { ticket, comments } = data;
+
+    document.getElementById('ticket-detail-title').textContent = `Ticket #${ticket.id}`;
+
+    const statusColors = {
+      'open': 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+      'in_progress': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+      'resolved': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+      'closed': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
+    };
+
+    // Original Post
+    let threadHtml = `
+      <div class="mb-8">
+        <div class="flex justify-between items-start mb-4">
+          <div>
+            <h1 class="text-xl font-bold text-slate-900 dark:text-white mb-1">${ticket.subject}</h1>
+            <div class="flex gap-2 items-center text-xs">
+              <span class="px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[ticket.status] || statusColors['open']}">${ticket.status.replace('_', ' ')}</span>
+              <span class="text-slate-500 dark:text-slate-400 font-medium capitalize">${ticket.type} • ${ticket.priority} Priority</span>
+            </div>
+          </div>
+          ${currentUser.role === 'superadmin' ? `
+            <select onchange="updateTicketStatus(${ticket.id}, this.value)" class="text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+              <option value="open" ${ticket.status === 'open' ? 'selected' : ''}>Open</option>
+              <option value="in_progress" ${ticket.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+              <option value="resolved" ${ticket.status === 'resolved' ? 'selected' : ''}>Resolved</option>
+              <option value="closed" ${ticket.status === 'closed' ? 'selected' : ''}>Closed</option>
+            </select>
+          ` : ''}
+        </div>
+        
+        <div class="bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-500/10 rounded-2xl p-4">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-sm">
+              ${ticket.author_name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div class="text-sm font-semibold text-slate-900 dark:text-white">${ticket.author_name}</div>
+              <div class="text-xs text-slate-500">${new Date(ticket.created_at).toLocaleString()}</div>
+            </div>
+          </div>
+          <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">${ticket.description}</div>
+          
+          ${ticket.attachment_url ? `
+            <div class="mt-4 pt-4 border-t border-indigo-100 dark:border-indigo-500/10">
+              <a href="${ticket.attachment_url}" target="_blank" class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-500/20 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                View Attachment
+              </a>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+      
+      <div class="relative">
+        <div class="absolute inset-y-0 left-4 w-px bg-slate-200 dark:bg-slate-800"></div>
+        <div class="space-y-6" id="ticket-comments-list">
+    `;
+
+    // Comments
+    comments.forEach(c => {
+      const isSuper = c.author_role === 'superadmin';
+      threadHtml += `
+        <div class="relative pl-10">
+          <div class="absolute left-0 w-8 h-8 rounded-full border-4 border-white dark:border-slate-900 ${isSuper ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/50 dark:text-rose-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'} flex items-center justify-center font-bold text-xs" style="left: 0;">
+             ${c.author_name.charAt(0).toUpperCase()}
+          </div>
+          <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 sm:rounded-2xl rounded-xl p-4 shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                ${c.author_name}
+                ${isSuper ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-100 dark:border-rose-800 uppercase tracking-wider">Support Team</span>' : ''}
+              </div>
+              <div class="text-xs text-slate-500">${new Date(c.created_at).toLocaleString()}</div>
+            </div>
+            <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">${c.comment}</div>
+          </div>
+        </div>
+      `;
+    });
+
+    threadHtml += `</div></div>`;
+    document.getElementById('ticket-detail-content').innerHTML = threadHtml;
+
+    if (ticket.status !== 'closed') {
+      document.getElementById('ticket-detail-reply-box').style.display = 'block';
+    } else {
+      document.getElementById('ticket-detail-reply-box').outerHTML = `
+        <div class="p-4 text-center text-sm font-medium text-slate-500 bg-slate-50 dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
+           This ticket is closed. No further replies can be added.
+        </div>
+      `;
+    }
+
+  } catch (err) {
+    document.getElementById('ticket-detail-content').innerHTML = `<div class="p-4 text-red-500">Failed to load ticket details: ${err.message}</div>`;
+  }
+}
+
+async function submitTicketComment(e, form, ticketId) {
+  e.preventDefault();
+  const btn = form.querySelector('button[type="submit"]');
+  const textarea = form.querySelector('textarea');
+  const commentText = textarea.value;
+  btn.disabled = true;
+
+  try {
+    await api(`/api/support/tickets/${ticketId}/comments`, 'POST', { comment: commentText });
+
+    // Create new comment element optimistically or re-fetch
+    const list = document.getElementById('ticket-comments-list');
+    const isSuper = currentUser.role === 'superadmin';
+    const newCommentHtml = `
+      <div class="relative pl-10 animate-fade-in">
+        <div class="absolute left-0 w-8 h-8 rounded-full border-4 border-white dark:border-slate-900 ${isSuper ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/50 dark:text-rose-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'} flex items-center justify-center font-bold text-xs" style="left: 0;">
+           ${currentUser.name.charAt(0).toUpperCase()}
+        </div>
+        <div class="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/30 sm:rounded-2xl rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+              ${currentUser.name}
+              ${isSuper ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-100 dark:border-rose-800 uppercase tracking-wider">Support Team</span>' : ''}
+            </div>
+            <div class="text-xs text-indigo-500/70">Just now</div>
+          </div>
+          <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">${commentText}</div>
+        </div>
+      </div>
+    `;
+    list.insertAdjacentHTML('beforeend', newCommentHtml);
+
+    textarea.value = '';
+    const contentBox = document.getElementById('ticket-detail-content');
+    contentBox.scrollTop = contentBox.scrollHeight;
+
+    // Refresh background list softly
+    renderSupportHub();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function updateTicketStatus(ticketId, status) {
+  try {
+    await api(`/api/support/tickets/${ticketId}/status`, 'PATCH', { status });
+    toast('Ticket status updated');
+    renderSupportHub();
+  } catch (err) {
+    alert(err.message);
+  }
+}
 
 // ─── Start ───────────────────────────────────────────────────────────
 init();
