@@ -136,3 +136,12 @@ CREATE TABLE IF NOT EXISTS ticket_comments (
   FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);

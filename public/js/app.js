@@ -194,10 +194,11 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.remove(), 3200);
 }
 
-function openModal(title, bodyHtml) {
-  $c('modal-title').textContent = title;
-  $c('modal-body').innerHTML = bodyHtml;
-  $c('modal').classList.remove('hidden');
+function openModal(title, bodyHtml, sizeClass = 'max-w-lg') {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-box').className = `glass rounded-2xl w-full shadow-xl transition-all ${sizeClass}`;
+  document.getElementById('modal').classList.remove('hidden');
 }
 function closeModal() { $c('modal').classList.add('hidden'); }
 
@@ -1412,7 +1413,7 @@ async function renderUsers() {
       return `
         <div class="glass rounded-2xl p-6 border border-gray-200 dark:border-gray-800 hover:shadow-xl hover:-translate-y-1 transition-all bg-white dark:bg-gray-900 flex flex-col gap-4">
           <div class="flex flex-col items-center text-center gap-3">
-            <div class="w-16 h-16 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold shadow-lg relative">
+            <div class="w-16 h-16 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold mb-5 shadow-lg relative">
               ${initials}
               <span class="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-900 ${statusOk ? 'bg-emerald-400' : 'bg-red-400'}"></span>
             </div>
@@ -1492,8 +1493,8 @@ async function renderUsers() {
 function userFormHtml(u = {}) {
   return `
     <div class="space-y-4">
-      <div class="grid grid-cols-2 gap-4">
-        <div class="col-span-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="sm:col-span-2 lg:col-span-1">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Full Name *</label>
           <input id="uf-name" value="${u.name || ''}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Full name" />
         </div>
@@ -1514,17 +1515,16 @@ function userFormHtml(u = {}) {
           <input id="uf-email" value="${u.email || ''}" type="email" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="user@example.com" />
         </div>
         ${u.role === 'superadmin' ? '' : `
-        <div class="col-span-1">
+        <div>
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Role</label>
           <select id="uf-role" onchange="toggleUserPanelPicker(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
             <option value="pos_user" ${u.role === 'pos_user' ? 'selected' : ''}>POS User</option>
             <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>Manager</option>
             <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin/Shop Owner</option>
           </select>
-
         </div>
         `}
-        <div class="col-span-1">
+        <div class="${u.role === 'superadmin' ? 'sm:col-span-2 lg:col-span-1' : ''}">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Status</label>
           <select id="uf-status" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
             <option value="active" ${u.status === 'active' || !u.status ? 'selected' : ''}>Active</option>
@@ -1532,7 +1532,7 @@ function userFormHtml(u = {}) {
           </select>
         </div>
         ${u.role === 'superadmin' ? `<input type="hidden" id="uf-role" value="superadmin" /><input type="hidden" id="uf-shop" value="" />` : `
-        <div class="col-span-2">
+        <div class="sm:col-span-2">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Assign Shop</label>
           <select id="uf-shop" ${currentUser.role !== 'superadmin' ? 'disabled' : ''} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
             ${currentUser.role === 'superadmin'
@@ -1543,25 +1543,25 @@ function userFormHtml(u = {}) {
         </div>
         `}
         ${u.role === 'superadmin' ? '' : `
-        <div class="col-span-2" id="uf-panels-container" style="display: ${u.role === 'admin' ? 'none' : 'block'}">
+        <div class="sm:col-span-2 lg:col-span-3" id="uf-panels-container" style="display: ${u.role === 'admin' ? 'none' : 'block'}">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-3 font-bold uppercase tracking-wider">Allowed Panels (Inherited from Shop)</label>
-          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="panel-picker">
+          <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3" id="panel-picker">
             ${AVAILABLE_PANELS.map(p => `
-
               <div class="panel-tile cursor-pointer p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${u.allowed_panels?.includes(p.id) ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20' : 'border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700'}"
                    onclick="this.dataset.selected = this.dataset.selected === 'true' ? 'false' : 'true'; this.classList.toggle('border-indigo-500'); this.classList.toggle('bg-indigo-50/50'); this.classList.toggle('dark:bg-indigo-900/20')"
                    data-id="${p.id}" data-selected="${u.allowed_panels?.includes(p.id)}">
                 <div class="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm group-hover:scale-110 transition-transform">
                   <svg class="w-4 h-4 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${p.icon}"></path></svg>
                 </div>
-                <span class="text-[10px] font-bold uppercase tracking-tight text-slate-600 dark:text-slate-400">${p.name}</span>
+                <span class="text-[9px] font-bold uppercase tracking-tight text-slate-600 dark:text-slate-400 text-center">${p.label}</span>
               </div>
             `).join('')}
           </div>
         </div>
         `}
       </div>
-    </div>`;
+    </div>
+  `;
 }
 function toggleUserPanelPicker(role) {
   const container = document.getElementById('uf-panels-container');
@@ -1597,15 +1597,11 @@ function togglePanel(el) {
 
 
 function openCreateUser(shopId = null) {
-  openModal('Create User', userFormHtml({ shop_id: shopId }) + `<button onclick="saveUser()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Create User</button>`);
-  if (shopId) {
-    const shopSelect = $c('uf-shop');
-    if (shopSelect) shopSelect.value = shopId;
-  }
+  openModal('Create User', userFormHtml({ shop_id: shopId }) + `<button onclick="saveUser()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Create User</button>`, 'max-w-2xl');
 }
 
 function openEditUser(id, name, username, email, phone, role, allowed_panels, shop_id, status) {
-  openModal('Edit User', userFormHtml({ id, name, username, email, phone, role, allowed_panels, shop_id, status }) + `<button onclick="saveUser(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update User</button>`);
+  openModal('Edit User', userFormHtml({ id, name, username, email, phone, role, allowed_panels, shop_id, status }) + `<button onclick="saveUser(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update User</button>`, 'max-w-2xl');
 }
 
 async function saveUser(id) {

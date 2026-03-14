@@ -18,6 +18,23 @@ if (!tableExists) {
     const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
     db.exec(schema);
     console.log('✅ Database initialized.');
+} else {
+    // Check for activity_logs specifically (added later)
+    const logsExist = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'").get();
+    if (!logsExist) {
+        console.log('🔧 Updating database: Adding activity_logs table...');
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                details TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+            );
+        `);
+        console.log('✅ activity_logs table added.');
+    }
 }
 
 

@@ -4,10 +4,10 @@ const { requireSuperAdmin } = require('../middleware/auth');
 const router = express.Router();
 
 // Helper for logging actions
-function logAdminAction(storeId, action, details) {
+function logAdminAction(shopId, action, details) {
     try {
-        db.prepare('INSERT INTO activity_logs (store_id, action, details) VALUES (?, ?, ?)')
-            .run(storeId, action, details);
+        db.prepare('INSERT INTO activity_logs (shop_id, action, details) VALUES (?, ?, ?)')
+            .run(shopId, action, details);
     } catch (e) {
         console.error('Failed to log admin action:', e);
     }
@@ -143,7 +143,7 @@ router.get('/activity', requireSuperAdmin, (req, res) => {
         const logs = db.prepare(`
             SELECT a.id, a.action, a.details, a.created_at, s.name as store_name
             FROM activity_logs a
-            LEFT JOIN shops s ON a.store_id = s.id
+            LEFT JOIN shops s ON a.shop_id = s.id
             ORDER BY a.created_at DESC LIMIT 100
         `).all();
         res.json(logs);
@@ -182,7 +182,7 @@ router.get('/support-tickets', requireSuperAdmin, (req, res) => {
         const tickets = db.prepare(`
             SELECT t.id, t.issue_type, t.status, t.assigned_to, t.created_at, s.name as store_name
             FROM support_tickets t
-            LEFT JOIN shops s ON t.store_id = s.id
+            LEFT JOIN shops s ON t.shop_id = s.id
             ORDER BY t.status DESC, t.created_at DESC
         `).all();
         res.json(tickets);

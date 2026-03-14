@@ -37,7 +37,7 @@ router.post('/', requireSuperAdmin, async (req, res) => {
                 .run(`${name} Admin`, adminUsername, hash, 'admin', shopId, panelsJson);
 
             // 3. Log the creation in Activity Logs
-            db.prepare('INSERT INTO activity_logs (store_id, action, details) VALUES (?, ?, ?)')
+            db.prepare('INSERT INTO activity_logs (shop_id, action, details) VALUES (?, ?, ?)')
                 .run(shopId, 'Store Created', `Store ${name} created by System Owner`);
 
             return shopId;
