@@ -21,6 +21,7 @@ app.use('/api/brands', require('./routes/brands'));
 app.use('/api/products', require('./routes/products'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/expenses', require('./routes/expenses'));
+app.use('/api/expense-categories', require('./routes/expense-categories'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));

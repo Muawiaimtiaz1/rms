@@ -6,6 +6,7 @@ function seed() {
 
     // Clear all tables in correct order
     const tables = [
+        'expense_categories',
         'brand_expense_payments',
         'sale_items',
         'sales',
@@ -68,6 +69,20 @@ function seed() {
         db.prepare(
             'INSERT INTO products (sku, name, category, brand_id, user_id, shop_id, buying_price, stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run('IPH-15', 'iPhone 15', 'Mobile', b2s2, admin2Id.lastInsertRowid, shop2Id, 150000, 10, 2);
+        // 9. Seed Default Expense Categories
+        const defaults = [
+            ['Electricity', '⚡', 'bg-yellow-900/40 text-yellow-300'],
+            ['Fuel', '⛽', 'bg-orange-900/40 text-orange-300'],
+            ['Rent', '🏠', 'bg-blue-900/40 text-blue-300'],
+            ['Salary', '👷', 'bg-purple-900/40 text-purple-300'],
+            ['Other', '📦', 'bg-slate-700 text-slate-300']
+        ];
+        const insertCat = db.prepare('INSERT INTO expense_categories (shop_id, name, emoji, color_class) VALUES (?, ?, ?, ?)');
+        [shop1Id, shop2Id].forEach(sid => {
+            defaults.forEach(([name, emoji, color]) => {
+                insertCat.run(sid, name, emoji, color);
+            });
+        });
 
         console.log('✅ Seeding Complete!');
         console.log('-----------------------------------');

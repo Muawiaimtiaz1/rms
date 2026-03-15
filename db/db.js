@@ -44,6 +44,41 @@ if (!tableExists) {
         db.exec("ALTER TABLE products ADD COLUMN is_deleted INTEGER DEFAULT 0;");
         console.log('✅ is_deleted column added.');
     }
+
+    // Check for expense_categories (new feature)
+    const catTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='expense_categories'").get();
+    if (!catTableExists) {
+        console.log('🔧 Updating database: Adding expense_categories table...');
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS expense_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                emoji TEXT DEFAULT '📦',
+                color_class TEXT DEFAULT 'bg-slate-700 text-slate-300',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+            );
+        `);
+
+        // Seed default categories
+        const defaults = [
+            ['Electricity', '⚡', 'bg-yellow-900/40 text-yellow-300'],
+            ['Fuel', '⛽', 'bg-orange-900/40 text-orange-300'],
+            ['Rent', '🏠', 'bg-blue-900/40 text-blue-300'],
+            ['Salary', '👷', 'bg-purple-900/40 text-purple-300'],
+            ['Other', '📦', 'bg-slate-700 text-slate-300']
+        ];
+
+        const insert = db.prepare('INSERT INTO expense_categories (shop_id, name, emoji, color_class) SELECT id, ?, ?, ? FROM shops');
+        const transaction = db.transaction(() => {
+            for (const [name, emoji, color] of defaults) {
+                insert.run(name, emoji, color);
+            }
+        });
+        transaction();
+        console.log('✅ expense_categories table added and seeded.');
+    }
 }
 
 

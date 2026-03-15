@@ -23,12 +23,9 @@ router.post('/', requireAuth, (req, res) => {
     const { title, category, amount, note, date } = req.body;
     if (!title || !amount) return res.status(400).json({ error: 'title and amount required' });
 
-    const validCategories = ['electricity', 'fuel', 'rent', 'salary', 'other'];
-    const cat = validCategories.includes(category) ? category : 'other';
-
     const result = db.prepare(
         'INSERT INTO expenses (user_id, shop_id, title, category, amount, note, date) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(req.session.user.id, req.session.user.shop_id, title, cat, parseFloat(amount), note || null, date || new Date().toISOString().slice(0, 10));
+    ).run(req.session.user.id, req.session.user.shop_id, title, category || 'Other', parseFloat(amount), note || null, date || new Date().toISOString().slice(0, 10));
 
     res.json({ ok: true, id: result.lastInsertRowid });
 });
@@ -73,8 +70,6 @@ router.put('/:id', requireAuth, (req, res) => {
     if (!title || !amount) return res.status(400).json({ error: 'title and amount required' });
 
     const expId = parseInt(req.params.id);
-    const validCategories = ['electricity', 'fuel', 'rent', 'salary', 'other'];
-    const cat = validCategories.includes(category) ? category : 'other';
 
     const exp = db.prepare('SELECT id FROM expenses WHERE id = ? AND shop_id = ?').get(expId, req.session.user.shop_id);
     if (!exp) return res.status(404).json({ error: 'Expense not found' });
@@ -83,7 +78,7 @@ router.put('/:id', requireAuth, (req, res) => {
         UPDATE expenses 
         SET title = ?, category = ?, amount = ?, note = ?, date = ? 
         WHERE id = ? AND shop_id = ?
-    `).run(title, cat, parseFloat(amount), note || null, date || new Date().toISOString().slice(0, 10), expId, req.session.user.shop_id);
+    `).run(title, category || 'Other', parseFloat(amount), note || null, date || new Date().toISOString().slice(0, 10), expId, req.session.user.shop_id);
 
     res.json({ ok: true });
 });

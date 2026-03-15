@@ -17,6 +17,7 @@ let allProducts = [];
 let _expenseView = 'list';
 let _expenseMonth = new Date().toISOString().slice(0, 7);
 let _expensePage = 1;
+let _expenseCategories = [];
 let shops = [];
 let managedShopId = null; // ─── Setup ────────────────────────────────────────────────────────
 const AVAILABLE_PANELS = [
@@ -146,6 +147,48 @@ function navigate(page) {
 async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });
   window.location.href = '/';
+}
+
+function openSettings() {
+  const html = `
+    <div class="space-y-6">
+      <div class="flex flex-col items-center text-center p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+        <div class="w-20 h-20 rounded-2xl bg-indigo-600 flex items-center justify-center text-white text-3xl font-bold mb-4 shadow-lg">
+          ${(currentUser.name || 'A')[0]}
+        </div>
+        <div>
+          <h4 class="text-xl font-bold text-slate-800 dark:text-white">${currentUser.name}</h4>
+          <p class="text-indigo-600 dark:text-indigo-400 font-medium font-mono text-sm">@${currentUser.username}</p>
+        </div>
+      </div>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+        <div class="p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+          <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Email</label>
+          <div class="font-medium dark:text-slate-200">${currentUser.email || 'Not provided'}</div>
+        </div>
+        <div class="p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+          <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Phone</label>
+          <div class="font-medium dark:text-slate-200">${currentUser.phone || 'Not provided'}</div>
+        </div>
+        <div class="p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+          <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Role</label>
+          <div class="font-medium dark:text-slate-200 uppercase">${currentUser.role.replace('_', ' ')}</div>
+        </div>
+        <div class="p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+          <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Status</label>
+          <div class="font-medium text-emerald-600 dark:text-emerald-400 uppercase">${currentUser.status || 'Active'}</div>
+        </div>
+      </div>
+
+      <div class="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30">
+        <p class="text-xs text-amber-700 dark:text-amber-400">Settings currently only allows viewing profile details. Password change and other settings are coming soon.</p>
+      </div>
+      
+      <button onclick="logout()" class="w-full py-3 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-bold border border-rose-100 dark:border-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-all">Sign Out</button>
+    </div>
+  `;
+  openModal("User Settings", html, "max-w-md");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -1431,10 +1474,13 @@ async function doMarkSalePaid(saleId, currentReceived) {
 // ─── Expenses ───────────────────────────────────────────────────────
 // ─── Expenses ───────────────────────────────────────────────────────
 async function renderExpenses() {
-  const [allExpenses, sharesRes] = await Promise.all([
+  const [allExpenses, sharesRes, categories] = await Promise.all([
     api('/api/expenses'),
-    api('/api/brands/expense-shares')
+    api('/api/brands/expense-shares'),
+    api('/api/expense-categories')
   ]);
+
+  _expenseCategories = categories;
 
   // Sort by date desc and filter by selected month (YYYY-MM)
   const filtered = allExpenses.sort((a, b) => new Date(b.date) - new Date(a.date)).filter(e => e.date.startsWith(_expenseMonth));
@@ -1465,11 +1511,7 @@ async function renderExpenses() {
           <div class="grid grid-cols-2 gap-4">
             <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Category</label>
               <select id="exp-cat" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all">
-                <option value="electricity">⚡ Electricity</option>
-                <option value="fuel">⛽ Fuel</option>
-                <option value="rent">🏠 Rent</option>
-                <option value="salary">🛠 Salary</option>
-                <option value="other">📦 Other</option>
+                ${_expenseCategories.map(c => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join('')}
               </select></div>
             <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Date</label>
               <input id="exp-date" type="date" value="${new Date().toISOString().slice(0, 10)}" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all" /></div>
@@ -1505,6 +1547,10 @@ async function renderExpenses() {
           <button onclick="openPayBrandExpenses()" class="flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/10 transition-all hover:-translate-y-0.5 active:scale-95">
              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
              Pay Brand
+          </button>
+          
+          <button onclick="openManageCategories()" title="Manage Categories" class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 dark:hover:border-indigo-900 shadow-sm transition-all active:scale-95 group">
+            <svg class="w-6 h-6 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           </button>
           
           <button onclick="toggleExpenseView('add')" class="flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-700 hover:from-indigo-500 hover:to-blue-600 text-white text-sm font-bold shadow-lg shadow-indigo-900/10 transition-all hover:-translate-y-0.5 active:scale-95">
@@ -1701,8 +1747,60 @@ async function doPayBrandExpense(brandId, month) {
   renderExpenses();
 }
 
-function catBadge(c) { return { electricity: 'bg-yellow-900/40 text-yellow-300', fuel: 'bg-orange-900/40 text-orange-300', rent: 'bg-blue-900/40 text-blue-300', salary: 'bg-purple-900/40 text-purple-300', other: 'bg-slate-700 text-slate-300' }[c] || 'bg-slate-700 text-slate-300'; }
-function catEmoji(c) { return { electricity: '⚡', fuel: '⛽', rent: '🏠', salary: '👷', other: '📦' }[c] || '📦'; }
+function catBadge(c) {
+  const cat = _expenseCategories.find(x => x.name === c);
+  return cat ? cat.color_class : 'bg-slate-700 text-slate-300';
+}
+function catEmoji(c) {
+  const cat = _expenseCategories.find(x => x.name === c);
+  return cat ? cat.emoji : '📦';
+}
+
+function openManageCategories() {
+  const html = `
+    <div class="space-y-4">
+      <div class="flex items-center gap-2 mb-4">
+        <input id="new-cat-name" placeholder="Category Name" class="flex-1 px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:border-indigo-500 transition-all" />
+        <input id="new-cat-emoji" placeholder="Emoji" class="w-16 px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-center text-sm focus:outline-none focus:border-indigo-500 transition-all" />
+        <button onclick="addExpenseCategory()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all">Add</button>
+      </div>
+      <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+        ${_expenseCategories.map(c => `
+          <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900/50">
+            <div class="flex items-center gap-3">
+              <span class="text-xl">${c.emoji}</span>
+              <span class="text-sm font-medium text-slate-700 dark:text-slate-200">${c.name}</span>
+            </div>
+            <button onclick="deleteExpenseCategory(${c.id})" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  openModal("Manage Expense Categories", html, "max-w-md");
+}
+
+async function addExpenseCategory() {
+  const name = $c('new-cat-name').value.trim();
+  const emoji = $c('new-cat-emoji').value.trim();
+  if (!name) return toast('Name required', 'error');
+  const r = await api('/api/expense-categories', 'POST', { name, emoji });
+  if (r.error) return toast(r.error, 'error');
+  toast('Category added!');
+  closeModal();
+  renderExpenses();
+}
+
+async function deleteExpenseCategory(id) {
+  if (!confirm('Delete this category? it should only be deleted if not in use.')) return;
+  const r = await api('/api/expense-categories/' + id, 'DELETE');
+  if (r.error) return toast(r.error, 'error');
+  toast('Category removed');
+  closeModal();
+  renderExpenses();
+}
 
 async function saveExpense() {
   const payload = {
@@ -1736,11 +1834,7 @@ async function openEditExpense(id) {
         <input id="edit-exp-title" value="${e.title}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all" /></div>
       <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Category</label>
         <select id="edit-exp-cat" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all">
-          <option value="electricity" ${e.category === 'electricity' ? 'selected' : ''}>⚡ Electricity</option>
-          <option value="fuel" ${e.category === 'fuel' ? 'selected' : ''}>⛽ Fuel</option>
-          <option value="rent" ${e.category === 'rent' ? 'selected' : ''}>🏠 Rent</option>
-          <option value="salary" ${e.category === 'salary' ? 'selected' : ''}>🛠 Salary</option>
-          <option value="other" ${e.category === 'other' ? 'selected' : ''}>📦 Other</option>
+          ${_expenseCategories.map(c => `<option value="${c.name}" ${e.category === c.name ? 'selected' : ''}>${c.emoji} ${c.name}</option>`).join('')}
         </select></div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Amount (Rs.) *</label>
