@@ -71,7 +71,21 @@ router.post('/logout', (req, res) => {
 // GET /api/auth/me
 router.get('/me', (req, res) => {
     if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-    res.json({ user: req.session.user });
+    
+    let total_users = 1;
+    let total_brands = 1;
+
+    try {
+        if (req.session.user.shop_id) {
+            total_users = db.prepare('SELECT COUNT(*) as c FROM users WHERE shop_id = ?').get(req.session.user.shop_id).c;
+            total_brands = db.prepare('SELECT COUNT(*) as c FROM brands WHERE shop_id = ?').get(req.session.user.shop_id).c;
+        } else {
+            total_users = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+            total_brands = db.prepare('SELECT COUNT(*) as c FROM brands').get().c;
+        }
+    } catch(e) { console.error('Error fetching counts', e); }
+
+    res.json({ user: req.session.user, total_users, total_brands });
 });
 
 // POST /api/auth/forgot-password  (superadmin resets password for a user by username)

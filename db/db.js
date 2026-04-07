@@ -1,8 +1,22 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 
-const DB_PATH = path.join(__dirname, 'pos.db');
+// Determine path based on environment (Electron vs Node)
+const isElectron = !!process.versions.electron;
+let dbDir = __dirname;
+
+if (isElectron) {
+    const { app } = require('electron');
+    // Store data in the user application data directory
+    dbDir = path.join(app.getPath('userData'), 'db');
+    if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(dbDir, { recursive: true });
+    }
+}
+
+const DB_PATH = path.join(dbDir, 'pos.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
 const db = new Database(DB_PATH);
@@ -17,8 +31,59 @@ if (!tableExists) {
     console.log('🌱 Initializing fresh database...');
     const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
     db.exec(schema);
-    console.log('✅ Database initialized.');
+    
+    // Auto-seed default shop, admin, and subscription
+    db.transaction(() => {
+        const hash = bcrypt.hashSync('admin123', 10);
+        const panels = JSON.stringify(['dashboard', 'brands', 'products', 'pos', 'sales-history', 'expenses']);
+        const longTermDate = '2099-12-31';
+        
+        // 1. Create default shop
+        const shopId = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)')
+                         .run('Default Shop', panels).lastInsertRowid;
+        
+        // 2. Create Super Admin (Bypasses all checks)
+        db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)')
+          .run('Global Owner', 'owner', hash, 'superadmin', null);
+
+        // 3. Create default shop Admin
+        db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)')
+          .run('Administrator', 'admin', hash, 'admin', shopId);
+
+        // 4. Create Active Subscription (Necessary for 'admin' role login)
+        db.prepare('INSERT INTO subscriptions (shop_id, amount, type, start_date, end_date, month) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(shopId, 0, '1_year', '2024-01-01', longTermDate, '2024-01');
+    })();
+    
+    console.log('✅ Database initialized with:');
+    console.log('   - SuperAdmin: owner / admin123');
+    console.log('   - ShopAdmin:  admin / admin123');
 } else {
+    // Migration check: Ensure 'owner' account and lifetime subscription exist
+    const ownerExists = db.prepare("SELECT id FROM users WHERE username = 'owner'").get();
+    if (!ownerExists) {
+        console.log('🔧 SuperAdmin missing. Seeding "owner" and lifetime subscription...');
+        db.transaction(() => {
+            const hash = bcrypt.hashSync('admin123', 10);
+            const panels = JSON.stringify(['dashboard', 'brands', 'products', 'pos', 'sales-history', 'expenses']);
+            const longTermDate = '2099-12-31';
+
+            let shopId = db.prepare("SELECT id FROM shops LIMIT 1").get()?.id;
+            if (!shopId) {
+                shopId = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)')
+                           .run('Default Shop', panels).lastInsertRowid;
+            }
+            
+            // Add Super Admin
+            db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)')
+              .run('Global Owner', 'owner', hash, 'superadmin', null);
+
+            // Add Lifetime Subscription for the default shop (so 'admin' works too)
+            db.prepare('INSERT INTO subscriptions (shop_id, amount, type, start_date, end_date, month) VALUES (?, ?, ?, ?, ?, ?)')
+              .run(shopId, 0, '1_year', '2024-01-01', longTermDate, '2024-01');
+        })();
+        console.log('✅ SuperAdmin ("owner") and Subscription added.');
+    }
     // Check for activity_logs specifically (added later)
     const logsExist = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'").get();
     if (!logsExist) {
@@ -43,6 +108,14 @@ if (!tableExists) {
         console.log('🔧 Updating database: Adding is_deleted to products...');
         db.exec("ALTER TABLE products ADD COLUMN is_deleted INTEGER DEFAULT 0;");
         console.log('✅ is_deleted column added.');
+    }
+
+    // Check for selling_price in products
+    const sellingPriceExists = productCols.some(col => col.name === 'selling_price');
+    if (!sellingPriceExists) {
+        console.log('🔧 Updating database: Adding selling_price to products...');
+        db.exec("ALTER TABLE products ADD COLUMN selling_price REAL NOT NULL DEFAULT 0;");
+        console.log('✅ selling_price column added.');
     }
 
     // Check for expense_categories (new feature)

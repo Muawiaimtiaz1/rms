@@ -26,8 +26,7 @@ const AVAILABLE_PANELS = [
   { id: 'brands', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>', label: 'Brand Management' },
   { id: 'products', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>', label: 'Products & Inventory' },
   { id: 'sales-history', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>', label: 'Sales Operations' },
-  { id: 'expenses', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>', label: 'Expense Management' },
-  { id: 'support', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>', label: 'Support Hub' }
+  { id: 'expenses', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>', label: 'Expense Management' }
 ];
 
 // ─── Init ────────────────────────────────────────────────────────────
@@ -37,6 +36,8 @@ async function init() {
     if (!res.ok) { window.location.href = '/'; return; }
     const data = await res.json();
     currentUser = data.user;
+    currentUser.total_users = data.total_users || 1;
+    currentUser.total_brands = data.total_brands || 1;
     document.getElementById('user-name-sidebar').textContent = currentUser.name || currentUser.username;
     document.getElementById('user-role-sidebar').textContent = currentUser.role;
     document.getElementById('user-avatar').textContent = (currentUser.name || currentUser.username)[0].toUpperCase();
@@ -48,9 +49,13 @@ async function init() {
         if (currentUser.role === 'superadmin') {
           // Master Admin only sees Dashboard (Global stats later)
           el.style.display = p.id === 'dashboard' ? 'flex' : 'none';
-        } else if (p.id === 'support' || (currentUser.allowed_panels && currentUser.allowed_panels.includes(p.id))) {
+        } else if (currentUser.allowed_panels && currentUser.allowed_panels.includes(p.id)) {
           el.style.display = 'flex';
         } else {
+          el.style.display = 'none';
+        }
+
+        if (p.id === 'brands' && currentUser.total_brands <= 1) {
           el.style.display = 'none';
         }
       }
@@ -65,7 +70,9 @@ async function init() {
       if (!currentUser.allowed_panels || !currentUser.allowed_panels.includes('sales-history')) document.getElementById('nav-sales-pending').style.display = 'none';
     }
 
-    if (currentUser.role === 'superadmin' || currentUser.role === 'admin') document.getElementById('nav-users-wrap').classList.remove('hidden');
+    if ((currentUser.role === 'superadmin' || currentUser.role === 'admin') && currentUser.total_users > 1) {
+      document.getElementById('nav-users-wrap').classList.remove('hidden');
+    }
     if (currentUser.role === 'superadmin') {
       document.getElementById('nav-shops-wrap').classList.remove('hidden');
       const sData = await fetch('/api/shops').then(r => r.json());
@@ -91,7 +98,7 @@ function navigate(page) {
     const parentMap = { 'products-low-stock': 'products', 'sales-pending': 'sales-history' };
     const parent = parentMap[page];
     if (parent && (!currentUser.allowed_panels || !currentUser.allowed_panels.includes(parent))) return false;
-    if (!parent && page !== 'support' && page !== 'users' && (!currentUser.allowed_panels || !currentUser.allowed_panels.includes(page))) return false;
+    if (!parent && page !== 'users' && (!currentUser.allowed_panels || !currentUser.allowed_panels.includes(page))) return false;
   }
 
   localStorage.setItem('pos_page', page);
@@ -107,8 +114,7 @@ function navigate(page) {
     expenses: 'Expenses',
     users: 'Users (Admin)',
     subscriptions: 'Subscription Tracking',
-    hierarchy: 'Master Platform Hierarchy',
-    support: 'Support Hub'
+    hierarchy: 'Master Platform Hierarchy'
   };
   if (page === 'dashboard' && currentUser.role === 'superadmin') titles.dashboard = 'System Overview (Master Admin)';
   document.getElementById('page-title').textContent = titles[page] || page;
@@ -125,8 +131,7 @@ function navigate(page) {
     expenses: renderExpenses,
     users: renderUsers,
     subscriptions: renderSubscriptions,
-    hierarchy: renderHierarchy,
-    support: renderSupportHub
+    hierarchy: renderHierarchy
   };
   if (pages[page]) pages[page]();
 
@@ -632,6 +637,7 @@ async function renderProducts(onlyLowStock = false) {
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Category</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Brand</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Cost</th>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Selling Price</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Stock</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase text-right">Actions</th>
         </tr></thead>
@@ -643,6 +649,7 @@ async function renderProducts(onlyLowStock = false) {
               <td class="px-5 py-4"><span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs">${p.category}</span></td>
               <td class="px-5 py-4 text-slate-600 dark:text-slate-400">${p.brand_name || '—'}</td>
               <td class="px-5 py-4 text-slate-600 dark:text-slate-400">Rs. ${p.buying_price}</td>
+              <td class="px-5 py-4 text-slate-600 dark:text-slate-400">Rs. ${p.selling_price || 0}</td>
               <td class="px-5 py-4">
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${p.stock > p.min_stock_level ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : p.stock > 0 ? 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300' : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'}">
                   ${p.stock} units
@@ -653,7 +660,7 @@ async function renderProducts(onlyLowStock = false) {
                 <button onclick="adjustStock(${p.id},'${p.name.replace(/'/g, "\\'")}',${p.stock})" class="px-2 py-1 text-xs rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-all border border-slate-200 dark:border-transparent">Stock</button>
                 <button onclick="openEditProduct(${p.id})" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all border border-indigo-200 dark:border-transparent">Edit</button>
               </td>
-            </tr>`).join('') : `<tr><td colspan="7" class="px-6 py-12 text-center text-slate-500">No products. Add brands first, then products.</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="8" class="px-6 py-12 text-center text-slate-500">No products. Add brands first, then products.</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -688,8 +695,11 @@ function productFormHtml(p = {}, brands = []) {
           <input id="pf-category" value="${p.category || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="e.g. Electronics" /></div>
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Product Name *</label>
           <input id="pf-name" value="${p.name || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Product name" /></div>
-        <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Brand *</label>
-          <select id="pf-brand" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm"><option value="">Select brand</option>${brandOptions}</select></div>
+        ${brands.length <= 1 
+          ? `<input type="hidden" id="pf-brand" value="${brands[0] ? brands[0].id : ''}" />` 
+          : `<div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Brand *</label>
+             <select id="pf-brand" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm"><option value="">Select brand</option>${brandOptions}</select></div>`
+        }
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Description</label>
           <input id="pf-desc" value="${p.description || ''}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Optional description" /></div>
         
@@ -698,8 +708,9 @@ function productFormHtml(p = {}, brands = []) {
         </div>
 
         ${numInput('pf-buy', 'Cost Price', p.buying_price || 0)}
+        ${numInput('pf-sell', 'Selling Price', p.selling_price || 0)}
         ${numInput('pf-stock', 'Initial Stock', p.stock || 0)}
-        <div class="col-span-2">
+        <div class="col-span-2 sm:col-span-1">
            ${numInput('pf-min-stock', 'Minimum Stock Level', p.min_stock_level || 0, 'Alert threshold')}
         </div>
       </div>
@@ -726,10 +737,15 @@ async function saveProduct(id) {
     description: $c('pf-desc').value.trim(),
     brand_id: parseInt($c('pf-brand').value),
     buying_price: parseFloat($c('pf-buy').value),
+    selling_price: parseFloat($c('pf-sell').value),
     stock: parseInt($c('pf-stock').value),
     min_stock_level: parseInt($c('pf-min-stock').value)
   };
   if (!payload.sku || !payload.category || !payload.name || !payload.brand_id) return toast('SKU, Category, Name, and Brand required', 'error');
+  if (isNaN(payload.buying_price) || payload.buying_price <= 0) return toast('Cost price must be greater than 0', 'error');
+  if (isNaN(payload.selling_price) || payload.selling_price <= 0) return toast('Selling price must be greater than 0', 'error');
+  if (payload.selling_price < payload.buying_price) return toast('Selling price cannot be less than cost price', 'error');
+  
   const r = id ? await api(`/api/products/${id}`, 'PUT', payload) : await api('/api/products', 'POST', payload);
   if (r.error) return toast(r.error, 'error');
   closeModal(); toast('Product saved!'); renderProducts();
@@ -920,7 +936,7 @@ function addToCart(productId) {
         </div>
         <div class="space-y-2">
           <label class="block text-sm font-bold text-slate-700 dark:text-slate-300">Selling Price (Rs)</label>
-          <input id="add-cart-price" type="number" value="${product.buying_price || 0}" min="0" class="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-center text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+          <input id="add-cart-price" type="number" value="${product.selling_price || 0}" min="0" class="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-center text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
         </div>
       </div>
 
@@ -942,7 +958,8 @@ function commitAddCart(productId) {
   const product = allProducts.find(p => p.id === productId);
 
   if (isNaN(qty) || qty <= 0) return toast('Invalid quantity', 'error');
-  if (isNaN(price) || price < 0) return toast('Invalid price', 'error');
+  if (isNaN(price) || price <= 0) return toast('Selling price must be greater than 0', 'error');
+  if (price < product.buying_price) return toast('Selling price cannot be less than cost price', 'error');
   if (qty > product.stock) return toast(`Only ${product.stock} items available`, 'error');
 
   const existing = cart.find(c => c.product_id === productId);
@@ -2838,397 +2855,6 @@ $c('modal').addEventListener('click', e => {
     closeModal();
   }
 });
-
-// ─── Support Hub (Shop Owner & Shared) ──────────────────────────────────
-async function renderSupportHub() {
-  const content = document.getElementById('page-content');
-  content.innerHTML = '<div class="flex justify-center p-12 text-slate-400">Loading support dashboard...</div>';
-
-  try {
-    const tickets = await api('/api/support/tickets');
-
-    let html = `
-      <div class="mb-6 flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
-        <div>
-          <h2 class="text-xl font-bold text-slate-800 dark:text-white mb-1">Support Hub</h2>
-          <p class="text-sm text-slate-500 dark:text-slate-400">Track and manage your requests and bugs.</p>
-        </div>
-        ${currentUser.role !== 'superadmin' ? `
-          <button onclick="openCreateSupportTicket()" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm shadow-indigo-200 dark:shadow-none">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-            Create Request
-          </button>
-        ` : ''}
-      </div>
-
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr class="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ticket ID</th>
-                ${currentUser.role === 'superadmin' ? `<th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Shop</th>` : ''}
-                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Subject</th>
-                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type & Priority</th>
-                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
-                <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-    `;
-
-    if (tickets.length === 0) {
-      html += `
-        <tr>
-          <td colspan="${currentUser.role === 'superadmin' ? '7' : '6'}" class="p-8 text-center text-slate-500 dark:text-slate-400">
-            No support requests found.
-          </td>
-        </tr>
-      `;
-    } else {
-      tickets.forEach(t => {
-        const statusColors = {
-          'open': 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
-          'in_progress': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-          'resolved': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-          'closed': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
-        };
-        const priorityColors = {
-          'low': 'text-slate-500',
-          'medium': 'text-amber-500',
-          'high': 'text-rose-500 font-semibold'
-        };
-        const badgeClass = statusColors[t.status] || statusColors['open'];
-        const prioClass = priorityColors[t.priority] || priorityColors['medium'];
-
-        html += `
-          <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors group cursor-pointer" onclick="openTicketDetail(${t.id})">
-            <td class="p-4 text-sm font-medium text-slate-900 dark:text-slate-200">#${t.id}</td>
-            ${currentUser.role === 'superadmin' ? `<td class="p-4 text-sm text-slate-600 dark:text-slate-300">${t.shop_name}</td>` : ''}
-            <td class="p-4">
-              <div class="text-sm font-medium text-slate-900 dark:text-white capitalize">${t.subject}</div>
-              <div class="text-xs text-slate-500 truncate max-w-xs mt-0.5">${t.description}</div>
-            </td>
-            <td class="p-4">
-              <div class="text-sm text-slate-700 dark:text-slate-300 capitalize">${t.type}</div>
-              <div class="text-xs ${prioClass} capitalize mt-0.5">${t.priority} Priority</div>
-            </td>
-            <td class="p-4">
-              <span class="px-2.5 py-1 text-xs rounded-full font-medium capitalize ${badgeClass}">
-                ${t.status.replace('_', ' ')}
-              </span>
-            </td>
-            <td class="p-4 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">
-              ${new Date(t.created_at).toLocaleDateString()}
-            </td>
-            <td class="p-4 text-right">
-              <button class="p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="View Details" onclick="event.stopPropagation(); openTicketDetail(${t.id})">
-                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-              </button>
-            </td>
-          </tr>
-        `;
-      });
-    }
-
-    html += `
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-    content.innerHTML = html;
-  } catch (e) {
-    console.error('Render Support Hub error:', e);
-    content.innerHTML = `<div class="p-6 text-red-500 bg-red-50 rounded-xl">Error loading tickets: ${e.message}</div>`;
-  }
-}
-
-function openCreateSupportTicket() {
-  const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
-  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
-
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-slide-up">
-      <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
-        <h3 class="text-lg font-bold text-slate-800 dark:text-white">Create Support Request</h3>
-        <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-        </button>
-      </div>
-      
-      <form id="create-ticket-form" class="p-6" onsubmit="submitSupportTicket(event, this)">
-        <div class="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Request Type</label>
-            <select name="type" required class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-              <option value="help">General Help / Support</option>
-              <option value="bug">Report a Bug</option>
-              <option value="feature">Feature Request</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Priority</label>
-            <select name="priority" required class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-              <option value="low">Low - Nice to have</option>
-              <option value="medium" selected>Medium - Needs attention</option>
-              <option value="high">High - Urgent / Blocking</option>
-            </select>
-          </div>
-        </div>
-        
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Subject</label>
-          <input type="text" name="subject" required placeholder="Brief summary of the issue" class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-        </div>
-        
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
-          <textarea name="description" required rows="4" placeholder="Provide as much detail as possible..." class="w-full border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none"></textarea>
-        </div>
-
-        <div class="mb-6">
-          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Attachment (Optional)</label>
-          <input type="file" name="attachment" accept="image/*,.pdf,.doc,.docx" class="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-400">
-          <p class="text-xs text-slate-400 mt-1">Accepts images, PDFs, or Word docs (Max 10MB).</p>
-        </div>
-
-        <div class="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
-          <button type="button" onclick="this.closest('.fixed').remove()" class="px-5 py-2.5 rounded-xl font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors">Cancel</button>
-          <button type="submit" class="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-200 dark:shadow-none transition-all flex items-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-            Submit Request
-          </button>
-        </div>
-      </form>
-    </div>
-  `;
-  document.body.appendChild(modal);
-}
-
-async function submitSupportTicket(e, form) {
-  e.preventDefault();
-  const btn = form.querySelector('button[type="submit"]');
-  const originalHtml = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<svg class="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
-
-  try {
-    const formData = new FormData(form);
-
-    // Use standard fetch directly because our global api() wrapper sets headers
-    // But FormData handles multipart/form-data boundary automatically. 
-    // Do not set Content-Type header when using FormData.
-    const res = await fetch('/api/support/tickets', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('pos_token')}`
-      },
-      body: formData
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to create ticket');
-
-    toast('Support ticket submitted successfully!', 'success');
-    form.closest('.fixed').remove();
-    renderSupportHub();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = originalHtml;
-  }
-}
-
-async function openTicketDetail(id) {
-  const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex justify-end';
-  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
-
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-xl h-full shadow-2xl animate-slide-left flex flex-col">
-      <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900">
-        <h3 class="text-lg font-bold text-slate-800 dark:text-white" id="ticket-detail-title">Loading Ticket #${id}...</h3>
-        <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-        </button>
-      </div>
-      
-      <div class="flex-1 overflow-y-auto p-6" id="ticket-detail-content">
-        <div class="flex justify-center text-slate-400 my-10"><svg class="animate-spin h-8 w-8" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
-      </div>
-      
-      <div class="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900" id="ticket-detail-reply-box" style="display: none;">
-        <form onsubmit="submitTicketComment(event, this, ${id})" class="relative">
-          <textarea name="comment" required rows="2" placeholder="Write a reply..." class="w-full border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none text-sm pr-12"></textarea>
-          <button type="submit" class="absolute right-2 bottom-3 p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-full transition-colors">
-            <svg class="w-5 h-5 -rotate-90" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path></svg>
-          </button>
-        </form>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  try {
-    const data = await api(`/api/support/tickets/${id}`);
-    const { ticket, comments } = data;
-
-    document.getElementById('ticket-detail-title').textContent = `Ticket #${ticket.id}`;
-
-    const statusColors = {
-      'open': 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
-      'in_progress': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-      'resolved': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-      'closed': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
-    };
-
-    // Original Post
-    let threadHtml = `
-      <div class="mb-8">
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <h1 class="text-xl font-bold text-slate-900 dark:text-white mb-1">${ticket.subject}</h1>
-            <div class="flex gap-2 items-center text-xs">
-              <span class="px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[ticket.status] || statusColors['open']}">${ticket.status.replace('_', ' ')}</span>
-              <span class="text-slate-500 dark:text-slate-400 font-medium capitalize">${ticket.type} • ${ticket.priority} Priority</span>
-            </div>
-          </div>
-          ${currentUser.role === 'superadmin' ? `
-            <select onchange="updateTicketStatus(${ticket.id}, this.value)" class="text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
-              <option value="open" ${ticket.status === 'open' ? 'selected' : ''}>Open</option>
-              <option value="in_progress" ${ticket.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
-              <option value="resolved" ${ticket.status === 'resolved' ? 'selected' : ''}>Resolved</option>
-              <option value="closed" ${ticket.status === 'closed' ? 'selected' : ''}>Closed</option>
-            </select>
-          ` : ''}
-        </div>
-        
-        <div class="bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-500/10 rounded-2xl p-4">
-          <div class="flex items-center gap-3 mb-3">
-            <div class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-sm">
-              ${ticket.author_name.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <div class="text-sm font-semibold text-slate-900 dark:text-white">${ticket.author_name}</div>
-              <div class="text-xs text-slate-500">${new Date(ticket.created_at).toLocaleString()}</div>
-            </div>
-          </div>
-          <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">${ticket.description}</div>
-          
-          ${ticket.attachment_url ? `
-            <div class="mt-4 pt-4 border-t border-indigo-100 dark:border-indigo-500/10">
-              <a href="${ticket.attachment_url}" target="_blank" class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-500/20 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
-                View Attachment
-              </a>
-            </div>
-          ` : ''}
-        </div>
-      </div>
-      
-      <div class="relative">
-        <div class="absolute inset-y-0 left-4 w-px bg-slate-200 dark:bg-slate-800"></div>
-        <div class="space-y-6" id="ticket-comments-list">
-    `;
-
-    // Comments
-    comments.forEach(c => {
-      const isSuper = c.author_role === 'superadmin';
-      threadHtml += `
-        <div class="relative pl-10">
-          <div class="absolute left-0 w-8 h-8 rounded-full border-4 border-white dark:border-slate-900 ${isSuper ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/50 dark:text-rose-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'} flex items-center justify-center font-bold text-xs" style="left: 0;">
-             ${c.author_name.charAt(0).toUpperCase()}
-          </div>
-          <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 sm:rounded-2xl rounded-xl p-4 shadow-sm">
-            <div class="flex items-center justify-between mb-2">
-              <div class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                ${c.author_name}
-                ${isSuper ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-100 dark:border-rose-800 uppercase tracking-wider">Support Team</span>' : ''}
-              </div>
-              <div class="text-xs text-slate-500">${new Date(c.created_at).toLocaleString()}</div>
-            </div>
-            <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">${c.comment}</div>
-          </div>
-        </div>
-      `;
-    });
-
-    threadHtml += `</div></div>`;
-    document.getElementById('ticket-detail-content').innerHTML = threadHtml;
-
-    if (ticket.status !== 'closed') {
-      document.getElementById('ticket-detail-reply-box').style.display = 'block';
-    } else {
-      document.getElementById('ticket-detail-reply-box').outerHTML = `
-        <div class="p-4 text-center text-sm font-medium text-slate-500 bg-slate-50 dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
-           This ticket is closed. No further replies can be added.
-        </div>
-      `;
-    }
-
-  } catch (err) {
-    document.getElementById('ticket-detail-content').innerHTML = `<div class="p-4 text-red-500">Failed to load ticket details: ${err.message}</div>`;
-  }
-}
-
-async function submitTicketComment(e, form, ticketId) {
-  e.preventDefault();
-  const btn = form.querySelector('button[type="submit"]');
-  const textarea = form.querySelector('textarea');
-  const commentText = textarea.value;
-  btn.disabled = true;
-
-  try {
-    await api(`/api/support/tickets/${ticketId}/comments`, 'POST', { comment: commentText });
-
-    // Create new comment element optimistically or re-fetch
-    const list = document.getElementById('ticket-comments-list');
-    const isSuper = currentUser.role === 'superadmin';
-    const newCommentHtml = `
-      <div class="relative pl-10 animate-fade-in">
-        <div class="absolute left-0 w-8 h-8 rounded-full border-4 border-white dark:border-slate-900 ${isSuper ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/50 dark:text-rose-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'} flex items-center justify-center font-bold text-xs" style="left: 0;">
-           ${currentUser.name.charAt(0).toUpperCase()}
-        </div>
-        <div class="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/30 sm:rounded-2xl rounded-xl p-4 shadow-sm">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              ${currentUser.name}
-              ${isSuper ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-100 dark:border-rose-800 uppercase tracking-wider">Support Team</span>' : ''}
-            </div>
-            <div class="text-xs text-indigo-500/70">Just now</div>
-          </div>
-          <div class="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">${commentText}</div>
-        </div>
-      </div>
-    `;
-    list.insertAdjacentHTML('beforeend', newCommentHtml);
-
-    textarea.value = '';
-    const contentBox = document.getElementById('ticket-detail-content');
-    contentBox.scrollTop = contentBox.scrollHeight;
-
-    // Refresh background list softly
-    renderSupportHub();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function updateTicketStatus(ticketId, status) {
-  try {
-    await api(`/api/support/tickets/${ticketId}/status`, 'PATCH', { status });
-    toast('Ticket status updated');
-    renderSupportHub();
-  } catch (err) {
-    alert(err.message);
-  }
-}
 
 // ─── Start ───────────────────────────────────────────────────────────
 init();

@@ -26,7 +26,6 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/shops', require('./routes/shops'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
 app.use('/api/admin', require('./routes/admin'));
-app.use('/api/support', require('./routes/support')); // API for Shop Owner Requests //
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get('/', (req, res) => {
@@ -45,8 +44,16 @@ app.get('/admin/store-monitoring', (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-    console.log(`✅ POS System running at http://localhost:${PORT}`);
-    console.log('   Login: admin / admin123');
-});
-// export default app;
+
+function startServer(port = PORT) {
+    return app.listen(port, () => {
+        console.log(`✅ POS System running at http://localhost:${port}`);
+        console.log('   Login: admin / admin123');
+    });
+}
+
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = { app, startServer };

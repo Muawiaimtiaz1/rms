@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS products (
   brand_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   buying_price REAL NOT NULL DEFAULT 0,
+  selling_price REAL NOT NULL DEFAULT 0,
   stock INTEGER NOT NULL DEFAULT 0,
   min_stock_level INTEGER NOT NULL DEFAULT 0,
   is_deleted INTEGER DEFAULT 0,
@@ -119,7 +120,6 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   priority TEXT NOT NULL DEFAULT 'medium', -- low, medium, high
   subject TEXT NOT NULL,
   description TEXT NOT NULL,
-  attachment_url TEXT,
   status TEXT NOT NULL DEFAULT 'open', -- open, in_progress, resolved, closed
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
