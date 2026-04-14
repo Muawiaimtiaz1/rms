@@ -1,94 +1,119 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-const bcrypt = require('bcryptjs');
+const Database = require("better-sqlite3");
+const path = require("path");
+const fs = require("fs");
+const bcrypt = require("bcryptjs");
 
-// Determine path based on environment (Electron vs Node)
-const isElectron = !!process.versions.electron;
-let dbDir = __dirname;
+// Local database directory
+const dbDir = __dirname;
 
-if (isElectron) {
-    const { app } = require('electron');
-    // Store data in the user application data directory
-    dbDir = path.join(app.getPath('userData'), 'db');
-    if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
-    }
-}
-
-const DB_PATH = path.join(dbDir, 'pos.db');
-const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+const DB_PATH = path.join(dbDir, "pos.db");
+const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
 const db = new Database(DB_PATH);
 
 // Enable WAL mode for better concurrency
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
 // Initialize tables from schema only if they don't exist
-const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shops'").get();
+const tableExists = db
+  .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shops'")
+  .get();
 if (!tableExists) {
-    console.log('🌱 Initializing fresh database...');
-    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-    db.exec(schema);
-    
-    // Auto-seed default shop, admin, and subscription
-    db.transaction(() => {
-        const hash = bcrypt.hashSync('admin123', 10);
-        const panels = JSON.stringify(['dashboard', 'brands', 'products', 'pos', 'sales-history', 'expenses']);
-        const longTermDate = '2099-12-31';
-        
-        // 1. Create default shop
-        const shopId = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)')
-                         .run('Default Shop', panels).lastInsertRowid;
-        
-        // 2. Create Super Admin (Bypasses all checks)
-        db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)')
-          .run('Global Owner', 'owner', hash, 'superadmin', null);
+  console.log("🌱 Initializing fresh database...");
+  const schema = fs.readFileSync(SCHEMA_PATH, "utf8");
+  db.exec(schema);
 
-        // 3. Create default shop Admin
-        db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)')
-          .run('Administrator', 'admin', hash, 'admin', shopId);
+  // Auto-seed default shop, admin, and subscription
+  db.transaction(() => {
+    const hash = bcrypt.hashSync("admin123", 10);
+    const panels = JSON.stringify([
+      "dashboard",
+      "brands",
+      "products",
+      "pos",
+      "sales-history",
+      "expenses",
+      "customers",
+      "composite_products",
+    ]);
+    const longTermDate = "2099-12-31";
 
-        // 4. Create Active Subscription (Necessary for 'admin' role login)
-        db.prepare('INSERT INTO subscriptions (shop_id, amount, type, start_date, end_date, month) VALUES (?, ?, ?, ?, ?, ?)')
-          .run(shopId, 0, '1_year', '2024-01-01', longTermDate, '2024-01');
-    })();
-    
-    console.log('✅ Database initialized with:');
-    console.log('   - SuperAdmin: owner / admin123');
-    console.log('   - ShopAdmin:  admin / admin123');
+    // 1. Create default shop
+    const shopId = db
+      .prepare("INSERT INTO shops (name, allowed_panels) VALUES (?, ?)")
+      .run("Default Shop", panels).lastInsertRowid;
+
+    // 2. Create Super Admin (Bypasses all checks)
+    db.prepare(
+      "INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)",
+    ).run("Global Owner", "owner", hash, "superadmin", null);
+
+    // 3. Create default shop Admin
+    db.prepare(
+      "INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)",
+    ).run("Administrator", "admin", hash, "admin", shopId);
+
+    // 4. Create Active Subscription (Necessary for 'admin' role login)
+    db.prepare(
+      "INSERT INTO subscriptions (shop_id, amount, type, start_date, end_date, month) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(shopId, 0, "1_year", "2024-01-01", longTermDate, "2024-01");
+  })();
+
+  console.log("✅ Database initialized with:");
+  console.log("   - SuperAdmin: owner / admin123");
+  console.log("   - ShopAdmin:  admin / admin123");
 } else {
-    // Migration check: Ensure 'owner' account and lifetime subscription exist
-    const ownerExists = db.prepare("SELECT id FROM users WHERE username = 'owner'").get();
-    if (!ownerExists) {
-        console.log('🔧 SuperAdmin missing. Seeding "owner" and lifetime subscription...');
-        db.transaction(() => {
-            const hash = bcrypt.hashSync('admin123', 10);
-            const panels = JSON.stringify(['dashboard', 'brands', 'products', 'pos', 'sales-history', 'expenses']);
-            const longTermDate = '2099-12-31';
+  // Migration check: Ensure 'owner' account and lifetime subscription exist
+  const ownerExists = db
+    .prepare("SELECT id FROM users WHERE username = 'owner'")
+    .get();
+  if (!ownerExists) {
+    console.log(
+      '🔧 SuperAdmin missing. Seeding "owner" and lifetime subscription...',
+    );
+    db.transaction(() => {
+      const hash = bcrypt.hashSync("admin123", 10);
+      const panels = JSON.stringify([
+        "dashboard",
+        "brands",
+        "products",
+        "pos",
+        "sales-history",
+        "expenses",
+        "customers",
+        "composite_products",
+      ]);
+      const longTermDate = "2099-12-31";
 
-            let shopId = db.prepare("SELECT id FROM shops LIMIT 1").get()?.id;
-            if (!shopId) {
-                shopId = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)')
-                           .run('Default Shop', panels).lastInsertRowid;
-            }
-            
-            // Add Super Admin
-            db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)')
-              .run('Global Owner', 'owner', hash, 'superadmin', null);
+      let shopId = db.prepare("SELECT id FROM shops LIMIT 1").get()?.id;
+      if (!shopId) {
+        shopId = db
+          .prepare("INSERT INTO shops (name, allowed_panels) VALUES (?, ?)")
+          .run("Default Shop", panels).lastInsertRowid;
+      }
 
-            // Add Lifetime Subscription for the default shop (so 'admin' works too)
-            db.prepare('INSERT INTO subscriptions (shop_id, amount, type, start_date, end_date, month) VALUES (?, ?, ?, ?, ?, ?)')
-              .run(shopId, 0, '1_year', '2024-01-01', longTermDate, '2024-01');
-        })();
-        console.log('✅ SuperAdmin ("owner") and Subscription added.');
-    }
-    // Check for activity_logs specifically (added later)
-    const logsExist = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'").get();
-    if (!logsExist) {
-        console.log('🔧 Updating database: Adding activity_logs table...');
-        db.exec(`
+      // Add Super Admin
+      db.prepare(
+        "INSERT INTO users (name, username, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?)",
+      ).run("Global Owner", "owner", hash, "superadmin", null);
+
+      // Add Lifetime Subscription for the default shop (so 'admin' works too)
+      db.prepare(
+        "INSERT INTO subscriptions (shop_id, amount, type, start_date, end_date, month) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(shopId, 0, "1_year", "2024-01-01", longTermDate, "2024-01");
+    })();
+    console.log('✅ SuperAdmin ("owner") and Subscription added.');
+  }
+  // Check for activity_logs specifically (added later)
+  const logsExist = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'",
+    )
+    .get();
+  if (!logsExist) {
+    console.log("🔧 Updating database: Adding activity_logs table...");
+    db.exec(`
             CREATE TABLE IF NOT EXISTS activity_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 shop_id INTEGER NOT NULL,
@@ -98,31 +123,39 @@ if (!tableExists) {
                 FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
             );
         `);
-        console.log('✅ activity_logs table added.');
-    }
+    console.log("✅ activity_logs table added.");
+  }
 
-    // Check for is_deleted in products (soft delete migration)
-    const productCols = db.prepare("PRAGMA table_info(products)").all();
-    const isDeletedExists = productCols.some(col => col.name === 'is_deleted');
-    if (!isDeletedExists) {
-        console.log('🔧 Updating database: Adding is_deleted to products...');
-        db.exec("ALTER TABLE products ADD COLUMN is_deleted INTEGER DEFAULT 0;");
-        console.log('✅ is_deleted column added.');
-    }
+  // Check for is_deleted in products (soft delete migration)
+  const productCols = db.prepare("PRAGMA table_info(products)").all();
+  const isDeletedExists = productCols.some((col) => col.name === "is_deleted");
+  if (!isDeletedExists) {
+    console.log("🔧 Updating database: Adding is_deleted to products...");
+    db.exec("ALTER TABLE products ADD COLUMN is_deleted INTEGER DEFAULT 0;");
+    console.log("✅ is_deleted column added.");
+  }
 
-    // Check for selling_price in products
-    const sellingPriceExists = productCols.some(col => col.name === 'selling_price');
-    if (!sellingPriceExists) {
-        console.log('🔧 Updating database: Adding selling_price to products...');
-        db.exec("ALTER TABLE products ADD COLUMN selling_price REAL NOT NULL DEFAULT 0;");
-        console.log('✅ selling_price column added.');
-    }
+  // Check for selling_price in products
+  const sellingPriceExists = productCols.some(
+    (col) => col.name === "selling_price",
+  );
+  if (!sellingPriceExists) {
+    console.log("🔧 Updating database: Adding selling_price to products...");
+    db.exec(
+      "ALTER TABLE products ADD COLUMN selling_price REAL NOT NULL DEFAULT 0;",
+    );
+    console.log("✅ selling_price column added.");
+  }
 
-    // Check for expense_categories (new feature)
-    const catTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='expense_categories'").get();
-    if (!catTableExists) {
-        console.log('🔧 Updating database: Adding expense_categories table...');
-        db.exec(`
+  // Check for expense_categories (new feature)
+  const catTableExists = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='expense_categories'",
+    )
+    .get();
+  if (!catTableExists) {
+    console.log("🔧 Updating database: Adding expense_categories table...");
+    db.exec(`
             CREATE TABLE IF NOT EXISTS expense_categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 shop_id INTEGER NOT NULL,
@@ -134,25 +167,525 @@ if (!tableExists) {
             );
         `);
 
-        // Seed default categories
-        const defaults = [
-            ['Electricity', '⚡', 'bg-yellow-900/40 text-yellow-300'],
-            ['Fuel', '⛽', 'bg-orange-900/40 text-orange-300'],
-            ['Rent', '🏠', 'bg-blue-900/40 text-blue-300'],
-            ['Salary', '👷', 'bg-purple-900/40 text-purple-300'],
-            ['Other', '📦', 'bg-slate-700 text-slate-300']
-        ];
+    // Seed default categories
+    const defaults = [
+      ["Electricity", "⚡", "bg-yellow-900/40 text-yellow-300"],
+      ["Fuel", "⛽", "bg-orange-900/40 text-orange-300"],
+      ["Rent", "🏠", "bg-blue-900/40 text-blue-300"],
+      ["Salary", "👷", "bg-purple-900/40 text-purple-300"],
+      ["Other", "📦", "bg-slate-700 text-slate-300"],
+    ];
 
-        const insert = db.prepare('INSERT INTO expense_categories (shop_id, name, emoji, color_class) SELECT id, ?, ?, ? FROM shops');
-        const transaction = db.transaction(() => {
-            for (const [name, emoji, color] of defaults) {
-                insert.run(name, emoji, color);
-            }
-        });
-        transaction();
-        console.log('✅ expense_categories table added and seeded.');
+    const insert = db.prepare(
+      "INSERT INTO expense_categories (shop_id, name, emoji, color_class) SELECT id, ?, ?, ? FROM shops",
+    );
+    const transaction = db.transaction(() => {
+      for (const [name, emoji, color] of defaults) {
+        insert.run(name, emoji, color);
+      }
+    });
+    transaction();
+    console.log("✅ expense_categories table added and seeded.");
+  }
+
+  // Check for product_categories (new feature)
+  const prodCatTableExists = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='product_categories'",
+    )
+    .get();
+  if (!prodCatTableExists) {
+    console.log("🔧 Updating database: Adding product_categories table...");
+    db.exec(`
+            CREATE TABLE IF NOT EXISTS product_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+            );
+        `);
+
+    // Migration: Seed from existing products
+    console.log("🔧 Migrating existing product categories...");
+    db.exec(`
+            INSERT INTO product_categories (shop_id, name)
+            SELECT DISTINCT shop_id, category FROM products
+            WHERE category IS NOT NULL AND category != ''
+        `);
+
+    // Also add defaults for any shop that may not have products yet
+    const defaults = ["General", "Electronics", "Groceries", "Services"];
+    const insert = db.prepare(
+      "INSERT INTO product_categories (shop_id, name) SELECT id, ? FROM shops WHERE id NOT IN (SELECT DISTINCT shop_id FROM product_categories WHERE name = ?)",
+    );
+    const transaction = db.transaction(() => {
+      for (const name of defaults) {
+        insert.run(name, name);
+      }
+    });
+    transaction();
+    console.log("✅ product_categories table added and migrated.");
+  }
+
+  // Migration for Products table (is_component flag)
+  const productColsIsComponent = db
+    .prepare("PRAGMA table_info(products)")
+    .all();
+  if (!productColsIsComponent.some((col) => col.name === "is_component")) {
+    console.log(
+      "🔧 Updating database: Adding is_component flag to products...",
+    );
+    db.exec("ALTER TABLE products ADD COLUMN is_component INTEGER DEFAULT 0;");
+    // Auto-flag existing components
+    db.exec(`
+            UPDATE products SET is_component = 1
+            WHERE id IN (SELECT DISTINCT component_product_id FROM product_compositions WHERE component_product_id IS NOT NULL)
+        `);
+    console.log("✅ products table updated with is_component flag.");
+  }
+
+  // Check for product_compositions (new feature)
+  const compTableExists = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='product_compositions'",
+    )
+    .get();
+  if (!compTableExists) {
+    console.log("🔧 Updating database: Adding product_compositions table...");
+    // Re-creating table to allow NULL component_product_id and add custom_name
+    console.log(
+      "🔧 Updating database: Adding custom_name and fixing constraints...",
+    );
+    db.exec(`
+            CREATE TABLE IF NOT EXISTS product_compositions_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_product_id INTEGER NOT NULL,
+                component_product_id INTEGER,
+                custom_name TEXT,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                price REAL,
+                FOREIGN KEY (parent_product_id) REFERENCES products(id) ON DELETE CASCADE,
+                FOREIGN KEY (component_product_id) REFERENCES products(id) ON DELETE CASCADE
+            );
+        `);
+    // Check if old table has data to migrate
+    const oldData = db.prepare("SELECT * FROM product_compositions").all();
+    if (oldData.length > 0) {
+      const insert = db.prepare(
+        "INSERT INTO product_compositions_new (id, parent_product_id, component_product_id, quantity, price) VALUES (?, ?, ?, ?, ?)",
+      );
+      oldData.forEach((row) =>
+        insert.run(
+          row.id,
+          row.parent_product_id,
+          row.component_product_id,
+          row.quantity,
+          row.price,
+        ),
+      );
     }
-}
+    db.exec("DROP TABLE product_compositions;");
+    db.exec(
+      "ALTER TABLE product_compositions_new RENAME TO product_compositions;",
+    );
+    console.log("✅ product_compositions table updated.");
+  } else {
+    // Migration to fix product_compositions constraints
+    const compCols = db
+      .prepare("PRAGMA table_info(product_compositions)")
+      .all();
+    const customNameExists = compCols.some((col) => col.name === "custom_name");
+    const compIdCol = compCols.find(
+      (col) => col.name === "component_product_id",
+    );
+    const isNotNull = compIdCol && compIdCol.notnull === 1;
 
+    if (!customNameExists || isNotNull) {
+      console.log(
+        "🔧 Updating database: Modernizing product_compositions constraints...",
+      );
+      const oldData = db.prepare("SELECT * FROM product_compositions").all();
+      db.exec("DROP TABLE product_compositions;");
+      db.exec(`
+                CREATE TABLE IF NOT EXISTS product_compositions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    parent_product_id INTEGER NOT NULL,
+                    component_product_id INTEGER,
+                    custom_name TEXT,
+                    quantity INTEGER NOT NULL DEFAULT 1,
+                    price REAL,
+                    cost REAL,
+                    FOREIGN KEY (parent_product_id) REFERENCES products(id) ON DELETE CASCADE,
+                    FOREIGN KEY (component_product_id) REFERENCES products(id) ON DELETE CASCADE
+                );
+            `);
+      if (oldData.length > 0) {
+        const insert = db.prepare(
+          "INSERT INTO product_compositions (id, parent_product_id, component_product_id, custom_name, quantity, price, cost) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        );
+        oldData.forEach((row) =>
+          insert.run(
+            row.id,
+            row.parent_product_id,
+            row.component_product_id,
+            row.custom_name || "",
+            row.quantity,
+            row.price,
+            row.cost || 0,
+          ),
+        );
+      }
+      console.log("✅ product_compositions modernized.");
+    }
+
+    // Add 'cost' column if missing in product_compositions
+    const compColsNew = db
+      .prepare("PRAGMA table_info(product_compositions)")
+      .all();
+    if (!compColsNew.some((col) => col.name === "cost")) {
+      console.log(
+        "🔧 Updating database: Adding cost to product_compositions...",
+      );
+      db.exec(
+        "ALTER TABLE product_compositions ADD COLUMN cost REAL DEFAULT 0;",
+      );
+      console.log("✅ cost column added to product_compositions.");
+    }
+
+    // NEW: Migration for sale_items to support manual entries
+    const saleItemCols = db.prepare("PRAGMA table_info(sale_items)").all();
+    const saleItemCustomExists = saleItemCols.some(
+      (col) => col.name === "custom_name",
+    );
+    const saleItemProdIdCol = saleItemCols.find(
+      (col) => col.name === "product_id",
+    );
+    const saleItemProdIdIsNotNull =
+      saleItemProdIdCol && saleItemProdIdCol.notnull === 1;
+
+    if (
+      !saleItemCustomExists ||
+      saleItemProdIdIsNotNull ||
+      !saleItemCols.some((col) => col.name === "parent_id")
+    ) {
+      console.log(
+        "🔧 Updating database: Modernizing sale_items for manual entries and parent linking...",
+      );
+      const oldSaleItems = db.prepare("SELECT * FROM sale_items").all();
+      db.exec("DROP TABLE sale_items;");
+      db.exec(`
+                CREATE TABLE IF NOT EXISTS sale_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sale_id INTEGER NOT NULL,
+                    product_id INTEGER,
+                    parent_id INTEGER,
+                    custom_name TEXT,
+                    quantity INTEGER NOT NULL DEFAULT 1,
+                    price_at_sale REAL NOT NULL DEFAULT 0,
+                    buying_price_at_sale REAL NOT NULL DEFAULT 0,
+                    FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+                    FOREIGN KEY (product_id) REFERENCES products(id),
+                    FOREIGN KEY (parent_id) REFERENCES products(id)
+                );
+            `);
+      if (oldSaleItems.length > 0) {
+        const insert = db.prepare(
+          "INSERT INTO sale_items (id, sale_id, product_id, quantity, price_at_sale) VALUES (?, ?, ?, ?, ?)",
+        );
+        oldSaleItems.forEach((row) =>
+          insert.run(
+            row.id,
+            row.sale_id,
+            row.product_id,
+            row.quantity,
+            row.price_at_sale,
+          ),
+        );
+      }
+      console.log("✅ sale_items modernized.");
+    }
+
+    const saleItemCols2 = db.prepare("PRAGMA table_info(sale_items)").all();
+    if (!saleItemCols2.some((col) => col.name === "buying_price_at_sale")) {
+      console.log(
+        "🔧 Updating database: Adding buying_price_at_sale to sale_items...",
+      );
+      db.exec(
+        "ALTER TABLE sale_items ADD COLUMN buying_price_at_sale REAL NOT NULL DEFAULT 0;",
+      );
+      console.log("✅ buying_price_at_sale column added to sale_items.");
+    }
+
+    const returnItemCols = db.prepare("PRAGMA table_info(return_items)").all();
+    if (returnItemCols.length > 0 && !returnItemCols.some((col) => col.name === "buying_price_at_sale")) {
+      console.log(
+        "🔧 Updating database: Adding buying_price_at_sale to return_items...",
+      );
+      db.exec(
+        "ALTER TABLE return_items ADD COLUMN buying_price_at_sale REAL NOT NULL DEFAULT 0;",
+      );
+      console.log("✅ buying_price_at_sale column added to return_items.");
+    }
+
+    // Migration: add damage_stock to products
+    const productColsDamage = db.prepare("PRAGMA table_info(products)").all();
+    if (!productColsDamage.some((col) => col.name === "damage_stock")) {
+      console.log("🔧 Updating database: Adding damage_stock to products...");
+      db.exec("ALTER TABLE products ADD COLUMN damage_stock INTEGER DEFAULT 0;");
+      console.log("✅ damage_stock column added to products.");
+    }
+
+    if (!productColsDamage.some((col) => col.name === "recovered_damage_amount")) {
+      console.log("🔧 Updating database: Adding recovered_damage_amount to products...");
+      db.exec("ALTER TABLE products ADD COLUMN recovered_damage_amount REAL DEFAULT 0;");
+      console.log("✅ recovered_damage_amount column added to products.");
+    }
+
+    if (!productColsDamage.some((col) => col.name === "manual_damage_loss")) {
+      console.log("🔧 Updating database: Adding manual_damage_loss to products...");
+      db.exec("ALTER TABLE products ADD COLUMN manual_damage_loss REAL DEFAULT 0;");
+      console.log("✅ manual_damage_loss column added to products.");
+    }
+
+    if (!productColsDamage.some((col) => col.name === "recovered_damage_quantity")) {
+      console.log("🔧 Updating database: Adding recovered_damage_quantity to products...");
+      db.exec("ALTER TABLE products ADD COLUMN recovered_damage_quantity INTEGER DEFAULT 0;");
+      console.log("✅ recovered_damage_quantity column added to products.");
+    }
+
+    // Migration: Create product_batches table if missing
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        shop_id INTEGER NOT NULL,
+        buying_price REAL NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      );
+    `);
+
+    // Migration: Move existing stock into initial batches
+    const batchCount = db.prepare("SELECT COUNT(*) as count FROM product_batches").get().count;
+    if (batchCount === 0) {
+      console.log("🔧 Migrating existing stock to product_batches...");
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO product_batches (product_id, shop_id, buying_price, quantity)
+          SELECT id, shop_id, buying_price, stock FROM products WHERE stock > 0 AND is_deleted = 0
+        `).run();
+      })();
+      console.log("✅ Stock migration completed.");
+    }
+
+    // Migration: add batch_id to sale_items
+    const saleItemColsBatch = db.prepare("PRAGMA table_info(sale_items)").all();
+    if (!saleItemColsBatch.some((col) => col.name === "batch_id")) {
+      console.log("🔧 Updating database: Adding batch_id to sale_items...");
+      db.exec("ALTER TABLE sale_items ADD COLUMN batch_id INTEGER;");
+      console.log("✅ batch_id column added to sale_items.");
+    }
+
+    // Migration: add damaged_quantity to product_batches
+    const productBatchCols = db.prepare("PRAGMA table_info(product_batches)").all();
+    if (!productBatchCols.some((col) => col.name === "damaged_quantity")) {
+      console.log("🔧 Updating database: Adding damaged_quantity to product_batches...");
+      db.exec("ALTER TABLE product_batches ADD COLUMN damaged_quantity INTEGER DEFAULT 0;");
+      console.log("✅ damaged_quantity column added to product_batches.");
+    }
+  }
+
+  // Check for returns and return_items (New Feature)
+  const returnsExist = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='returns'",
+    )
+    .get();
+  if (!returnsExist) {
+    console.log(
+      "🔧 Updating database: Adding returns and return_items tables...",
+    );
+    db.exec(`
+            CREATE TABLE IF NOT EXISTS returns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id INTEGER NOT NULL,
+                sale_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                total_refund REAL NOT NULL DEFAULT 0,
+                reason TEXT,
+                payment_method TEXT NOT NULL DEFAULT 'cash',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+                FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS return_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                return_id INTEGER NOT NULL,
+                product_id INTEGER,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                refund_price REAL NOT NULL DEFAULT 0,
+                buying_price_at_sale REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE,
+                FOREIGN KEY (product_id) REFERENCES products(id)
+            );
+        `);
+    console.log("✅ Returns tables added.");
+  } else {
+    // Migration: Ensure returns has payment_method column
+    const returnsCols = db.prepare("PRAGMA table_info(returns)").all();
+    if (!returnsCols.some((col) => col.name === "payment_method")) {
+      console.log("🔧 Updating database: Adding payment_method to returns...");
+      db.exec(
+        "ALTER TABLE returns ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash';",
+      );
+      console.log("✅ payment_method column added to returns.");
+    }
+
+    // Migration: add customers table
+    const customersTableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='customers'",
+      )
+      .get();
+    if (!customersTableExists) {
+      console.log(
+        "🔧 Updating database: Adding customers and customer_ledger tables...",
+      );
+      db.exec(`
+            CREATE TABLE IF NOT EXISTS customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shop_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                phone TEXT,
+                email TEXT,
+                address TEXT,
+                notes TEXT,
+                credit_limit REAL DEFAULT 0,
+                current_balance REAL DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS customer_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id INTEGER NOT NULL,
+                shop_id INTEGER NOT NULL,
+                sale_id INTEGER,
+                type TEXT NOT NULL DEFAULT 'sale',
+                amount REAL NOT NULL DEFAULT 0,
+                balance_after REAL NOT NULL DEFAULT 0,
+                note TEXT,
+                created_by INTEGER,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+                FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+                FOREIGN KEY (sale_id) REFERENCES sales(id),
+                FOREIGN KEY (created_by) REFERENCES users(id)
+            );
+        `);
+      console.log("✅ customers and customer_ledger tables added.");
+    }
+
+    // Migration: add customer_id to sales
+    const salesColsCheck = db.prepare("PRAGMA table_info(sales)").all();
+    if (!salesColsCheck.some((col) => col.name === "customer_id")) {
+      console.log("🔧 Updating database: Adding customer_id to sales...");
+      db.exec(
+        "ALTER TABLE sales ADD COLUMN customer_id INTEGER REFERENCES customers(id);",
+      );
+      console.log("✅ customer_id column added to sales.");
+    }
+
+    // Migration: enable customers panel for existing shops and admins
+    try {
+      const existingShops = db
+        .prepare("SELECT id, allowed_panels FROM shops")
+        .all();
+
+      const updateShopPanels = db.prepare(
+        "UPDATE shops SET allowed_panels = ? WHERE id = ?",
+      );
+
+      existingShops.forEach((shop) => {
+        let panels = [];
+        try {
+          panels = shop.allowed_panels ? JSON.parse(shop.allowed_panels) : [];
+        } catch (e) {
+          panels = [];
+        }
+
+        if (!panels.includes("customers")) {
+          panels.push("customers");
+          updateShopPanels.run(JSON.stringify(panels), shop.id);
+        }
+      });
+
+      const adminUsers = db
+        .prepare("SELECT id, allowed_panels FROM users WHERE role = 'admin'")
+        .all();
+
+      const updateUserPanels = db.prepare(
+        "UPDATE users SET allowed_panels = ? WHERE id = ?",
+      );
+
+      adminUsers.forEach((user) => {
+        let panels = [];
+        try {
+          panels = user.allowed_panels ? JSON.parse(user.allowed_panels) : [];
+        } catch (e) {
+          panels = [];
+        }
+
+        if (!panels.includes("customers")) {
+          panels.push("customers");
+          updateUserPanels.run(JSON.stringify(panels), user.id);
+        }
+      });
+    } catch (e) {
+      console.error("Failed to enable customers panel for existing data:", e);
+    }
+
+    // Migration: Add receipt settings columns to shops
+    const shopCols = db.prepare("PRAGMA table_info(shops)").all();
+    const receiptColumns = [
+      { name: "logo_path", type: "TEXT" },
+      { name: "receipt_header_text", type: "TEXT" },
+      { name: "receipt_phone", type: "TEXT" },
+      { name: "receipt_address", type: "TEXT" },
+      { name: "receipt_images_json", type: "TEXT" },
+      { name: "receipt_policies", type: "TEXT" },
+      { name: "use_logo_on_receipt", type: "INTEGER DEFAULT 1" },
+      // Typography settings
+      { name: "header_font_size", type: "INTEGER DEFAULT 18" },
+      { name: "header_font_weight", type: "TEXT DEFAULT 'bold'" },
+      { name: "header_spacing", type: "INTEGER DEFAULT 10" },
+      { name: "contact_font_size", type: "INTEGER DEFAULT 10" },
+      { name: "contact_align", type: "TEXT DEFAULT 'center'" },
+      { name: "contact_padding", type: "INTEGER DEFAULT 10" },
+      { name: "footer_font_size", type: "INTEGER DEFAULT 9" },
+      { name: "footer_font_style", type: "TEXT DEFAULT 'normal'" },
+      { name: "footer_margin", type: "INTEGER DEFAULT 10" },
+      { name: "divider_style", type: "TEXT DEFAULT 'dashed'" },
+      { name: "divider_width", type: "INTEGER DEFAULT 1" },
+      { name: "section_gap", type: "INTEGER DEFAULT 10" },
+      { name: "auto_calculate_damage_to_loss", type: "INTEGER DEFAULT 1" },
+    ];
+
+    receiptColumns.forEach((col) => {
+      if (!shopCols.some((c) => c.name === col.name)) {
+        console.log(`🔧 Updating database: Adding ${col.name} to shops...`);
+        db.exec(`ALTER TABLE shops ADD COLUMN ${col.name} ${col.type};`);
+        console.log(`✅ ${col.name} column added to shops.`);
+      }
+    });
+  }
+}
 
 module.exports = db;

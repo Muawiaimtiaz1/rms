@@ -36,13 +36,29 @@ router.post('/login', (req, res) => {
         if (!sub) return res.status(403).json({ error: 'No active subscription. Please contact administrator.' });
     }
 
-    // ─── Panel Permissions ──────────────────────────────────────────
-    let allowedPanels = user.allowed_panels ? JSON.parse(user.allowed_panels) : [];
-    if (user.role !== 'superadmin') {
-        const shop = db.prepare('SELECT allowed_panels FROM shops WHERE id = ?').get(user.shop_id);
-        if (!shop) return res.status(403).json({ error: 'Shop not found' });
+    req.session.user = {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        role: user.role,
+        shop_id: user.shop_id,
+    };
+    res.json({ ok: true, user: req.session.user });
+});
 
-        // Filter user panels by what the shop actually has access to
+// Helper to get fresh user permissions
+function getFreshUser(userId) {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!user) return null;
+
+    let allowedPanels = user.allowed_panels ? JSON.parse(user.allowed_panels) : [];
+    let shopName = 'Master Control';
+
+    if (user.role !== 'superadmin') {
+        const shop = db.prepare('SELECT allowed_panels, name FROM shops WHERE id = ?').get(user.shop_id);
+        if (!shop) return null;
+        shopName = shop.name;
+
         const shopPanels = shop.allowed_panels ? JSON.parse(shop.allowed_panels) : [];
         if (user.role === 'admin') {
             allowedPanels = shopPanels;
@@ -51,16 +67,12 @@ router.post('/login', (req, res) => {
         }
     }
 
-    req.session.user = {
-        id: user.id,
-        name: user.name,
-        username: user.username,
-        role: user.role,
-        shop_id: user.shop_id,
+    return {
+        ...user,
+        shop_name: shopName,
         allowed_panels: allowedPanels
     };
-    res.json({ ok: true, user: req.session.user });
-});
+}
 
 // POST /api/auth/logout
 router.post('/logout', (req, res) => {
@@ -72,6 +84,15 @@ router.post('/logout', (req, res) => {
 router.get('/me', (req, res) => {
     if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
     
+    const freshUser = getFreshUser(req.session.user.id);
+    if (!freshUser) return res.status(401).json({ error: 'User no longer exists' });
+
+    // Update session with fresh data (panels, shop name)
+    req.session.user.allowed_panels = freshUser.allowed_panels;
+    req.session.user.shop_name = freshUser.shop_name;
+    req.session.user.name = freshUser.name;
+    req.session.user.role = freshUser.role;
+
     let total_users = 1;
     let total_brands = 1;
 

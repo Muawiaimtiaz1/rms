@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS shops (
   name TEXT NOT NULL,
   status TEXT DEFAULT 'active', -- active, blocked
   allowed_panels TEXT, -- JSON array of panel IDs allotted by master
+  auto_calculate_damage_to_loss INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -55,6 +56,10 @@ CREATE TABLE IF NOT EXISTS products (
   buying_price REAL NOT NULL DEFAULT 0,
   selling_price REAL NOT NULL DEFAULT 0,
   stock INTEGER NOT NULL DEFAULT 0,
+  damage_stock INTEGER NOT NULL DEFAULT 0,
+  recovered_damage_amount REAL NOT NULL DEFAULT 0,
+  manual_damage_loss REAL NOT NULL DEFAULT 0,
+  recovered_damage_quantity INTEGER NOT NULL DEFAULT 0,
   min_stock_level INTEGER NOT NULL DEFAULT 0,
   is_deleted INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
@@ -82,11 +87,17 @@ CREATE TABLE IF NOT EXISTS sales (
 CREATE TABLE IF NOT EXISTS sale_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sale_id INTEGER NOT NULL,
-  product_id INTEGER NOT NULL,
+  product_id INTEGER,
+  parent_id INTEGER,
+  custom_name TEXT,
   quantity INTEGER NOT NULL DEFAULT 1,
-  price_at_sale REAL NOT NULL,
+  price_at_sale REAL NOT NULL DEFAULT 0,
+  buying_price_at_sale REAL NOT NULL DEFAULT 0,
+  batch_id INTEGER, -- Track specific batch sold
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
-  FOREIGN KEY (product_id) REFERENCES products(id)
+  FOREIGN KEY (product_id) REFERENCES products(id),
+  FOREIGN KEY (parent_id) REFERENCES products(id),
+  FOREIGN KEY (batch_id) REFERENCES product_batches(id)
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
@@ -101,6 +112,24 @@ CREATE TABLE IF NOT EXISTS expenses (
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  emoji TEXT DEFAULT '📦',
+  color_class TEXT DEFAULT 'bg-slate-700 text-slate-300',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS brand_expense_payments (
@@ -145,4 +174,52 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     details TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_compositions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_product_id INTEGER NOT NULL,
+  component_product_id INTEGER,
+  custom_name TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  price REAL,
+  FOREIGN KEY (parent_product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (component_product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS returns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  sale_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  total_refund REAL NOT NULL DEFAULT 0,
+  reason TEXT,
+  payment_method TEXT NOT NULL DEFAULT 'cash',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS return_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  return_id INTEGER NOT NULL,
+  product_id INTEGER,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  refund_price REAL NOT NULL DEFAULT 0,
+  buying_price_at_sale REAL NOT NULL DEFAULT 0,
+  is_damage INTEGER DEFAULT 0,
+  FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id)
+);
+CREATE TABLE IF NOT EXISTS product_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  shop_id INTEGER NOT NULL,
+  buying_price REAL NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  damaged_quantity INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );

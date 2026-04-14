@@ -75,6 +75,8 @@ router.get('/', requireAuth, (req, res) => {
     ? db.prepare('SELECT COUNT(*) as val FROM products WHERE shop_id = ? AND brand_id = ?').get(shopId, brandId).val
     : db.prepare('SELECT COUNT(*) as val FROM products WHERE shop_id = ?').get(shopId).val;
 
+  const shopSettings = db.prepare('SELECT auto_calculate_damage_to_loss FROM shops WHERE id = ?').get(shopId);
+
   // ── Revenue, COGS, Sales count ──
   // When brand filter is active: aggregate at sale_items level so we only count
   // the portion of each sale that belongs to that brand, not the whole sale total.
@@ -84,12 +86,11 @@ router.get('/', requireAuth, (req, res) => {
     const agg = db.prepare(`
       SELECT
         COALESCE(SUM(si.quantity * si.price_at_sale), 0) AS revenue,
-        COALESCE(SUM(si.quantity * p.buying_price),   0) AS cogs,
+        COALESCE(SUM(si.quantity * si.buying_price_at_sale), 0) AS cogs,
         COUNT(DISTINCT s.id)                              AS sales_count
       FROM sale_items si
-      JOIN products p ON si.product_id = p.id
       JOIN sales    s ON si.sale_id    = s.id
-      WHERE s.shop_id = ? AND p.brand_id = ? ${dateClause}
+      WHERE s.shop_id = ? AND si.parent_id IS NULL AND EXISTS (SELECT 1 FROM products p WHERE p.id = si.product_id AND p.brand_id = ?) ${dateClause}
     `).get(shopId, brandId, ...dateParams);
 
     totalRevenue = agg.revenue;
@@ -104,9 +105,8 @@ router.get('/', requireAuth, (req, res) => {
     `).get(shopId, ...dateParams);
 
     const cogs = db.prepare(`
-      SELECT COALESCE(SUM(si.quantity * p.buying_price), 0) as val
+      SELECT COALESCE(SUM(si.quantity * si.buying_price_at_sale), 0) as val
       FROM sale_items si
-      JOIN products p ON si.product_id = p.id
       JOIN sales    s ON si.sale_id    = s.id
       WHERE s.shop_id = ? ${dateClause}
     `).get(shopId, ...dateParams);
@@ -116,19 +116,43 @@ router.get('/', requireAuth, (req, res) => {
     totalCOGS = cogs.val;
   }
 
-  const netProfit = totalRevenue - totalCOGS;
+  // ── Returns & Refunds (Subtract from stats) ──
+  const returns = db.prepare(`
+    SELECT COALESCE(SUM(total_refund), 0) as val
+    FROM returns s
+    WHERE s.shop_id = ? ${dateClause}
+  `).get(shopId, ...dateParams);
+
+  const returnedCogs = db.prepare(`
+    SELECT COALESCE(SUM(ri.quantity * ri.buying_price_at_sale), 0) as val
+    FROM return_items ri
+    JOIN returns s ON ri.return_id = s.id
+    WHERE s.shop_id = ? ${dateClause}
+  `).get(shopId, ...dateParams);
+
+  totalRevenue -= returns.val;
+  totalCOGS -= returnedCogs.val;
+
+  let netProfit = totalRevenue - totalCOGS;
+
+  const damageStats = db.prepare(`
+    SELECT (SUM(manual_damage_loss) - SUM(recovered_damage_amount)) as total
+    FROM products
+    WHERE shop_id = ? AND is_deleted = 0
+  `).get(shopId);
+  const damageTotal = damageStats.total || 0;
 
   // ── Top products (filtered) ──
   let topProducts;
   if (brandId) {
     topProducts = db.prepare(`
-      SELECT p.name, b.name as brand_name,
+      SELECT COALESCE(p.name, si.custom_name) as name, b.name as brand_name,
              SUM(si.quantity) as qty_sold,
              SUM(si.quantity * si.price_at_sale) as revenue,
-             SUM(si.quantity * p.buying_price)   as cogs
+             SUM(si.quantity * si.buying_price_at_sale) as cogs
       FROM sale_items si
-      JOIN products p ON si.product_id = p.id
-      JOIN brands   b ON p.brand_id    = b.id
+      LEFT JOIN products p ON si.product_id = p.id
+      LEFT JOIN brands   b ON p.brand_id    = b.id
       JOIN sales    s ON si.sale_id    = s.id
       WHERE s.shop_id = ? AND p.brand_id = ? ${dateClause}
       GROUP BY si.product_id
@@ -137,16 +161,16 @@ router.get('/', requireAuth, (req, res) => {
     `).all(shopId, brandId, ...dateParams);
   } else {
     topProducts = db.prepare(`
-      SELECT p.name, b.name as brand_name,
+      SELECT COALESCE(p.name, si.custom_name) as name, b.name as brand_name,
              SUM(si.quantity) as qty_sold,
              SUM(si.quantity * si.price_at_sale) as revenue,
-             SUM(si.quantity * p.buying_price)   as cogs
+             SUM(si.quantity * si.buying_price_at_sale) as cogs
       FROM sale_items si
-      JOIN products p ON si.product_id = p.id
+      LEFT JOIN products p ON si.product_id = p.id
       LEFT JOIN brands b ON p.brand_id = b.id
       JOIN sales    s ON si.sale_id    = s.id
       WHERE s.shop_id = ? ${dateClause}
-      GROUP BY si.product_id
+      GROUP BY si.product_id, si.custom_name
       ORDER BY qty_sold DESC
       LIMIT 5
     `).all(shopId, ...dateParams);
@@ -187,6 +211,7 @@ router.get('/', requireAuth, (req, res) => {
     totalSales: totalSalesCount,
     totalCOGS,
     netProfit,
+    damageTotal,
     totalProducts,
     topProducts,
     recentSales,
