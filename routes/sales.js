@@ -519,7 +519,7 @@ router.get("/:id/bill", requireAuth, (req, res) => {
   const shop = db
     .prepare(
       `SELECT id, name, status, logo_path, receipt_header_text, receipt_phone, 
-              receipt_address, receipt_images_json, receipt_policies, use_logo_on_receipt,
+              receipt_address, receipt_images_json, receipt_policies, use_logo_on_receipt, receipt_font_family,
               header_font_size, header_font_weight, header_spacing,
               contact_font_size, contact_align, contact_padding,
               footer_font_size, footer_font_style, footer_margin,
@@ -703,7 +703,7 @@ router.get("/returns/:id/receipt", requireAuth, (req, res) => {
   const shop = db
     .prepare(
       `SELECT id, name, status, logo_path, receipt_header_text, receipt_phone, 
-              receipt_address, receipt_images_json, receipt_policies, use_logo_on_receipt,
+              receipt_address, receipt_images_json, receipt_policies, use_logo_on_receipt, receipt_font_family,
               header_font_size, header_font_weight, header_spacing,
               contact_font_size, contact_align, contact_padding,
               footer_font_size, footer_font_style, footer_margin,
