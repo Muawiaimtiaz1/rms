@@ -428,6 +428,13 @@ if (!tableExists) {
       console.log("✅ buying_price_at_sale column added to return_items.");
     }
 
+    const returnItemColsDamage = db.prepare("PRAGMA table_info(return_items)").all();
+    if (returnItemColsDamage.length > 0 && !returnItemColsDamage.some((col) => col.name === "is_damage")) {
+        console.log("🔧 Updating database: Adding is_damage to return_items...");
+        db.exec("ALTER TABLE return_items ADD COLUMN is_damage INTEGER NOT NULL DEFAULT 0;");
+        console.log("✅ is_damage column added to return_items.");
+    }
+
     // Migration: add damage_stock to products
     const productColsDamage = db.prepare("PRAGMA table_info(products)").all();
     if (!productColsDamage.some((col) => col.name === "damage_stock")) {
@@ -530,6 +537,7 @@ if (!tableExists) {
                 quantity INTEGER NOT NULL DEFAULT 1,
                 refund_price REAL NOT NULL DEFAULT 0,
                 buying_price_at_sale REAL NOT NULL DEFAULT 0,
+                is_damage INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE,
                 FOREIGN KEY (product_id) REFERENCES products(id)
             );
