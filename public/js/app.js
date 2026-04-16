@@ -3143,6 +3143,7 @@ async function printBill(saleId) {
 
   const win = window.open("", "_blank");
   win.document.write(`<!DOCTYPE html><html><head><title>Bill #${sale.id}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     @page { margin: 0; }
     html, body {
@@ -3432,6 +3433,7 @@ async function printReturnReceipt(returnId) {
 
   const win = window.open("", "_blank");
   win.document.write(`<!DOCTYPE html><html><head><title>Return Receipt #${ret.id}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     @page { margin: 0; }
     html, body { margin: 0; padding: 0; background: #f0f0f0; font-family: ${shop?.receipt_font_family || "'Courier New', Courier, monospace"}; }
