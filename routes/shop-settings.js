@@ -48,7 +48,7 @@ router.get("/", requireAuth, (req, res) => {
     const shop = db
       .prepare(
         `SELECT id, name, logo_path, receipt_header_text, receipt_phone, receipt_address, 
-                receipt_images_json, receipt_policies, use_logo_on_receipt,
+                receipt_images_json, receipt_policies, use_logo_on_receipt, receipt_font_family,
                 header_font_size, header_font_weight, header_spacing,
                 contact_font_size, contact_align, contact_padding,
                 footer_font_size, footer_font_style, footer_margin,
@@ -102,6 +102,7 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), (req, res) =>
       receipt_address,
       receipt_policies,
       use_logo_on_receipt,
+      receipt_font_family,
       header_font_size,
       header_font_weight,
       header_spacing,
@@ -144,6 +145,11 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), (req, res) =>
     if (use_logo_on_receipt !== undefined) {
       updates.push("use_logo_on_receipt = ?");
       values.push(use_logo_on_receipt === "true" || use_logo_on_receipt === true ? 1 : 0);
+    }
+
+    if (receipt_font_family !== undefined) {
+      updates.push("receipt_font_family = ?");
+      values.push(receipt_font_family);
     }
 
     // Typography settings

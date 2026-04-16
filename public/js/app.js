@@ -694,6 +694,7 @@ function renderReceiptPreview() {
   const images = settings.receipt_images || [];
 
   // Get typography settings from form or saved settings
+  const receiptFontFamily = document.getElementById("receipt-font-family")?.value || settings.receipt_font_family || "'Courier New', Courier, monospace";
   const headerFontSize = document.getElementById("header-font-size")?.value || settings.header_font_size || 18;
   const headerFontWeight = document.getElementById("header-font-weight")?.value || settings.header_font_weight || "bold";
   const headerSpacing = document.getElementById("header-spacing")?.value || settings.header_spacing || 10;
@@ -747,7 +748,7 @@ function renderReceiptPreview() {
   footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px; text-align: center; margin-top: ${footerMargin}px;">Thank you for your purchase!</div>`;
 
   return `
-    <div style="font-family: 'Courier New', Courier, monospace; width: 80mm; padding: 5mm; background: #fff; color: #000; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 0 auto;">
+    <div style="font-family: ${receiptFontFamily}; width: 80mm; padding: 5mm; background: #fff; color: #000; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 0 auto;">
       <div style="text-align: center; margin-bottom: ${sectionGap}px;">
         ${headerHtml}
         <div style="font-weight: bold; font-size: 14px; margin-top: 5px;">Sales Receipt</div>
@@ -965,6 +966,22 @@ function renderReceiptSettings() {
           </h4>
           
           <div class="space-y-6">
+            <!-- Global Font -->
+            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
+              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Global Receipt Font</h5>
+              <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Printer Font Family</label>
+                <select id="receipt-font-family" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
+                  <option value="'Courier New', Courier, monospace" ${!settings.receipt_font_family || settings.receipt_font_family === "'Courier New', Courier, monospace" ? "selected" : ""}>Courier New (Classic POS)</option>
+                  <option value="'bit array-a2', 'Courier New', monospace" ${settings.receipt_font_family === "'bit array-a2', 'Courier New', monospace" ? "selected" : ""}>Bit Array A2 / Dot Matrix</option>
+                  <option value="monospace" ${settings.receipt_font_family === "monospace" ? "selected" : ""}>System Monospace</option>
+                  <option value="Arial, sans-serif" ${settings.receipt_font_family === "Arial, sans-serif" ? "selected" : ""}>Arial (Thermal Clear)</option>
+                  <option value="'Inter', sans-serif" ${settings.receipt_font_family === "'Inter', sans-serif" ? "selected" : ""}>Inter (Modern Smooth)</option>
+                  <option value="'Roboto Mono', monospace" ${settings.receipt_font_family === "'Roboto Mono', monospace" ? "selected" : ""}>Roboto Mono</option>
+                </select>
+              </div>
+            </div>
+
             <!-- Header Text Styling -->
             <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
               <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Header (Shop Name)</h5>
@@ -1127,6 +1144,7 @@ async function saveReceiptSettings() {
     formData.append("receipt_policies", policies);
 
     // Typography settings
+    formData.append("receipt_font_family", document.getElementById("receipt-font-family")?.value || "'Courier New', Courier, monospace");
     formData.append("header_font_size", document.getElementById("header-font-size")?.value || "18");
     formData.append("header_font_weight", document.getElementById("header-font-weight")?.value || "bold");
     formData.append("header_spacing", document.getElementById("header-spacing")?.value || "10");
@@ -3133,7 +3151,7 @@ async function printBill(saleId) {
       background: #f0f0f0;
     }
     .receipt {
-      font-family: 'Courier New', Courier, monospace;
+      font-family: ${shop?.receipt_font_family || "'Courier New', Courier, monospace"};
       width: 80mm;
       margin: 0 auto;
       padding: 4mm;
@@ -3416,7 +3434,7 @@ async function printReturnReceipt(returnId) {
   win.document.write(`<!DOCTYPE html><html><head><title>Return Receipt #${ret.id}</title>
   <style>
     @page { margin: 0; }
-    html, body { margin: 0; padding: 0; background: #f0f0f0; font-family: 'Courier New', Courier, monospace; }
+    html, body { margin: 0; padding: 0; background: #f0f0f0; font-family: ${shop?.receipt_font_family || "'Courier New', Courier, monospace"}; }
     .receipt { width: 80mm; margin: 0 auto; padding: 4mm; color: #000; font-size: 12px; line-height: 1.2; background: #fff; min-height: 100vh; box-sizing: border-box; }
     @media print { html, body { background: #fff; } .receipt { margin: 0; width: 100%; min-height: auto; } }
     .text-center { text-align: center; }
