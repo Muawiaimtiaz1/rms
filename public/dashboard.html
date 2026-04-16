@@ -173,6 +173,18 @@
             box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.5);
         }
 
+        @font-face {
+            font-family: 'bit array-a2';
+            src: url('/fonts/be69564cba72b68a4f28d2f3d3139513.eot');
+            src: url('/fonts/be69564cba72b68a4f28d2f3d3139513.eot?#iefix') format('embedded-opentype'),
+                url('/fonts/be69564cba72b68a4f28d2f3d3139513.woff2') format('woff2'),
+                url('/fonts/be69564cba72b68a4f28d2f3d3139513.woff') format('woff'),
+                url('/fonts/be69564cba72b68a4f28d2f3d3139513.ttf') format('truetype'),
+                url('/fonts/be69564cba72b68a4f28d2f3d3139513.svg#BIT') format('svg');
+            font-weight: normal;
+            font-style: normal;
+        }
+
         @media print {
             body * {
                 visibility: hidden;
@@ -181,7 +193,7 @@
             #bill-content,
             #bill-content * {
                 visibility: visible;
-                font-family: 'Courier New', Courier, monospace;
+                font-family: 'bit array-a2', !important;
                 color: #000000 !important;
                 font-weight: 700 !important;
             }

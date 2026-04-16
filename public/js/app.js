@@ -3145,6 +3145,17 @@ async function printBill(saleId) {
   win.document.write(`<!DOCTYPE html><html><head><title>Bill #${sale.id}</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
+    @font-face {
+      font-family: 'bit array-a2';
+      src: url('/fonts/be69564cba72b68a4f28d2f3d3139513.eot');
+      src: url('/fonts/be69564cba72b68a4f28d2f3d3139513.eot?#iefix') format('embedded-opentype'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.woff2') format('woff2'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.woff') format('woff'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.ttf') format('truetype'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.svg#BIT') format('svg');
+      font-weight: normal;
+      font-style: normal;
+    }
     @page { margin: 0; }
     html, body {
       margin: 0;
@@ -3435,6 +3446,17 @@ async function printReturnReceipt(returnId) {
   win.document.write(`<!DOCTYPE html><html><head><title>Return Receipt #${ret.id}</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
+    @font-face {
+      font-family: 'bit array-a2';
+      src: url('/fonts/be69564cba72b68a4f28d2f3d3139513.eot');
+      src: url('/fonts/be69564cba72b68a4f28d2f3d3139513.eot?#iefix') format('embedded-opentype'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.woff2') format('woff2'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.woff') format('woff'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.ttf') format('truetype'),
+           url('/fonts/be69564cba72b68a4f28d2f3d3139513.svg#BIT') format('svg');
+      font-weight: normal;
+      font-style: normal;
+    }
     @page { margin: 0; }
     html, body { margin: 0; padding: 0; background: #f0f0f0; font-family: ${shop?.receipt_font_family || "'Courier New', Courier, monospace"}; }
     .receipt { width: 80mm; margin: 0 auto; padding: 4mm; color: #000; font-size: 12px; line-height: 1.2; background: #fff; min-height: 100vh; box-sizing: border-box; }
