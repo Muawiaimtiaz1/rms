@@ -11,8 +11,13 @@ const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
 const db = new Database(DB_PATH);
 
-// Enable WAL mode for better concurrency
+// Enable WAL mode and production performance PRAGMAs
 db.pragma("journal_mode = WAL");
+db.pragma("synchronous = NORMAL");
+db.pragma("journal_size_limit = 6144000"); // 6MB limit for WAL
+db.pragma("cache_size = -64000"); // 64MB cache
+db.pragma("temp_store = memory"); // In-memory temp tables
+db.pragma("mmap_size = 30000000000"); // ~30GB mmap
 db.pragma("foreign_keys = ON");
 
 // --- START MIGRATIONS ---
@@ -788,6 +793,45 @@ if (!tableExists) {
       console.log("✅ Restaurant columns added to sale_items.");
     }
   }
+}
+
+// -----------------------------------------------------------------------------
+// PERFORMANCE MIGRATION: Ensure all necessary secondary indices exist.
+// Running CREATE INDEX IF NOT EXISTS is very fast if they already exist,
+// and drastically speeds up the application in production environments.
+// -----------------------------------------------------------------------------
+try {
+  console.log("⚡ Ensuring database performance indexes exist...");
+  db.exec(`
+    -- Multi-tenant / shop_id Lookups (Most queried column in the system)
+    CREATE INDEX IF NOT EXISTS idx_users_shop_id ON users(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_products_shop_id ON products(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_sales_shop_id ON sales(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_expenses_shop_id ON expenses(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_customers_shop_id ON customers(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_brands_shop_id ON brands(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_tables_shop_id ON tables(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_returns_shop_id ON returns(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_product_batches_shop_id ON product_batches(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_activity_logs_shop_id ON activity_logs(shop_id);
+    
+    -- Foreign Keys & Relationships
+    CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_batch_id ON sale_items(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id);
+    CREATE INDEX IF NOT EXISTS idx_product_batches_product_id ON product_batches(product_id);
+    CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer_id ON customer_ledger(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id);
+    
+    -- Dates (Used heavily in reporting and dashboards)
+    CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
+    CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+    CREATE INDEX IF NOT EXISTS idx_customer_ledger_created_at ON customer_ledger(created_at);
+  `);
+  console.log("✅ Database performance indexes are ready.");
+} catch (e) {
+  console.error("⚠️ Failed to create performance indexes:", e);
 }
 
 module.exports = db;
