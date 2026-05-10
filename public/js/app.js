@@ -2517,9 +2517,9 @@ async function renderPOS() {
         </button>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full transition-all">
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 h-full transition-all">
         <!-- Products Panel -->
-        <div class="lg:col-span-2 space-y-4">
+        <div class="lg:col-span-3 space-y-4">
           <div class="flex gap-2">
             <input id="pos-search" oninput="filterPOSProducts()" placeholder="Search products…"
               class="flex-1 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" />
@@ -2529,32 +2529,38 @@ async function renderPOS() {
             <button onclick="filterPOSByCategory(null)" class="cat-pill active px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-bold border border-transparent transition-all" data-cat="">All</button>
             ${(_productCategories || []).map(c => `<button onclick="filterPOSByCategory('${c.name}')" class="cat-pill px-4 py-1.5 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700 hover:border-indigo-400 transition-all" data-cat="${c.name}">${c.name}</button>`).join('')}
           </div>
-          <div id="pos-products" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[56vh] overflow-y-auto pr-1"></div>
+          <div id="pos-products" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[72vh] overflow-y-auto pr-1"></div>
         </div>
 
         <!-- Cart / Order Panel -->
-        <div class="glass rounded-2xl p-5 flex flex-col shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
+        <div class="lg:col-span-2 glass rounded-2xl p-3 flex flex-col shadow-sm border border-slate-200 dark:border-slate-800 transition-all sticky top-24">
+          <h3 class="font-black text-slate-900 dark:text-white mb-2 flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800 uppercase tracking-tighter text-base">
+            <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            Current Order
+          </h3>
+          
+          <div id="cart-items" class="space-y-2 min-h-20"></div>
 
           <!-- Restaurant Fields (Hidden for Retail) -->
-          <div id="pos-restaurant-fields" class="${isRetail ? 'hidden' : ''}">
+          <div id="pos-restaurant-fields" class="${isRetail ? 'hidden' : ''} mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
             <!-- Dine-in specific: Table & Waiter -->
-            <div id="pos-dine-fields" class="mb-4 space-y-2">
+            <div id="pos-dine-fields" class="mb-2 space-y-2">
               <div class="grid grid-cols-2 gap-2">
                 <div>
-                  <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Table</label>
-                  <select id="pos-table" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm">
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Table</label>
+                  <select id="pos-table" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                     <option value="">-- Select Table --</option>
                     ${(tables || []).map(t => `<option value="${t.id}">${t.table_number} (${t.status})</option>`).join('')}
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Guests</label>
-                  <input id="pos-guests" type="number" min="1" value="1" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm" />
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Guests</label>
+                  <input id="pos-guests" type="number" min="1" value="1" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
                 </div>
               </div>
               <div>
-                <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Waiter</label>
-                <select id="pos-waiter" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm">
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Waiter</label>
+                <select id="pos-waiter" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                   <option value="">-- Select Waiter --</option>
                   ${waiterList.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
                 </select>
@@ -2562,27 +2568,27 @@ async function renderPOS() {
             </div>
 
             <!-- Delivery specific: Customer details + address -->
-            <div id="pos-delivery-fields" class="mb-4 space-y-2 hidden">
+            <div id="pos-delivery-fields" class="mb-2 space-y-2 hidden">
               <div>
-                <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Customer Name</label>
-                <input id="pos-delivery-name" type="text" placeholder="Customer name" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm" />
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer Name</label>
+                <input id="pos-delivery-name" type="text" placeholder="Customer name" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <div>
-                  <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Phone</label>
-                  <input id="pos-delivery-phone" type="text" placeholder="Phone" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm" />
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Phone</label>
+                  <input id="pos-delivery-phone" type="text" placeholder="Phone" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
                 </div>
                 <div>
-                  <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Rider</label>
-                  <select id="pos-rider" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm">
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Rider</label>
+                  <select id="pos-rider" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                     <option value="">-- Rider --</option>
                     ${waiterList.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
                   </select>
                 </div>
               </div>
               <div>
-                <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Delivery Address</label>
-                <input id="pos-delivery-addr" type="text" placeholder="Full address" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm" />
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Delivery Address</label>
+                <input id="pos-delivery-addr" type="text" placeholder="Full address" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
               </div>
             </div>
 
@@ -2590,88 +2596,82 @@ async function renderPOS() {
             <div id="pos-takeaway-fields" class="mb-4 space-y-2 hidden">
               <div class="grid grid-cols-2 gap-2">
                 <div>
-                  <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Token #</label>
-                  <input id="pos-token" type="text" placeholder="Auto or manual" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm" />
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Token #</label>
+                  <input id="pos-token" type="text" placeholder="Auto or manual" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
                 </div>
                 <div>
-                  <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Customer</label>
-                  <input id="pos-takeaway-name" type="text" placeholder="Optional" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm" />
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer</label>
+                  <input id="pos-takeaway-name" type="text" placeholder="Optional" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-          <h3 class="font-semibold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2 border-t pt-3 border-slate-200 dark:border-slate-700">
-            <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-            Order Items
-          </h3>
-          <div id="cart-items" class="flex-1 space-y-2 overflow-y-auto min-h-20"></div>
           <div class="border-t border-slate-200 dark:border-slate-700 mt-4 pt-4 space-y-4">
-            <div class="grid grid-cols-2 gap-4 text-base">
-               <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Discount (Rs)</label>
-                 <div class="flex items-center gap-1">
-                   <button type="button" onclick="$c('pos-discount').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">-</button>
-                   <input id="pos-discount" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-medium shadow-sm text-center" />
-                   <button type="button" onclick="$c('pos-discount').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">+</button>
-                 </div>
-               </div>
-
-               <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Tax (%)</label>
-                 <div class="flex items-center gap-1">
-                   <button type="button" onclick="$c('pos-tax').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">-</button>
-                   <input id="pos-tax" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-medium shadow-sm text-center" />
-                   <button type="button" onclick="$c('pos-tax').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">+</button>
-                 </div>
-               </div>
-            </div>
-
             <div class="space-y-2 text-base text-slate-600 dark:text-slate-300">
-               <div class="flex justify-between"><span>Subtotal</span><span id="cart-subtotal" class="font-medium">Rs. 0</span></div>
-               <div class="flex justify-between"><span>Tax Amount</span><span id="cart-tax-amt" class="font-medium">Rs. 0.00</span></div>
+               <div class="flex justify-between"><span>Subtotal</span><span id="cart-subtotal" class="font-bold text-slate-900 dark:text-white">Rs. 0</span></div>
+               <div class="flex justify-between text-rose-500"><span class="text-xs font-bold uppercase tracking-widest">Tax Amount</span><span id="cart-tax-amt" class="font-bold">Rs. 0.00</span></div>
             </div>
 
-            <div class="flex justify-between text-xl font-bold text-slate-900 dark:text-white border-t border-slate-200 dark:border-slate-800 pt-4">
-              <span>Grand Total</span>
-              <span id="cart-total" data-total="0" class="text-indigo-600 dark:text-indigo-400">Rs. 0.00</span>
+            <div class="flex justify-between items-center text-2xl font-black text-indigo-600 dark:text-indigo-400 border-t border-slate-200 dark:border-slate-800 pt-4">
+              <span class="text-slate-900 dark:text-white text-lg">Grand Total</span>
+              <span id="cart-total" data-total="0">Rs. 0.00</span>
             </div>
 
-            <div class="grid grid-cols-2 gap-4 text-base pt-4 border-t border-slate-200 dark:border-slate-800">
-               <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Payment</label>
-               <select id="pos-method" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base shadow-sm">
+            <div class="grid grid-cols-2 gap-4 text-base bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800">
+               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Discount (Rs)</label>
+                 <div class="flex items-center gap-1">
+                   <button type="button" onclick="$c('pos-discount').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
+                   <input id="pos-discount" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <button type="button" onclick="$c('pos-discount').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                 </div>
+               </div>
+
+               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Tax (%)</label>
+                 <div class="flex items-center gap-1">
+                   <button type="button" onclick="$c('pos-tax').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
+                   <input id="pos-tax" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <button type="button" onclick="$c('pos-tax').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                 </div>
+               </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 text-base pt-2 border-t border-slate-200 dark:border-slate-800">
+               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 px-1">Payment</label>
+               <select id="pos-method" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base shadow-sm font-bold">
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
                   <option value="online">Online</option>
                </select></div>
 
-               <div><label class="block text-sm text-slate-500 dark:text-slate-400 mb-1.5">Amount Received</label>
+               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Received</label>
                  <div class="flex items-center gap-1">
-                   <button type="button" onclick="$c('pos-received').stepDown();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">-</button>
-                   <input id="pos-received" type="number" min="0" value="0" oninput="calculateRemaining()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-medium shadow-sm text-center" />
-                   <button type="button" onclick="$c('pos-received').stepUp();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold">+</button>
+                   <button type="button" onclick="$c('pos-received').stepDown();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
+                   <input id="pos-received" type="number" min="0" value="0" oninput="calculateRemaining()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <button type="button" onclick="$c('pos-received').stepUp();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
                  </div>
                </div>
             </div>
 
-            <div class="flex justify-between text-lg font-bold mt-2">
-              <span class="text-slate-500 dark:text-slate-300">Remaining / Change</span>
-              <span id="cart-remaining" class="text-slate-800 dark:text-slate-100">Rs. 0.00</span>
+            <div class="flex justify-between items-center text-lg font-black mt-2 p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
+              <span class="text-emerald-700 dark:text-emerald-400 text-xs uppercase tracking-widest">Change / Dues</span>
+              <span id="cart-remaining" class="text-emerald-600 dark:text-emerald-400">Rs. 0.00</span>
             </div>
 
-            <div class="flex items-center gap-2 mb-3 p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl">
+            <div class="flex items-center gap-2 mb-2 p-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl">
               <input type="checkbox" id="pos-is-quotation" class="w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer" onchange="toggleQuotationMode(this.checked)" />
-              <label for="pos-is-quotation" class="text-xs font-bold text-amber-700 dark:text-amber-400 cursor-pointer select-none">
+              <label for="pos-is-quotation" class="text-xs font-black text-amber-700 dark:text-amber-400 cursor-pointer select-none">
                 Generate Quotation (Estimate Only)
               </label>
             </div>
 
             <div class="${isRetail ? 'grid-cols-1' : 'grid-cols-2'} grid gap-3 mt-1">
               <button onclick="checkout()" id="checkout-btn"
-                class="py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-base shadow-lg hover:shadow-indigo-500/25 transition-all disabled:opacity-40">
+                class="py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-lg shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-40 h-14">
                 ✅ Place Order
               </button>
               <button onclick="sendToKitchen()" id="kitchen-btn"
-                class="${isRetail ? 'hidden' : 'flex'} py-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-bold text-sm shadow-lg transition-all disabled:opacity-40 items-center justify-center">
+                class="${isRetail ? 'hidden' : 'flex'} py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm shadow-lg shadow-orange-500/20 transition-all disabled:opacity-40 items-center justify-center h-14">
                 👨‍🍳 Kitchen
               </button>
             </div>
@@ -2777,7 +2777,27 @@ function renderPOSProducts(products) {
             </span>
             ${(p.ingredients && p.ingredients.length > 0)
             ? `<span class="text-base font-black text-amber-500 uppercase">🍳 Recipe</span>`
-            : `<span class="text-2xl font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
+            : (p.components && p.components.length > 0)
+               ? `
+                 <div class="flex flex-col">
+                    <div class="flex items-baseline gap-2">
+                       <span class="text-2xl font-black ${p.stock > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>
+                       <span class="text-[10px] font-bold text-slate-400 uppercase">Complete</span>
+                    </div>
+                    ${(() => {
+                        const c = p.components[0];
+                        const child = productMap[c.id];
+                        if (!child || child.stock <= 0) return '';
+                        
+                        const looseUnits = Math.ceil(child.stock / c.quantity);
+                        const pieces = child.stock % c.quantity;
+                        const piecesText = pieces > 0 ? ` (${pieces} pieces left)` : ` (Full parts available)`;
+                        
+                        return `<div class="text-[11px] font-black text-amber-500 uppercase tracking-tighter mt-0.5">+ ${looseUnits} Loose / Broken${piecesText}</div>`;
+                    })()}
+                 </div>
+                 `
+               : `<span class="text-2xl font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
           }
           </div>
           <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
@@ -2812,7 +2832,7 @@ function addToCart(productId) {
   const isRecipe = product.ingredients && product.ingredients.length > 0;
   if (!isRecipe && product.stock <= 0) return toast("Out of stock", "error");
 
-  // SPECIAL POPUP FOR COMPOSITE PRODUCTS
+  // COMPOSITE PRODUCTS STILL NEED MODAL
   if (product.components && product.components.length > 0) {
     const compRows = product.components
       .map((c) => {
@@ -2861,6 +2881,28 @@ function addToCart(productId) {
                 <div class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Full Product Composition</div>
              </div>
           </div>
+          
+          <div id="composite-stock-sum" class="p-3 mb-2 bg-white/50 dark:bg-slate-900/40 rounded-xl border border-indigo-100 dark:border-indigo-800/50 flex gap-6">
+             <div>
+                <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Complete Units</div>
+                <div class="text-xl font-black text-indigo-600 dark:text-indigo-400">${product.stock}</div>
+             </div>
+             <div>
+                <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Current Loose</div>
+                <div class="text-xl font-black text-amber-500">
+                   ${(() => {
+                      const c = product.components[0];
+                      const child = productMap[c.id];
+                      if (!child || child.stock <= 0) return '0';
+                      
+                      const looseUnits = Math.ceil(child.stock / c.quantity);
+                      const remnant = child.stock % c.quantity;
+                      return `${looseUnits} <span class="text-[10px] font-black opacity-60">(${remnant || c.quantity} pcs left)</span>`;
+                   })()}
+                </div>
+             </div>
+          </div>
+
           <p class="text-[11px] text-indigo-700/70 dark:text-indigo-300/60 leading-relaxed italic">This product is a bundle. Selling it will automatically deduct all components listed below from the inventory in the quantities specified.</p>
         </div>
 
@@ -2906,14 +2948,17 @@ function addToCart(productId) {
 
   // STANDARD MODAL FOR REGULAR PRODUCTS
   const content = `
-    <div class="space-y-6 py-2">
-      <div class="flex items-center gap-4 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+    <div class="space-y-4 py-1">
+      <div class="flex items-center gap-4 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
         <div class="w-12 h-12 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
           <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
         </div>
         <div>
           <div class="font-bold text-slate-900 dark:text-white">${product.name}</div>
-          <div class="text-[10px] font-mono text-indigo-500 dark:text-indigo-400 mt-0.5">SKU: ${product.sku} | ${isRecipe ? '🍳 Recipe-Based' : `In Stock: ${product.stock}`}</div>
+          <div class="text-[10px] font-mono text-indigo-500 dark:text-indigo-400 mt-0.5">
+            SKU: ${product.sku} | ${isRecipe ? '🍳 Recipe-Based' : `In Stock: ${product.stock}`}
+            ${product.batches && product.batches.length > 0 ? `<br/><span class="text-rose-500 font-bold uppercase">Cost: Rs. ${product.batches[0].buying_price}</span>` : ''}
+          </div>
         </div>
       </div>
 
@@ -2938,7 +2983,7 @@ function addToCart(productId) {
       </div>
     </div>
   `;
-  openModal("Add to Cart", content, "max-w-md");
+  openModal("Add to Cart", content, "max-w-xl");
   setTimeout(() => $c("add-cart-qty").focus(), 100);
 }
 
@@ -3063,7 +3108,8 @@ async function commitSellPart(id, name, parentId, qtyInParent) {
 
       // Refresh local data
       allProducts = await api("/api/products");
-      product = allProducts.find((p) => p.name === name);
+      syncProductMap(allProducts); // Critical to update the map for child/parent links
+      product = productMap[id];
       toast(`Successfully harvested ${name} from ${parent.name}`, "success");
     } catch (err) {
       return toast("Auto-harvest failed: " + err.message, "error");
@@ -3140,20 +3186,59 @@ function removeFromCart(productId) {
 
 function renderCart() {
   const cartEl = $c("cart-items");
-  const count = cart.reduce((a, b) => a + b.quantity, 0);
 
-  // Show a simplified view instead of a long list
+  if (!cart.length) {
+    cartEl.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-10 opacity-30">
+        <svg class="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        <p class="text-[10px] font-black uppercase tracking-widest">Cart is Empty</p>
+      </div>`;
+    calculateCartTotal();
+    return;
+  }
+
   cartEl.innerHTML = `
-    <div class="flex flex-col items-center justify-center py-3 px-4 bg-slate-50/50 dark:bg-slate-900/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
-      <div class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 italic">Short Summary</div>
-      <div class="text-xl font-black text-slate-900 dark:text-white mb-3">
-        ${count} <span class="text-xs font-medium text-slate-400">Products</span>
-      </div>
-      <button onclick="showCartModal()" class="w-full py-2 px-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 text-sm font-bold hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:border-indigo-200 dark:hover:border-indigo-800 transition-all flex items-center justify-center gap-2 group shadow-sm">
-        <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
-        Expand Cart & Manage
-      </button>
-    </div>`;
+    <div class="space-y-2 mb-3">
+      ${cart.map(item => `
+        <div class="group relative grid grid-cols-10 items-center gap-2 p-1.5 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl hover:shadow-lg hover:border-indigo-200 dark:hover:border-indigo-800 transition-all overflow-hidden">
+          <!-- Image -->
+          <div class="col-span-1 w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 flex-shrink-0 overflow-hidden">
+             ${(item.product && item.product.image_url) 
+               ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
+               : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
+             }
+          </div>
+
+          <!-- Name -->
+          <div class="col-span-4 min-w-0">
+             <div class="text-[11px] font-black text-slate-900 dark:text-white truncate">${item.product?.name || item.name}</div>
+          </div>
+
+          <!-- Price -->
+          <div class="col-span-2 text-right">
+             <div class="text-[10px] font-black text-indigo-600 dark:text-indigo-400">Rs. ${item.selling_price}</div>
+          </div>
+
+          <!-- Quantity -->
+          <div class="col-span-2 flex items-center justify-center gap-1 bg-slate-50 dark:bg-slate-800 p-0.5 rounded-lg">
+            <button onclick="updateCartQty(${item.product_id}, ${item.quantity - 1})" class="w-6 h-6 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-500 transition-all font-bold">-</button>
+            <span class="w-4 text-center text-[10px] font-black">${item.quantity}</span>
+            <button onclick="updateCartQty(${item.product_id}, ${item.quantity + 1})" class="w-6 h-6 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-500 transition-all font-bold group-hover:shadow-sm">+</button>
+          </div>
+
+          <!-- Delete -->
+          <div class="col-span-1 flex justify-end">
+            <button onclick="removeFromCart(${item.product_id})" class="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-all shadow-sm" title="Remove Item">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+            </button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <button onclick="showCartModal()" class="w-full py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 transition-all flex items-center justify-center gap-2 shadow-inner">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+      Expand Cart Management
+    </button>`;
 
   calculateCartTotal();
 }
@@ -3181,8 +3266,16 @@ function showCartModal() {
       .map(
         (item) => `
             <tr class="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
-              <td class="py-4 px-2">
-                <div class="font-bold text-slate-800 dark:text-slate-200">${item.product ? item.product.name : item.name}</div>
+              <td class="py-2 px-2">
+                <div class="flex items-center gap-4">
+                  <div class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex-shrink-0 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm transition-transform hover:scale-110">
+                    ${(item.product && item.product.image_url) 
+                      ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
+                      : `<svg class="w-6 h-6 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
+                    }
+                  </div>
+                  <div>
+                    <div class="font-bold text-slate-800 dark:text-slate-200 leading-tight">${item.product ? item.product.name : item.name}</div>
                 ${item.product && item.product.batches && item.product.batches.length > 1
             ? `
                   <div class="mt-2">
@@ -3207,9 +3300,10 @@ function showCartModal() {
                   <div class="text-[10px] font-mono text-slate-400 dark:text-indigo-400 mt-0.5">${item.product ? item.product.sku : "MANUAL ITEM"}</div>
                 `
           }
+                  </div>
               </td>
-              <td class="py-4 px-2 text-slate-600 dark:text-slate-400 font-medium">Rs. ${item.selling_price}</td>
-              <td class="py-4 px-2">
+              <td class="py-2 px-2 text-slate-600 dark:text-slate-400 font-medium">Rs. ${item.selling_price}</td>
+              <td class="py-2 px-2">
                 <div class="flex items-center justify-center gap-3">
                   <button onclick="if(${item.quantity} > 1) { updateCartQty(${item.product_id}, ${item.quantity - 1}); showCartModal(); } else { toast('Use delete button to remove', 'info'); }"
                     class="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-slate-600 dark:text-slate-400 hover:text-rose-600 transition-all font-bold group-hover:shadow-sm">−</button>
@@ -3218,10 +3312,10 @@ function showCartModal() {
                     class="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-slate-600 dark:text-slate-400 hover:text-emerald-600 transition-all font-bold group-hover:shadow-sm">+</button>
                 </div>
               </td>
-              <td class="py-4 px-2 text-right font-black text-indigo-600 dark:text-indigo-400">
+              <td class="py-2 px-2 text-right font-black text-indigo-600 dark:text-indigo-400">
                 Rs. ${(item.selling_price * item.quantity).toFixed(0)}
               </td>
-              <td class="py-4 px-2 text-right">
+              <td class="py-2 px-2 text-right">
                 <button onclick="removeFromCart(${item.product_id}); cart.length ? showCartModal() : closeModal();"
                   class="p-2 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all" title="Remove">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -3234,7 +3328,7 @@ function showCartModal() {
         </tbody>
       </table>
     </div>
-    <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 -mx-6 -mb-6 p-6 rounded-b-2xl">
+    <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 -mx-6 -mb-6 p-4 rounded-b-2xl">
        <div class="text-sm text-slate-500 dark:text-slate-400">Total Items: <span class="font-bold text-slate-900 dark:text-slate-100">${cart.reduce((a, b) => a + b.quantity, 0)}</span></div>
        <div class="text-xl font-black text-slate-900 dark:text-white flex items-baseline gap-2">
          <span class="text-sm font-bold text-slate-400 uppercase tracking-wider">Net Total:</span>
@@ -3242,7 +3336,7 @@ function showCartModal() {
        </div>
     </div>
   `;
-  openModal("Detailed Cart Management", content, "max-w-4xl");
+  openModal("Detailed Cart Management", content, "max-w-7xl");
 }
 
 function calculateCartTotal() {
@@ -3403,7 +3497,7 @@ async function checkout() {
           <button onclick="closeModal();renderPOS();" class="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium transition-all">New Order</button>
         </div>
       </div>`,
-      "max-w-md",
+      "max-w-xl",
       true,
     );
   } catch (err) {
