@@ -29,9 +29,12 @@ app.use("/api/analytics", require("./routes/analytics"));
 app.use("/api/customers", require("./routes/customers"));
 app.use("/api/shops", require("./routes/shops"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));
+app.use('/api/raw-stock', require('./routes/raw-stock'));
+app.use('/api/recipes', require('./routes/recipes'));
 app.use("/api/shop-settings", require("./routes/shop-settings"));
 app.use("/api/admin", require("./routes/admin"));
-
+app.use("/api/tables", require("./routes/tables"));
+app.use("/api/kds", require("./routes/kds"));
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));

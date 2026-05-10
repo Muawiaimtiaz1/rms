@@ -193,7 +193,7 @@
             #bill-content,
             #bill-content * {
                 visibility: visible;
-                font-family: 'bit array-a2', !important;
+                font-family: 'bit array-a2' !important;
                 color: #000000 !important;
                 font-weight: 700 !important;
             }
@@ -204,6 +204,11 @@
                 left: 0;
                 width: 100%;
             }
+        }
+
+        #user-avatar {
+            border-radius: 50% !important;
+            background: #2563eb !important;
         }
 
         /* ─── Profile Dropdown ──────────────────────────── */
@@ -245,6 +250,125 @@
             background-color: #1e293b;
             color: #818cf8;
         }
+
+        /* ─── Lobby Styles (Odoo Inspired) ──────────────── */
+        .lobby-active {
+            background: linear-gradient(135deg, #e4e4f2 0%, #f0f0ff 100%) !important;
+        }
+
+        .dark .lobby-active {
+            background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%) !important;
+        }
+
+        .lobby-active #top-nav { 
+            background: transparent !important; 
+            border-bottom: none !important;
+            box-shadow: none !important;
+        }
+        
+        .lobby-active main { padding-top: 5rem !important; background: transparent !important; }
+        .lobby-active #page-header-wrap { display: none !important; }
+
+        .lobby-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 2.5rem 1rem;
+            padding: 2rem 0;
+            width: 100%;
+        }
+
+        .lobby-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            animation: lobby-fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+        }
+
+        .lobby-item:hover {
+            transform: scale(1.08);
+        }
+
+        .lobby-icon-wrap {
+            width: 82px;
+            height: 82px;
+            background: #ffffff;
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.02);
+            margin-bottom: 0.75rem;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.02);
+        }
+
+        .dark .lobby-icon-wrap {
+            background: #1e293b;
+            border-color: rgba(255,255,255,0.05);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        }
+
+        .lobby-label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #4b5563;
+            letter-spacing: -0.01em;
+        }
+
+        .dark .lobby-label {
+            color: #94a3b8;
+        }
+
+        /* Top Bar Enhancements */
+        .header-status-badge {
+            background: #ef4444;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2);
+        }
+
+        @keyframes lobby-fade-in {
+            0% { opacity: 0; transform: translateY(15px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        #lobby-controls {
+            display: flex;
+        }
+
+        .lobby-active #header-branding {
+            display: none !important;
+        }
+
+        .lobby-active #switch-module-btn {
+            display: none !important;
+        }
+
+        .animate-delay-100 { animation-delay: 100ms; }
+        .animate-delay-200 { animation-delay: 200ms; }
+        .animate-delay-300 { animation-delay: 300ms; }
+        .animate-delay-400 { animation-delay: 400ms; }
+        .animate-delay-500 { animation-delay: 500ms; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
     </style>
 </head>
 
@@ -255,7 +379,7 @@
         class="fixed top-0 left-0 w-full h-16 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 z-50 flex items-center justify-between px-6 transition-colors duration-300 shadow-sm">
 
         <!-- Branding (Left) -->
-        <div class="flex items-center gap-3 min-w-fit">
+        <div class="flex items-center gap-3 min-w-fit" id="header-branding">
             <div
                 class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-900/20">
                 <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -270,119 +394,46 @@
                     id="header-shop-mgmt">Management</div>
             </div>
         </div>
-
-        <!-- Main Navigation (Center) -->
-        <nav class="flex-1 flex items-center justify-center gap-1 mx-8 overflow-x-auto no-scrollbar py-1">
-            <a href="#dashboard" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-dashboard" onclick="navigate('dashboard')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                </svg>
-                Dashboard
-            </a>
-            <a href="#brands" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-brands" onclick="navigate('brands')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                </svg>
-                Brands
-            </a>
-            <a href="#products" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-products" onclick="navigate('products')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                </svg>
-                Products
-            </a>
-            <a href="#pos" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm" id="nav-pos"
-                onclick="navigate('pos')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-                POS
-            </a>
-            <a href="#sales-history" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-sales-history" onclick="navigate('sales-history')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                </svg>
-                History
-            </a>
-            <a href="#expenses" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-expenses" onclick="navigate('expenses')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                Expenses
-            </a>
-            <a href="#customers" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-customers" onclick="navigate('customers')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                Customers
-            </a>
-
-            <a href="#settings" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                id="nav-settings" onclick="navigate('settings')">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Settings
-            </a>
-
-            <!-- Dynamic Wrappers (Role Based) -->
-            <div id="nav-users-wrap" class="hidden flex items-center">
-                <a href="#users" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                    id="nav-users" onclick="navigate('users')">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+        <!-- Lobby Controls (Always shown) -->
+        <div id="lobby-controls" class="flex-1 flex items-center justify-end px-4 gap-4 sm:gap-6">
+            
+            <div class="hidden sm:flex items-center gap-3">
+                <div class="header-status-badge">
+                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
                     </svg>
-                    Users
-                </a>
+                    Pending Activation
+                </div>
+                <!-- AI Icon (Odoo style) -->
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-500 via-pink-500 to-orange-500 flex items-center justify-center text-white text-[10px] font-black shadow-sm">
+                    AI
+                </div>
             </div>
-            <div id="nav-shops-wrap" class="hidden flex items-center gap-1">
-                <a href="#hierarchy" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                    id="nav-hierarchy" onclick="navigate('hierarchy')">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                    Master
-                </a>
-                <a href="#subscriptions" class="nav-link flex items-center gap-2 whitespace-nowrap text-xs sm:text-sm"
-                    id="nav-subscriptions" onclick="navigate('subscriptions')">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    Billing
-                </a>
+            
+            <div class="hidden md:flex items-center gap-4 text-slate-500">
+                <div class="relative group cursor-pointer">
+                    <button class="hover:text-indigo-600 transition-colors">
+                        <svg class="w-5.5 h-5.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                    </button>
+                    <span class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-white dark:border-slate-900">3</span>
+                </div>
+                <button class="hover:text-indigo-600 transition-colors">
+                    <svg class="w-5.5 h-5.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </button>
+                <div class="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
             </div>
 
-            <!-- Badges -->
-            <a href="#products-low-stock"
-                class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-600 dark:text-amber-400 text-xs font-bold transition-all hover:bg-amber-100"
-                id="nav-products-low-stock" onclick="navigate('products-low-stock')">
-                <span id="low-stock-count">0</span> Low
-            </a>
-            <a href="#sales-pending"
-                class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-rose-600 dark:text-rose-400 text-xs font-bold transition-all hover:bg-rose-100"
-                id="nav-sales-pending" onclick="navigate('sales-pending')">
-                <span id="pending-dues-count">0</span> Dues
-            </a>
-        </nav>
+            <!-- Switch Module Button (Hidden in lobby via CSS) -->
+            <div id="switch-module-btn" class="flex items-center">
+                 <button onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" 
+                         class="flex items-center gap-2 px-3 py-2 sm:px-4 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition-all border border-indigo-100/50 dark:border-indigo-800/50">
+                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                     </svg>
+                     <span class="hidden sm:block">Switch Module</span>
+                 </button>
+            </div>
+        </div>
 
         <!-- User Controls (Right) -->
         <div class="relative min-w-fit">
@@ -425,6 +476,17 @@
                         Account Settings
                     </div>
 
+                    <div onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" class="dropdown-item rounded-xl">
+                        <div
+                            class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                            </svg>
+                        </div>
+                        Switch Module
+                    </div>
+ 
                     <div onclick="toggleTheme()" class="dropdown-item rounded-xl">
                         <div
                             class="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center">
@@ -462,7 +524,7 @@
     <!-- Main content container -->
     <main class="pt-20 min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <div class="container mx-auto px-6 pb-20">
-            <header class="flex items-center justify-between mb-8">
+            <header id="page-header-wrap" class="flex items-center justify-between mb-8">
                 <h2 class="text-3xl font-black text-slate-900 dark:text-white tracking-tighter" id="page-title">
                     Dashboard</h2>
                 <div class="h-px flex-1 bg-slate-200 dark:bg-slate-800 mx-8"></div>

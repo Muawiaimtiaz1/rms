@@ -15,6 +15,16 @@ const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+// --- START MIGRATIONS ---
+try {
+  // Fix for multi-batch returns
+  db.exec("ALTER TABLE return_items ADD COLUMN sale_item_id INTEGER REFERENCES sale_items(id);");
+  console.log("✅ DB Migration Applied: added sale_item_id to return_items");
+} catch (e) {
+  // ignore if already exists
+}
+// --- END MIGRATIONS ---
+
 // Initialize tables from schema only if they don't exist
 const tableExists = db
   .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shops'")
@@ -694,6 +704,89 @@ if (!tableExists) {
         console.log(`✅ ${col.name} column added to shops.`);
       }
     });
+
+    if (!shopCols.some((c) => c.name === "shop_type")) {
+      console.log("🔧 Updating database: Adding shop_type to shops...");
+      db.exec("ALTER TABLE shops ADD COLUMN shop_type TEXT DEFAULT 'retail';");
+      console.log("✅ shop_type column added to shops.");
+    }
+
+    // Migration: add user_id to brand_expense_payments
+    const bepCols = db.prepare("PRAGMA table_info(brand_expense_payments)").all();
+    if (!bepCols.some((col) => col.name === "user_id")) {
+      console.log("🔧 Updating database: Adding user_id to brand_expense_payments...");
+      db.exec("ALTER TABLE brand_expense_payments ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;");
+      console.log("✅ user_id column added to brand_expense_payments.");
+    }
+    // Migration: Restaurant Management System Columns
+    const salesRestCols = db.prepare("PRAGMA table_info(sales)").all();
+    if (!salesRestCols.some((col) => col.name === "order_type")) {
+      console.log("🔧 Updating database: Adding Restaurant POS columns to sales...");
+      db.exec(`
+        ALTER TABLE sales ADD COLUMN delivery_address TEXT DEFAULT '';
+        ALTER TABLE sales ADD COLUMN order_type TEXT DEFAULT 'dine_in';
+        ALTER TABLE sales ADD COLUMN order_status TEXT DEFAULT 'pending';
+        ALTER TABLE sales ADD COLUMN table_id INTEGER REFERENCES tables(id);
+        ALTER TABLE sales ADD COLUMN waiter_id INTEGER REFERENCES users(id);
+        ALTER TABLE sales ADD COLUMN rider_id INTEGER REFERENCES users(id);
+        ALTER TABLE sales ADD COLUMN guest_count INTEGER DEFAULT 1;
+        ALTER TABLE sales ADD COLUMN token_number TEXT;
+        ALTER TABLE sales ADD COLUMN special_instructions TEXT;
+      `);
+      console.log("✅ Restaurant columns added to sales.");
+    }
+
+    const salesColsCheckNotes = db.prepare("PRAGMA table_info(sales)").all();
+    if (!salesColsCheckNotes.some((col) => col.name === "special_instructions")) {
+      console.log("🔧 Updating database: Adding special_instructions to sales...");
+      db.exec("ALTER TABLE sales ADD COLUMN special_instructions TEXT;");
+      console.log("✅ special_instructions column added to sales.");
+    }
+    
+    // Check for tables table
+    const tablesTableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='tables'"
+      )
+      .get();
+    if (!tablesTableExists) {
+      console.log("🔧 Updating database: Adding tables table...");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tables (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shop_id INTEGER NOT NULL,
+          table_number TEXT NOT NULL,
+          capacity INTEGER DEFAULT 4,
+          status TEXT DEFAULT 'available',
+          created_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+        );
+      `);
+      // Seed some default tables for existing shops
+      db.exec(`
+        INSERT INTO tables (shop_id, table_number, capacity)
+        SELECT id, 'T1', 4 FROM shops;
+        INSERT INTO tables (shop_id, table_number, capacity)
+        SELECT id, 'T2', 4 FROM shops;
+        INSERT INTO tables (shop_id, table_number, capacity)
+        SELECT id, 'T3', 6 FROM shops;
+        INSERT INTO tables (shop_id, table_number, capacity)
+        SELECT id, 'T4', 2 FROM shops;
+      `);
+      console.log("✅ tables table added.");
+    }
+
+    // Migration: Sale Items Restaurant Columns
+    const saleItemsRestCols = db.prepare("PRAGMA table_info(sale_items)").all();
+    if (!saleItemsRestCols.some((col) => col.name === "special_instructions")) {
+      console.log("🔧 Updating database: Adding Restaurant POS columns to sale_items...");
+      db.exec(`
+        ALTER TABLE sale_items ADD COLUMN special_instructions TEXT;
+        ALTER TABLE sale_items ADD COLUMN variants_json TEXT;
+        ALTER TABLE sale_items ADD COLUMN addons_json TEXT;
+      `);
+      console.log("✅ Restaurant columns added to sale_items.");
+    }
   }
 }
 

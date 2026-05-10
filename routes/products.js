@@ -1,7 +1,39 @@
 const express = require('express');
 const db = require('../db/db');
 const { requireAuth } = require('../middleware/auth');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const router = express.Router();
+
+// MULTER CONFIG FOR PRODUCT IMAGES
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, "..", "public", "uploads", "products");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `prod-${uniqueSuffix}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|webp/;
+    if (allowed.test(path.extname(file.originalname).toLowerCase())) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images (jpg, png, webp) allowed"));
+    }
+  },
+});
 
 // GET /api/products
 router.get('/', requireAuth, (req, res) => {
@@ -24,6 +56,21 @@ router.get('/', requireAuth, (req, res) => {
     (
       SELECT json_group_array(
         json_object(
+          'id', ri.raw_stock_id,
+          'name', rs.name,
+          'unit', rs.unit,
+          'quantity', ri.quantity,
+          'cost', (SELECT buying_price FROM raw_stock_batches WHERE raw_stock_id = rs.id ORDER BY id DESC LIMIT 1)
+        )
+      )
+      FROM product_recipe_links prl
+      JOIN recipe_ingredients ri ON prl.recipe_id = ri.recipe_id
+      JOIN raw_stocks rs ON ri.raw_stock_id = rs.id
+      WHERE prl.product_id = p.id
+    ) as ingredients,
+    (
+      SELECT json_group_array(
+        json_object(
           'id', pb.id,
           'buying_price', pb.buying_price,
           'quantity', pb.quantity,
@@ -40,12 +87,20 @@ router.get('/', requireAuth, (req, res) => {
     ORDER BY p.name ASC
   `).all(req.session.user.shop_id);
 
-    // Parse components JSON
+    // Parse components JSON & format images
     products.forEach(p => {
+        if (p.image_path) {
+            p.image_url = p.image_path;
+        }
         try {
             p.components = JSON.parse(p.components);
             if (!Array.isArray(p.components) || p.components.length === 0) p.components = null;
         } catch (e) { p.components = null; }
+
+        try {
+            p.ingredients = JSON.parse(p.ingredients);
+            if (!Array.isArray(p.ingredients) || p.ingredients.length === 0) p.ingredients = null;
+        } catch (e) { p.ingredients = null; }
 
         try {
             p.batches = JSON.parse(p.batches);
@@ -57,20 +112,35 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // POST /api/products
-router.post('/', requireAuth, (req, res) => {
-    const { sku, name, category, description, brand_id, buying_price, selling_price, stock, min_stock_level, components } = req.body;
-    if (!sku || !name || !category || !brand_id) return res.status(400).json({ error: 'sku, name, category, and brand_id required' });
-    if (buying_price <= 0 || selling_price <= 0) return res.status(400).json({ error: 'Cost price and selling price must be greater than 0' });
-    if (selling_price < buying_price) return res.status(400).json({ error: 'Selling price cannot be less than cost price' });
+router.post('/', requireAuth, upload.single('image'), (req, res) => {
+    let { sku, name, category, description, brand_id, buying_price, selling_price, stock, min_stock_level, components, ingredients } = req.body;
+    
+    // Coerce FormData strings to correct types
+    brand_id = parseInt(brand_id) || 0;
+    buying_price = parseFloat(buying_price) || 0;
+    selling_price = parseFloat(selling_price) || 0;
+    stock = parseInt(stock) || 0;
+    min_stock_level = parseInt(min_stock_level) || 0;
+    if (typeof components === 'string') { try { components = JSON.parse(components); } catch(e) { components = []; } }
+    if (typeof ingredients === 'string') { try { ingredients = JSON.parse(ingredients); } catch(e) { ingredients = []; } }
+
+    const hasIngredients = Array.isArray(ingredients) && ingredients.length > 0;
+
+    if (!sku || !name || !category || !brand_id) return res.status(400).json({ error: 'SKU, name, category, and brand are required' });
+    if (selling_price <= 0) return res.status(400).json({ error: 'Selling price must be greater than 0' });
+    if (!hasIngredients && buying_price <= 0) return res.status(400).json({ error: 'Cost price must be greater than 0 (or add ingredients to auto-calculate)' });
+    if (!hasIngredients && selling_price < buying_price) return res.status(400).json({ error: 'Selling price cannot be less than cost price' });
 
     // Ensure brand belongs to shop
     const brand = db.prepare('SELECT id FROM brands WHERE id = ? AND shop_id = ?').get(brand_id, req.session.user.shop_id);
     if (!brand) return res.status(400).json({ error: 'Invalid brand' });
 
+    const image_path = req.file ? `/uploads/products/${req.file.filename}` : null;
+
     const transaction = db.transaction(() => {
         const result = db.prepare(
-            'INSERT INTO products (sku, name, category, description, brand_id, user_id, shop_id, buying_price, selling_price, stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(sku, name, category, description || null, brand_id, req.session.user.id, req.session.user.shop_id, buying_price || 0, selling_price || 0, stock || 0, min_stock_level || 0);
+            'INSERT INTO products (sku, name, category, description, brand_id, user_id, shop_id, buying_price, selling_price, stock, min_stock_level, image_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(sku, name, category, description || null, brand_id, req.session.user.id, req.session.user.shop_id, buying_price || 0, selling_price || 0, stock || 0, min_stock_level || 0, image_path);
 
         const productId = result.lastInsertRowid;
 
@@ -80,6 +150,21 @@ router.post('/', requireAuth, (req, res) => {
               .run(productId, req.session.user.shop_id, buying_price || 0, stock);
         }
 
+        // --- Handling Ingredients (Restaurant) ---
+        if (Array.isArray(ingredients) && ingredients.length > 0) {
+            const recipeResult = db.prepare('INSERT INTO recipes (shop_id, name) VALUES (?, ?)').run(req.session.user.shop_id, `Recipe: ${name}`);
+            const recipeId = recipeResult.lastInsertRowid;
+            
+            db.prepare('INSERT INTO product_recipe_links (shop_id, product_id, recipe_id) VALUES (?, ?, ?)')
+              .run(req.session.user.shop_id, productId, recipeId);
+
+            const insertIng = db.prepare('INSERT INTO recipe_ingredients (recipe_id, raw_stock_id, quantity) VALUES (?, ?, ?)');
+            for (const ing of ingredients) {
+                insertIng.run(recipeId, ing.raw_stock_id, ing.quantity);
+            }
+        }
+
+        // --- Handling Components (Retail) ---
         const hasCompositePermission = req.session.user.allowed_panels && req.session.user.allowed_panels.includes('composite_products');
         if (hasCompositePermission && Array.isArray(components) && components.length > 0) {
             const insertComp = db.prepare('INSERT INTO product_compositions (parent_product_id, component_product_id, custom_name, quantity, price, cost) VALUES (?, ?, ?, ?, ?, ?)');
@@ -123,21 +208,72 @@ router.post('/', requireAuth, (req, res) => {
 });
 
 // PUT /api/products/:id
-router.put('/:id', requireAuth, (req, res) => {
-    const { sku, name, category, description, brand_id, buying_price, selling_price, stock, min_stock_level, components } = req.body;
+router.put('/:id', requireAuth, upload.single('image'), (req, res) => {
+    let { sku, name, category, description, brand_id, buying_price, selling_price, stock, min_stock_level, components, ingredients } = req.body;
+    
+    // Coerce FormData strings to correct types
+    brand_id = parseInt(brand_id) || 0;
+    buying_price = parseFloat(buying_price) || 0;
+    selling_price = parseFloat(selling_price) || 0;
+    stock = parseInt(stock) || 0;
+    min_stock_level = parseInt(min_stock_level) || 0;
+    if (typeof components === 'string') { try { components = JSON.parse(components); } catch(e) { components = []; } }
+    if (typeof ingredients === 'string') { try { ingredients = JSON.parse(ingredients); } catch(e) { ingredients = []; } }
     const productId = parseInt(req.params.id);
 
     const product = db.prepare('SELECT * FROM products WHERE id = ? AND shop_id = ?').get(productId, req.session.user.shop_id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
-    if (buying_price <= 0 || selling_price <= 0) return res.status(400).json({ error: 'Cost price and selling price must be greater than 0' });
-    if (selling_price < buying_price) return res.status(400).json({ error: 'Selling price cannot be less than cost price' });
+
+    const hasIngredients = Array.isArray(ingredients) && ingredients.length > 0;
+    if (selling_price <= 0) return res.status(400).json({ error: 'Selling price must be greater than 0' });
+    if (!hasIngredients && buying_price <= 0) return res.status(400).json({ error: 'Cost price must be greater than 0 (or add ingredients)' });
+    if (!hasIngredients && selling_price < buying_price) return res.status(400).json({ error: 'Selling price cannot be less than cost price' });
+
+    // Handle image
+    let image_path = product.image_path;
+    if (req.file) {
+        // Delete old image if exists
+        if (product.image_path) {
+            const oldPath = path.join(__dirname, '..', 'public', product.image_path);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+        image_path = `/uploads/products/${req.file.filename}`;
+    }
 
     const transaction = db.transaction(() => {
         db.prepare(
-            'UPDATE products SET sku=?, name=?, category=?, description=?, brand_id=?, buying_price=?, selling_price=?, stock=?, min_stock_level=? WHERE id=? AND shop_id=?'
-        ).run(sku, name, category, description || null, brand_id, buying_price || 0, selling_price || 0, stock ?? product.stock, min_stock_level || 0, productId, req.session.user.shop_id);
+            'UPDATE products SET sku=?, name=?, category=?, description=?, brand_id=?, buying_price=?, selling_price=?, stock=?, min_stock_level=?, image_path=? WHERE id=? AND shop_id=?'
+        ).run(sku, name, category, description || null, brand_id, buying_price || 0, selling_price || 0, stock ?? product.stock, min_stock_level || 0, image_path, productId, req.session.user.shop_id);
 
-        // Update composition
+        // --- Update Ingredients (Restaurant) ---
+        if (Array.isArray(ingredients)) {
+            // Check if recipe already exists
+            let recipeId;
+            const existingLink = db.prepare('SELECT recipe_id FROM product_recipe_links WHERE product_id = ?').get(productId);
+            
+            if (existingLink) {
+                recipeId = existingLink.recipe_id;
+                db.prepare('DELETE FROM recipe_ingredients WHERE recipe_id = ?').run(recipeId);
+            } else if (ingredients.length > 0) {
+                const recipeResult = db.prepare('INSERT INTO recipes (shop_id, name) VALUES (?, ?)').run(req.session.user.shop_id, `Recipe: ${name}`);
+                recipeId = recipeResult.lastInsertRowid;
+                db.prepare('INSERT INTO product_recipe_links (shop_id, product_id, recipe_id) VALUES (?, ?, ?)')
+                  .run(req.session.user.shop_id, productId, recipeId);
+            }
+
+            if (recipeId && ingredients.length > 0) {
+                const insertIng = db.prepare('INSERT INTO recipe_ingredients (recipe_id, raw_stock_id, quantity) VALUES (?, ?, ?)');
+                for (const ing of ingredients) {
+                    insertIng.run(recipeId, ing.raw_stock_id, ing.quantity);
+                }
+            } else if (recipeId && ingredients.length === 0) {
+                // If ingredients are cleared, we can delete the link and recipe if it's only for this product
+                db.prepare('DELETE FROM product_recipe_links WHERE product_id = ?').run(productId);
+                // Optionally delete the recipe record too if it's not reused
+            }
+        }
+
+        // Update composition (Retail Components)
         db.prepare('DELETE FROM product_compositions WHERE parent_product_id = ?').run(productId);
         const hasCompositePermission = req.session.user.allowed_panels && req.session.user.allowed_panels.includes('composite_products');
         if (hasCompositePermission && Array.isArray(components) && components.length > 0) {

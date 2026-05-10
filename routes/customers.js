@@ -237,7 +237,15 @@ router.get("/:id", requireAuth, (req, res) => {
 
 // ─── POST /api/customers ──────────────────────────────────────────────────────
 router.post("/", requireAuth, (req, res) => {
-  const { name, phone, email, address, notes, credit_limit = 0 } = req.body;
+  const {
+    name,
+    phone,
+    email,
+    address,
+    notes,
+    credit_limit = 0,
+    opening_balance = 0,
+  } = req.body;
   const shopId = req.session.user.shop_id;
 
   if (!name)
@@ -256,25 +264,49 @@ router.post("/", requireAuth, (req, res) => {
   }
 
   try {
-    const result = db
-      .prepare(
-        `
-      INSERT INTO customers (
-        shop_id, name, phone, email, address, notes, credit_limit, current_balance, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active')
-    `,
-      )
-      .run(
-        shopId,
-        name.trim(),
-        phone || null,
-        email || null,
-        address || null,
-        notes || null,
-        parseFloat(credit_limit) || 0,
-      );
+    const openingBal = parseFloat(opening_balance) || 0;
 
-    res.json({ ok: true, id: result.lastInsertRowid });
+    let customerId;
+    db.transaction(() => {
+      const result = db
+        .prepare(
+          `
+        INSERT INTO customers (
+          shop_id, name, phone, email, address, notes, credit_limit, current_balance, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `,
+        )
+        .run(
+          shopId,
+          name.trim(),
+          phone || null,
+          email || null,
+          address || null,
+          notes || null,
+          parseFloat(credit_limit) || 0,
+          openingBal,
+        );
+
+      customerId = result.lastInsertRowid;
+
+      if (openingBal !== 0) {
+        db.prepare(
+          `
+          INSERT INTO customer_ledger (customer_id, shop_id, type, amount, balance_after, note, created_by)
+          VALUES (?, ?, 'opening', ?, ?, ?, ?)
+        `,
+        ).run(
+          customerId,
+          shopId,
+          Math.abs(openingBal),
+          openingBal,
+          "Opening balance",
+          req.session.user.id,
+        );
+      }
+    })();
+
+    res.json({ ok: true, id: customerId });
   } catch (e) {
     console.error("Customer create error:", e);
     res.status(500).json({ error: "Failed to create customer" });
@@ -441,6 +473,71 @@ router.post("/:id/payment", requireAuth, (req, res) => {
   }
 });
 
+// ─── POST /api/customers/:id/adjustment ──────────────────────────────────────
+router.post("/:id/adjustment", requireAuth, (req, res) => {
+  const customerId = parseInt(req.params.id, 10);
+  const shopId = req.session.user.shop_id;
+  const { amount, type, note = "" } = req.body; // type: 'debit' (increase debt) or 'credit' (decrease debt)
+
+  if (!amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ error: "Valid amount required" });
+  }
+  if (!["debit", "credit"].includes(type)) {
+    return res.status(400).json({ error: "Type must be 'debit' or 'credit'" });
+  }
+
+  const customer = db
+    .prepare(`SELECT * FROM customers WHERE id = ? AND shop_id = ?`)
+    .get(customerId, shopId);
+
+  if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+  try {
+    const adjAmount = parseFloat(amount);
+    let newBalance;
+
+    db.transaction(() => {
+      if (type === "debit") {
+        newBalance = Number(customer.current_balance || 0) + adjAmount;
+      } else {
+        newBalance = Math.max(0, Number(customer.current_balance || 0) - adjAmount);
+      }
+
+      newBalance = parseFloat(newBalance.toFixed(2));
+
+      db.prepare(
+        `
+        UPDATE customers
+        SET current_balance = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `,
+      ).run(newBalance, customerId);
+
+      db.prepare(
+        `
+        INSERT INTO customer_ledger (customer_id, shop_id, type, amount, balance_after, note, created_by)
+        VALUES (?, ?, 'adjustment', ?, ?, ?, ?)
+      `,
+      ).run(
+        customerId,
+        shopId,
+        adjAmount,
+        newBalance,
+        note || `Manual ${type} adjustment`,
+        req.session.user.id,
+      );
+    })();
+
+    res.json({
+      ok: true,
+      new_balance: newBalance,
+    });
+  } catch (e) {
+    console.error("Adjustment error:", e);
+    res.status(500).json({ error: "Failed to record adjustment" });
+  }
+});
+
 // ─── GET /api/customers/:id/ledger.pdf ───────────────────────────────────────
 router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
   const customerId = parseInt(req.params.id, 10);
@@ -457,6 +554,19 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
   const params = [customerId];
   const dateClause = buildDateClause("cl.created_at", from, to, params);
 
+  // Calculate Balance Brought Forward if 'from' is provided
+  let balanceBF = 0;
+  if (from) {
+    const bfEntry = db.prepare(`
+      SELECT balance_after 
+      FROM customer_ledger 
+      WHERE customer_id = ? AND date(created_at) < date(?) 
+      ORDER BY created_at DESC, id DESC 
+      LIMIT 1
+    `).get(customerId, from);
+    if (bfEntry) balanceBF = Number(bfEntry.balance_after || 0);
+  }
+
   const ledger = db
     .prepare(
       `
@@ -471,15 +581,37 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
     .all(...params);
 
   const totalDebits = ledger
-    .filter((e) => e.type === "sale")
+    .filter((e) => e.type === "sale" || (e.type === "adjustment" && e.amount > 0 && e.balance_after > (e.balance_after - e.amount))) // Simplified check
     .reduce((s, e) => s + Number(e.amount || 0), 0);
-  const totalCredits = ledger
-    .filter((e) => e.type === "payment")
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
+    
+  // Refined debit/credit calculation based on balance change
+  let periodDebits = 0;
+  let periodCredits = 0;
+  let runningBal = balanceBF;
+
+  ledger.forEach(e => {
+      const amt = Number(e.amount || 0);
+      if (e.type === 'sale') {
+          periodDebits += amt;
+      } else if (e.type === 'payment') {
+          periodCredits += amt;
+      } else if (e.type === 'return') {
+          periodCredits += amt;
+      } else if (e.type === 'adjustment' || e.type === 'opening') {
+          // Check if adjustment was an increase or decrease
+          if (e.balance_after > runningBal) {
+              periodDebits += amt;
+          } else {
+              periodCredits += amt;
+          }
+      }
+      runningBal = Number(e.balance_after || 0);
+  });
+
   const closingBalance =
     ledger.length > 0
       ? Number(ledger[ledger.length - 1].balance_after || 0)
-      : Number(customer.current_balance || 0);
+      : balanceBF;
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
@@ -540,13 +672,13 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
   const summaryItems = [
     {
       label: "TOTAL DEBIT",
-      val: `Rs. ${fmtMoney(totalDebits)}`,
+      val: `Rs. ${fmtMoney(periodDebits)}`,
       bg: "#fef3c7",
       fg: "#92400e",
     },
     {
       label: "TOTAL CREDIT",
-      val: `Rs. ${fmtMoney(totalCredits)}`,
+      val: `Rs. ${fmtMoney(periodCredits)}`,
       bg: "#d1fae5",
       fg: "#065f46",
     },
@@ -596,6 +728,24 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
   doc.text("BALANCE", C.bal, y + 6, { width: 75, align: "right" });
   y += 20;
 
+  // Insert Balance Brought Forward Row
+  if (from) {
+    const rH = 18;
+    doc.rect(40, y, W, rH).fill("#f8fafc");
+    doc.fontSize(7.5).font("Helvetica-Bold").fillColor(tMid);
+    doc.text(new Date(from).toLocaleDateString("en-GB"), C.date + 3, y + 5);
+    doc.text("—", C.ref + 3, y + 5, { width: 76 });
+    doc.text("B/F", C.type + 3, y + 5, { width: 60 });
+    doc.text("BALANCE BROUGHT FORWARD", C.note + 3, y + 5, { width: 128 });
+    doc.text("—", C.debit, y + 5, { width: 52, align: "right" });
+    doc.text("—", C.credit, y + 5, { width: 37, align: "right" });
+    const bfColor = balanceBF > 0.01 ? "#b91c1c" : "#059669";
+    doc.fillColor(bfColor).text(fmtMoney(balanceBF), C.bal, y + 5, { width: 75, align: "right" });
+    
+    doc.moveTo(40, y + rH).lineTo(555, y + rH).strokeColor(bdr).lineWidth(0.3).stroke();
+    y += rH;
+  }
+
   ledger.forEach((entry, idx) => {
     if (y > 750) {
       doc.addPage();
@@ -609,17 +759,34 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
     const d = new Date(entry.created_at);
     doc.text(d.toLocaleDateString("en-GB"), C.date + 3, y + 5);
 
-    const ref = entry.sale_id
-      ? `SALE-${String(entry.sale_id).padStart(5, "0")}`
-      : `PAY-${String(entry.id).padStart(5, "0")}`;
+    let ref = "—";
+    if (entry.sale_id) {
+       ref = `SALE-${String(entry.sale_id).padStart(5, "0")}`;
+    } else if (entry.type === 'payment') {
+       ref = `PAY-${String(entry.id).padStart(5, "0")}`;
+    } else if (entry.type === 'return') {
+       ref = `RET-${String(entry.id).padStart(5, "0")}`;
+    } else if (entry.type === 'adjustment') {
+       ref = `ADJ-${String(entry.id).padStart(5, "0")}`;
+    } else if (entry.type === 'opening') {
+       ref = `OPN-${String(entry.id).padStart(5, "0")}`;
+    }
 
     doc.text(ref, C.ref + 3, y + 5, { width: 76 });
 
-    const typeColor = entry.type === "sale" ? "#dc2626" : "#059669";
+    const typeMap = {
+        'sale': { label: 'SALE', color: '#dc2626' },
+        'payment': { label: 'PAYMENT', color: '#059669' },
+        'return': { label: 'RETURN', color: '#2563eb' },
+        'adjustment': { label: 'ADJUST', color: '#4b5563' },
+        'opening': { label: 'OPENING', color: '#7c3aed' }
+    };
+    const tStyle = typeMap[entry.type] || { label: entry.type.toUpperCase(), color: '#4b5563' };
+
     doc
-      .fillColor(typeColor)
+      .fillColor(tStyle.color)
       .font("Helvetica-Bold")
-      .text(entry.type === "sale" ? "SALE" : "PAYMENT", C.type + 3, y + 5, {
+      .text(tStyle.label, C.type + 3, y + 5, {
         width: 60,
       });
     doc
@@ -627,7 +794,7 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
       .font("Helvetica")
       .text(entry.note || "—", C.note + 3, y + 5, { width: 128 });
 
-    if (entry.type === "sale") {
+    if (entry.type === "sale" || (entry.type === 'adjustment' && entry.balance_after > (idx > 0 ? ledger[idx-1].balance_after : balanceBF)) || (entry.type === 'opening' && entry.amount > 0)) {
       doc
         .fillColor("#dc2626")
         .font("Helvetica-Bold")
@@ -691,8 +858,8 @@ router.get("/:id/ledger.pdf", requireAuth, (req, res) => {
     .text("TOTALS", C.date + 3, y + 7);
   doc
     .fillColor("#dc2626")
-    .text(fmtMoney(totalDebits), C.debit, y + 7, { width: 52, align: "right" });
-  doc.fillColor("#059669").text(fmtMoney(totalCredits), C.credit, y + 7, {
+    .text(fmtMoney(periodDebits), C.debit, y + 7, { width: 52, align: "right" });
+  doc.fillColor("#059669").text(fmtMoney(periodCredits), C.credit, y + 7, {
     width: 37,
     align: "right",
   });
@@ -748,8 +915,37 @@ router.get("/:id/report.pdf", requireAuth, (req, res) => {
   const legacyPhone = customer.phone ? String(customer.phone).trim() : "";
   const legacyName = customer.name ? String(customer.name).trim() : "";
 
-  const params = [shopId, customerId, legacyPhone, legacyName];
-  const dateClause = buildDateClause("s.created_at", from, to, params);
+  // Build dynamic customer matching clause to avoid broad matching on empty strings
+  let customerMatchSql = "s.customer_id = ?";
+  const params = [shopId, customerId];
+
+  const orClauses = [];
+  if (legacyPhone) {
+    orClauses.push("(s.customer_phone IS NOT NULL AND s.customer_phone = ?)");
+    params.push(legacyPhone);
+  }
+  if (legacyName && legacyName.toLowerCase() !== "walk-in") {
+    orClauses.push("(s.customer_name IS NOT NULL AND lower(s.customer_name) = lower(?))");
+    params.push(legacyName);
+  }
+
+  if (orClauses.length > 0) {
+    customerMatchSql = `(s.customer_id = ? OR (s.customer_id IS NULL AND (${orClauses.join(" OR ")})))`;
+    // We need to push customerId again for the first placeholder in the OR block if we use this exact structure
+    // but easier to just use standard params array construction.
+  }
+
+  // Final Params for the main query
+  const finalParams = [shopId, customerId];
+  let dynamicMatchRow = "s.customer_id = ?";
+  
+  if (orClauses.length > 0) {
+      dynamicMatchRow = `(s.customer_id = ? OR (s.customer_id IS NULL AND (${orClauses.join(" OR ")})))`;
+      if (legacyPhone) finalParams.push(legacyPhone);
+      if (legacyName && legacyName.toLowerCase() !== "walk-in") finalParams.push(legacyName);
+  }
+
+  const dateClause = buildDateClause("s.created_at", from, to, finalParams);
 
   const sales = db
     .prepare(
@@ -758,21 +954,12 @@ router.get("/:id/report.pdf", requireAuth, (req, res) => {
     FROM sales s
     LEFT JOIN users u ON s.user_id = u.id
     WHERE s.shop_id = ?
-      AND (
-        s.customer_id = ?
-        OR (
-          s.customer_id IS NULL
-          AND (
-            (s.customer_phone IS NOT NULL AND s.customer_phone = ?)
-            OR (s.customer_name IS NOT NULL AND lower(s.customer_name) = lower(?))
-          )
-        )
-      )
+      AND ${dynamicMatchRow}
       ${dateClause}
     ORDER BY s.created_at DESC
   `,
     )
-    .all(...params);
+    .all(...finalParams);
 
   const salesWithItems = sales.map((sale) => {
     const items = db

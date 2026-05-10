@@ -53,11 +53,13 @@ function getFreshUser(userId) {
 
     let allowedPanels = user.allowed_panels ? JSON.parse(user.allowed_panels) : [];
     let shopName = 'Master Control';
+    let shopType = 'other';
 
     if (user.role !== 'superadmin') {
-        const shop = db.prepare('SELECT allowed_panels, name FROM shops WHERE id = ?').get(user.shop_id);
+        const shop = db.prepare('SELECT allowed_panels, name, shop_type FROM shops WHERE id = ?').get(user.shop_id);
         if (!shop) return null;
         shopName = shop.name;
+        shopType = shop.shop_type || 'retail';
 
         const shopPanels = shop.allowed_panels ? JSON.parse(shop.allowed_panels) : [];
         if (user.role === 'admin') {
@@ -70,6 +72,7 @@ function getFreshUser(userId) {
     return {
         ...user,
         shop_name: shopName,
+        shop_type: shopType,
         allowed_panels: allowedPanels
     };
 }
@@ -90,6 +93,7 @@ router.get('/me', (req, res) => {
     // Update session with fresh data (panels, shop name)
     req.session.user.allowed_panels = freshUser.allowed_panels;
     req.session.user.shop_name = freshUser.shop_name;
+    req.session.user.shop_type = freshUser.shop_type;
     req.session.user.name = freshUser.name;
     req.session.user.role = freshUser.role;
 

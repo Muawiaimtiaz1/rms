@@ -61,11 +61,22 @@ CREATE TABLE IF NOT EXISTS products (
   manual_damage_loss REAL NOT NULL DEFAULT 0,
   recovered_damage_quantity INTEGER NOT NULL DEFAULT 0,
   min_stock_level INTEGER NOT NULL DEFAULT 0,
+  image_path TEXT,
   is_deleted INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
   FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tables (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  table_number TEXT NOT NULL,
+  capacity INTEGER DEFAULT 4,
+  status TEXT DEFAULT 'available', -- available, occupied, reserved
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS sales (
@@ -74,14 +85,25 @@ CREATE TABLE IF NOT EXISTS sales (
   user_id INTEGER NOT NULL,
   customer_name TEXT DEFAULT '',
   customer_phone TEXT DEFAULT '',
+  delivery_address TEXT DEFAULT '',
   total REAL NOT NULL DEFAULT 0,
   discount REAL NOT NULL DEFAULT 0,
   tax_percentage REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'cash',
   amount_received REAL NOT NULL DEFAULT 0,
+  order_type TEXT DEFAULT 'dine_in', -- dine_in, takeaway, delivery
+  order_status TEXT DEFAULT 'pending', -- pending, preparing, ready, completed
+  table_id INTEGER,
+  waiter_id INTEGER,
+  rider_id INTEGER,
+  guest_count INTEGER DEFAULT 1,
+  token_number TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (table_id) REFERENCES tables(id),
+  FOREIGN KEY (waiter_id) REFERENCES users(id),
+  FOREIGN KEY (rider_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -94,6 +116,9 @@ CREATE TABLE IF NOT EXISTS sale_items (
   price_at_sale REAL NOT NULL DEFAULT 0,
   buying_price_at_sale REAL NOT NULL DEFAULT 0,
   batch_id INTEGER, -- Track specific batch sold
+  special_instructions TEXT,
+  variants_json TEXT,
+  addons_json TEXT,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id),
   FOREIGN KEY (parent_id) REFERENCES products(id),
@@ -135,10 +160,12 @@ CREATE TABLE IF NOT EXISTS expense_categories (
 CREATE TABLE IF NOT EXISTS brand_expense_payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   brand_id INTEGER NOT NULL,
+  user_id INTEGER,
   amount REAL NOT NULL DEFAULT 0,
   month TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE
+  FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS support_tickets (
@@ -222,4 +249,73 @@ CREATE TABLE IF NOT EXISTS product_batches (
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+-- --- RMS (Restaurant Management System) Extensions ---
+
+CREATE TABLE IF NOT EXISTS raw_stocks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  unit TEXT NOT NULL, -- kg, g, l, ml, pcs, etc.
+  current_stock REAL NOT NULL DEFAULT 0,
+  min_stock_level REAL NOT NULL DEFAULT 0,
+  is_deleted INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS raw_stock_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  raw_stock_id INTEGER NOT NULL,
+  shop_id INTEGER NOT NULL,
+  buying_price REAL NOT NULL,
+  quantity REAL NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (raw_stock_id) REFERENCES raw_stocks(id) ON DELETE CASCADE,
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS raw_stock_waste (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  raw_stock_id INTEGER NOT NULL,
+  shop_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  quantity REAL NOT NULL,
+  reason TEXT,
+  date TEXT DEFAULT (date('now')),
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (raw_stock_id) REFERENCES raw_stocks(id) ON DELETE CASCADE,
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS recipes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS recipe_ingredients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipe_id INTEGER NOT NULL,
+  raw_stock_id INTEGER NOT NULL,
+  quantity REAL NOT NULL, -- The amount required for this recipe
+  FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+  FOREIGN KEY (raw_stock_id) REFERENCES raw_stocks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS product_recipe_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  recipe_id INTEGER NOT NULL,
+  variant_name TEXT, -- Optional: link to a specific variant (like 'Large', 'Extra Cheese')
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
 );

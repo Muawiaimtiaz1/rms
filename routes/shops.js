@@ -19,16 +19,17 @@ const bcrypt = require('bcryptjs');
 
 // POST /api/shops — superadmin creates a shop + initial admin
 router.post('/', requireSuperAdmin, async (req, res) => {
-    const { name, allowed_panels, adminUsername, adminPassword } = req.body;
+    const { name, shop_type, allowed_panels, adminUsername, adminPassword } = req.body;
     if (!name) return res.status(400).json({ error: 'Shop name required' });
     if (!adminUsername || !adminPassword) return res.status(400).json({ error: 'Admin credentials required' });
 
     const panelsJson = JSON.stringify(allowed_panels || []);
+    const type = shop_type || 'retail';
 
     try {
         const transaction = db.transaction(() => {
             // 1. Create the Shop
-            const shopResult = db.prepare('INSERT INTO shops (name, allowed_panels) VALUES (?, ?)').run(name, panelsJson);
+            const shopResult = db.prepare('INSERT INTO shops (name, allowed_panels, shop_type) VALUES (?, ?, ?)').run(name, panelsJson, type);
             const shopId = shopResult.lastInsertRowid;
 
             // 2. Create the Shop Admin

@@ -7,14 +7,19 @@ const router = express.Router();
 // GET /api/expenses
 router.get('/', requireAuth, (req, res) => {
     const { from, to, category } = req.query;
-    let query = 'SELECT * FROM expenses WHERE shop_id = ?';
+    let query = `
+        SELECT expenses.*, u.name as added_by 
+        FROM expenses 
+        LEFT JOIN users u ON expenses.user_id = u.id 
+        WHERE expenses.shop_id = ?
+    `;
     const params = [req.session.user.shop_id];
 
-    if (from) { query += ' AND date >= ?'; params.push(from); }
-    if (to) { query += ' AND date <= ?'; params.push(to); }
-    if (category) { query += ' AND category = ?'; params.push(category); }
+    if (from) { query += ' AND expenses.date >= ?'; params.push(from); }
+    if (to) { query += ' AND expenses.date <= ?'; params.push(to); }
+    if (category) { query += ' AND expenses.category = ?'; params.push(category); }
 
-    query += ' ORDER BY date DESC';
+    query += ' ORDER BY expenses.date DESC';
     res.json(db.prepare(query).all(...params));
 });
 
@@ -43,6 +48,20 @@ router.put('/bulk', requireAuth, (req, res) => {
 
     const transaction = db.transaction((exps) => {
         for (const e of exps) {
+            const expRec = db.prepare('SELECT created_at, date FROM expenses WHERE id = ? AND shop_id = ?').get(e.id, Number(req.session.user.shop_id));
+            if (!expRec) throw new Error(`Expense ID ${e.id} not found`);
+
+            const paymentsFound = db.prepare(`
+                SELECT 1 FROM brand_expense_payments bep
+                JOIN brands b ON bep.brand_id = b.id
+                WHERE bep.month = strftime('%Y-%m', ?) AND b.shop_id = ? AND bep.created_at >= ?
+                LIMIT 1
+            `).get(expRec.date, Number(req.session.user.shop_id), expRec.created_at);
+
+            if (paymentsFound) {
+                throw new Error(`Cannot update expense "${e.title}" as brand payments have been recorded after it was added.`);
+            }
+
             updateStmt.run(
                 e.title,
                 e.category,
@@ -60,7 +79,7 @@ router.put('/bulk', requireAuth, (req, res) => {
         res.json({ ok: true });
     } catch (e) {
         console.error('Bulk update failed:', e);
-        res.status(500).json({ error: 'Bulk update failed' });
+        res.status(400).json({ error: e.message || 'Bulk update failed' });
     }
 });
 
@@ -71,8 +90,20 @@ router.put('/:id', requireAuth, (req, res) => {
 
     const expId = parseInt(req.params.id);
 
-    const exp = db.prepare('SELECT id FROM expenses WHERE id = ? AND shop_id = ?').get(expId, req.session.user.shop_id);
+    const exp = db.prepare('SELECT id, date, created_at FROM expenses WHERE id = ? AND shop_id = ?').get(expId, req.session.user.shop_id);
     if (!exp) return res.status(404).json({ error: 'Expense not found' });
+
+    // Safeguard: Check for brand payments that happened after this expense was added
+    const paymentsFound = db.prepare(`
+        SELECT 1 FROM brand_expense_payments bep
+        JOIN brands b ON bep.brand_id = b.id
+        WHERE bep.month = strftime('%Y-%m', ?) AND b.shop_id = ? AND bep.created_at >= ?
+        LIMIT 1
+    `).get(exp.date, Number(req.session.user.shop_id), exp.created_at);
+
+    if (paymentsFound) {
+        return res.status(400).json({ error: 'Cannot edit this expense because brand payments have already been made for it.' });
+    }
 
     db.prepare(`
         UPDATE expenses 
@@ -86,8 +117,21 @@ router.put('/:id', requireAuth, (req, res) => {
 // DELETE /api/expenses/:id
 router.delete('/:id', requireAuth, (req, res) => {
     const expId = parseInt(req.params.id);
-    const exp = db.prepare('SELECT id FROM expenses WHERE id = ? AND shop_id = ?').get(expId, req.session.user.shop_id);
+    const exp = db.prepare('SELECT id, date, created_at FROM expenses WHERE id = ? AND shop_id = ?').get(expId, req.session.user.shop_id);
     if (!exp) return res.status(404).json({ error: 'Expense not found' });
+
+    // Safeguard: Check for brand payments that happened after this expense was added
+    const paymentsFound = db.prepare(`
+        SELECT 1 FROM brand_expense_payments bep
+        JOIN brands b ON bep.brand_id = b.id
+        WHERE bep.month = strftime('%Y-%m', ?) AND b.shop_id = ? AND bep.created_at >= ?
+        LIMIT 1
+    `).get(exp.date, Number(req.session.user.shop_id), exp.created_at);
+
+    if (paymentsFound) {
+        return res.status(400).json({ error: 'Cannot delete this expense because brand payments have already been made for it.' });
+    }
+
     db.prepare('DELETE FROM expenses WHERE id = ? AND shop_id = ?').run(expId, req.session.user.shop_id);
     res.json({ ok: true });
 });
