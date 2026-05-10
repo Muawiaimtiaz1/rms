@@ -1975,7 +1975,6 @@ function productFormHtml(p = {}, brands = []) {
         </div>
         ${compHtml}
 
-        ${isRestaurant ? `
         <div class="col-span-2 border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
           <h4 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">Product Image</h4>
           <div class="flex items-start gap-4">
@@ -1986,7 +1985,7 @@ function productFormHtml(p = {}, brands = []) {
       }
             </div>
             <div class="flex-1">
-              <label class="block text-xs text-slate-500 mb-2">Upload a photo of this dish (JPG, PNG, WebP, max 2MB)</label>
+              <label class="block text-xs text-slate-500 mb-2">Upload a photo of this product (JPG, PNG, WebP, max 2MB)</label>
               <label for="pf-image" class="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-bold hover:bg-indigo-100 transition-all">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                 Choose Image
@@ -1994,7 +1993,7 @@ function productFormHtml(p = {}, brands = []) {
               <input id="pf-image" type="file" accept="image/*" class="hidden" onchange="previewProductImage(this)" />
             </div>
           </div>
-        </div>` : ''}
+        </div>
       </div>
     </div>`;
 }
@@ -2638,7 +2637,7 @@ async function renderPOS() {
 
             <div class="grid grid-cols-2 gap-4 text-base pt-2 border-t border-slate-200 dark:border-slate-800">
                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 px-1">Payment</label>
-               <select id="pos-method" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base shadow-sm font-bold">
+               <select id="pos-method" onchange="handlePOSMethodChange(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base shadow-sm font-bold">
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
                   <option value="online">Online</option>
@@ -2769,39 +2768,34 @@ function renderPOSProducts(products) {
           </div>
         </div>
 
-        <!-- Stock / Status -->
-        <div class="flex items-center justify-between mt-auto">
-          <div class="flex flex-col">
+        <!-- Price + Stock -->
+        <div class="mt-auto space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex flex-col">
+              <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Selling Price</span>
+              <span class="text-lg font-black text-indigo-600 dark:text-indigo-400">Rs. ${p.selling_price}</span>
+            </div>
+            <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            </div>
+          </div>
+          <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
             <span class="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
               ${(p.ingredients && p.ingredients.length > 0) ? "Status" : "In Stock"}
             </span>
             ${(p.ingredients && p.ingredients.length > 0)
-            ? `<span class="text-base font-black text-amber-500 uppercase">🍳 Recipe</span>`
+            ? `<span class="text-xs font-black text-amber-500 uppercase">🍳 Recipe</span>`
             : (p.components && p.components.length > 0)
                ? `
-                 <div class="flex flex-col">
-                    <div class="flex items-baseline gap-2">
-                       <span class="text-2xl font-black ${p.stock > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>
-                       <span class="text-[10px] font-bold text-slate-400 uppercase">Complete</span>
+                 <div class="flex flex-col items-end">
+                    <div class="flex items-baseline gap-1">
+                       <span class="text-sm font-black ${p.stock > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>
+                       <span class="text-[8px] font-bold text-slate-400 uppercase">Units</span>
                     </div>
-                    ${(() => {
-                        const c = p.components[0];
-                        const child = productMap[c.id];
-                        if (!child || child.stock <= 0) return '';
-                        
-                        const looseUnits = Math.ceil(child.stock / c.quantity);
-                        const pieces = child.stock % c.quantity;
-                        const piecesText = pieces > 0 ? ` (${pieces} pieces left)` : ` (Full parts available)`;
-                        
-                        return `<div class="text-[11px] font-black text-amber-500 uppercase tracking-tighter mt-0.5">+ ${looseUnits} Loose / Broken${piecesText}</div>`;
-                    })()}
                  </div>
                  `
-               : `<span class="text-2xl font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
+               : `<span class="text-sm font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
           }
-          </div>
-          <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
           </div>
         </div>
       </div>
@@ -3369,7 +3363,8 @@ function calculateCartTotal() {
 function calculateRemaining() {
   const grandTotal = parseFloat($c("cart-total").dataset.total) || 0;
   const received = parseFloat($c("pos-received").value) || 0;
-  const remaining = grandTotal - received;
+  // Use toFixed(2) and Number() to avoid floating point precision issues
+  const remaining = Number((grandTotal - received).toFixed(2));
 
   const el = $c("cart-remaining");
   const reqName = $c("req-name");
@@ -3397,6 +3392,20 @@ function toggleQuotationMode(isQuotation) {
   } else {
     btn.textContent = "✅ Place Order";
     btn.className = btn.className.replace("from-amber-500 to-orange-600", "from-indigo-600 to-violet-600");
+  }
+}
+
+
+/**
+ * Auto-fills Amount Received if method is Card or Online
+ */
+function handlePOSMethodChange(method) {
+  if (method === "card" || method === "online") {
+    const total = parseFloat($c("cart-total").dataset.total) || 0;
+    if (total > 0) {
+      $c("pos-received").value = total.toFixed(2);
+      calculateRemaining();
+    }
   }
 }
 
@@ -3520,7 +3529,12 @@ async function printBill(saleId) {
   const grandTotal = Number(sale.total);
   const discount = Number(sale.discount || 0);
   const taxPct = Number(sale.tax_percentage || 0);
-  const method = sale.payment_method === "online" ? "Online Transfer" : "Cash";
+  const methodMap = {
+    'cash': 'Cash',
+    'card': 'Card / POS',
+    'online': 'Online Transfer'
+  };
+  const method = methodMap[sale.payment_method] || sale.payment_method?.toUpperCase() || "Cash";
   const received = Number(sale.amount_received || 0);
   const remaining = grandTotal - received;
 
@@ -4214,7 +4228,7 @@ async function doMarkSalePaid(saleId, currentReceived) {
 async function renderExpenses() {
   const [allExpenses, sharesRes, previousDues, categories] = await Promise.all([
     api("/api/expenses"),
-    api("/api/brands/expense-shares"),
+    api(`/api/brands/expense-shares?month=${_expenseMonth}`),
     api("/api/brands/all-months-dues"),
     api("/api/expense-categories"),
   ]);
@@ -4225,7 +4239,7 @@ async function renderExpenses() {
   const filtered = allExpenses
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .filter((e) => e.date.startsWith(_expenseMonth));
-  const total = filtered.reduce((s, e) => s + e.amount, 0);
+  const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
 
   // Pagination logic (10 per page)
   const pageSize = 5;
@@ -4274,7 +4288,7 @@ async function renderExpenses() {
             <div class="flex items-center gap-2 mt-1">
               <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
               <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Month: <span class="text-slate-900 dark:text-slate-200">${_expenseMonth}</span> — Total: <span class="text-rose-600 dark:text-rose-400">Rs. ${total.toLocaleString()}</span>
+                Month: <span class="text-slate-900 dark:text-slate-200">${_expenseMonth}</span> — Total: <span class="text-rose-600 dark:text-rose-400">Rs. ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </p>
             </div>
           </div>
@@ -4324,8 +4338,8 @@ async function renderExpenses() {
            </div>
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-100 dark:border-gray-800">
-          ${statCard("Total Month Expenses", "Rs. " + Number(sharesRes.totalExpenses).toLocaleString(), "Operating costs", "rose")}
-          ${statCard("Split Per Brand", "Rs. " + (sharesRes.brandCount > 0 ? Number(sharesRes.totalExpenses / sharesRes.brandCount).toLocaleString() : "0"), `${sharesRes.brandCount} brands total`, "blue")}
+          ${statCard("Total Month Expenses", "Rs. " + Number(sharesRes.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), "Operating costs", "rose")}
+          ${statCard("Split Per Brand", "Rs. " + (sharesRes.brandCount > 0 ? Number(sharesRes.totalExpenses / sharesRes.brandCount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"), `${sharesRes.brandCount} brands total`, "blue")}
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -4394,7 +4408,7 @@ async function renderExpenses() {
                      ${e.added_by || 'Admin'}
                    </div>
                  </td>
-                 <td class="px-6 py-4 text-right text-rose-600 dark:text-rose-400 font-bold">Rs. ${Number(e.amount).toLocaleString()}</td>
+                 <td class="px-6 py-4 text-right text-rose-600 dark:text-rose-400 font-bold">Rs. ${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                  <td class="px-6 py-4 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <button onclick="openEditExpense(${e.id})" class="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors">
@@ -4564,7 +4578,7 @@ function openAddExpenseModal() {
 }
 
 async function openPayBrandExpenses() {
-  const sharesRes = await api("/api/brands/expense-shares");
+  const sharesRes = await api(`/api/brands/expense-shares?month=${_expenseMonth}`);
   const rows = (sharesRes.shares || []).filter((s) => s.due > 0);
 
   if (!rows.length) {
@@ -4587,7 +4601,7 @@ async function openPayBrandExpenses() {
         <div class="flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
           <div class="flex-1">
             <div class="font-semibold text-gray-800 dark:text-gray-200 text-sm">${s.brand_name}</div>
-            <div class="text-xs text-gray-500">Due: <span class="text-rose-600 dark:text-rose-400 font-bold">Rs. ${Number(s.due).toLocaleString()}</span></div>
+            <div class="text-xs text-gray-500">Due: <span class="text-rose-600 dark:text-rose-400 font-bold">Rs. ${Number(s.due).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
           </div>
           <input id="bep-${s.brand_id}" type="number" min="1" max="${s.due}" value="${s.due}"
             class="w-32 px-3 py-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:border-blue-500 text-sm font-bold text-right"/>
@@ -5155,7 +5169,7 @@ async function openExpensesHistory() {
   allExpenses.forEach((e) => {
     const m = e.date.slice(0, 7);
     if (!monthsMap[m]) monthsMap[m] = 0;
-    monthsMap[m] += e.amount;
+    monthsMap[m] += Number(e.amount);
   });
 
   const sortedMonths = Object.keys(monthsMap).sort((a, b) =>
@@ -5177,7 +5191,7 @@ async function openExpensesHistory() {
                 <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
                 <span class="font-bold text-slate-800 dark:text-slate-100 text-base">${new Date(m + "-01").toLocaleDateString("default", { month: "long", year: "numeric" })}</span>
               </div>
-              <p class="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-semibold ml-4">Monthly Target Split: Rs. ${monthsMap[m].toLocaleString()}</p>
+              <p class="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-semibold ml-4">Total Monthly Expenses: Rs. ${monthsMap[m].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
             <div class="flex items-center gap-2">
               <button onclick="window.open('/api/brands/pdf/monthly-report?month=${m}', '_blank')" class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30 transition-all border border-transparent hover:border-emerald-200 dark:hover:border-emerald-900" title="View PDF">
