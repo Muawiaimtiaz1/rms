@@ -28,6 +28,16 @@ try {
 } catch (e) {
   // ignore if already exists
 }
+
+try {
+  db.exec("ALTER TABLE raw_stocks ADD COLUMN conversion_factor REAL DEFAULT 1;");
+  console.log("✅ DB Migration Applied: added conversion_factor to raw_stocks");
+} catch (e) {}
+
+try {
+  db.exec("ALTER TABLE raw_stocks ADD COLUMN usage_unit TEXT;");
+  console.log("✅ DB Migration Applied: added usage_unit to raw_stocks");
+} catch (e) {}
 // --- END MIGRATIONS ---
 
 // Initialize tables from schema only if they don't exist
@@ -680,6 +690,7 @@ if (!tableExists) {
     const receiptColumns = [
       { name: "logo_path", type: "TEXT" },
       { name: "receipt_header_text", type: "TEXT" },
+      { name: "receipt_extended_name", type: "TEXT" },
       { name: "receipt_phone", type: "TEXT" },
       { name: "receipt_address", type: "TEXT" },
       { name: "receipt_images_json", type: "TEXT" },
@@ -690,6 +701,9 @@ if (!tableExists) {
       { name: "header_font_size", type: "INTEGER DEFAULT 18" },
       { name: "header_font_weight", type: "TEXT DEFAULT 'bold'" },
       { name: "header_spacing", type: "INTEGER DEFAULT 10" },
+      { name: "extended_name_font_size", type: "INTEGER DEFAULT 10" },
+      { name: "extended_name_font_weight", type: "TEXT DEFAULT 'normal'" },
+      { name: "extended_name_spacing", type: "INTEGER DEFAULT 2" },
       { name: "contact_font_size", type: "INTEGER DEFAULT 10" },
       { name: "contact_align", type: "TEXT DEFAULT 'center'" },
       { name: "contact_padding", type: "INTEGER DEFAULT 10" },

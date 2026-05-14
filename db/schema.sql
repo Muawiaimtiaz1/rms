@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS shops (
   status TEXT DEFAULT 'active', -- active, blocked
   allowed_panels TEXT, -- JSON array of panel IDs allotted by master
   auto_calculate_damage_to_loss INTEGER DEFAULT 1,
+  use_logo_on_receipt INTEGER DEFAULT 1,
+  use_text_on_receipt INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -257,7 +259,9 @@ CREATE TABLE IF NOT EXISTS raw_stocks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   shop_id INTEGER NOT NULL,
   name TEXT NOT NULL,
-  unit TEXT NOT NULL, -- kg, g, l, ml, pcs, etc.
+  unit TEXT NOT NULL, -- purchase unit (kg, liter, pcs, etc.)
+  usage_unit TEXT, -- small unit (g, ml, etc.)
+  conversion_factor REAL NOT NULL DEFAULT 1, -- how many usage_units in one unit
   current_stock REAL NOT NULL DEFAULT 0,
   min_stock_level REAL NOT NULL DEFAULT 0,
   is_deleted INTEGER DEFAULT 0,

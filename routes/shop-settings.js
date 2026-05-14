@@ -47,9 +47,10 @@ router.get("/", requireAuth, (req, res) => {
 
     const shop = db
       .prepare(
-        `SELECT id, name, logo_path, receipt_header_text, receipt_phone, receipt_address, 
-                receipt_images_json, receipt_policies, use_logo_on_receipt, receipt_font_family,
+        `SELECT id, name, logo_path, receipt_header_text, receipt_extended_name, receipt_phone, receipt_address, 
+                receipt_images_json, receipt_policies, use_logo_on_receipt, use_text_on_receipt, receipt_font_family,
                 header_font_size, header_font_weight, header_spacing,
+                extended_name_font_size, extended_name_font_weight, extended_name_spacing,
                 contact_font_size, contact_align, contact_padding,
                 footer_font_size, footer_font_style, footer_margin,
                 divider_style, divider_width, section_gap, auto_calculate_damage_to_loss
@@ -73,8 +74,9 @@ router.get("/", requireAuth, (req, res) => {
     }
     delete shop.receipt_images_json;
 
-    // Convert use_logo_on_receipt to boolean
+    // Convert to boolean
     shop.use_logo_on_receipt = shop.use_logo_on_receipt === 1;
+    shop.use_text_on_receipt = shop.use_text_on_receipt === 1;
 
     // Generate full URLs for images
     if (shop.logo_path) {
@@ -98,14 +100,19 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), (req, res) =>
 
     const {
       receipt_header_text,
+      receipt_extended_name,
       receipt_phone,
       receipt_address,
       receipt_policies,
       use_logo_on_receipt,
+      use_text_on_receipt,
       receipt_font_family,
       header_font_size,
       header_font_weight,
       header_spacing,
+      extended_name_font_size,
+      extended_name_font_weight,
+      extended_name_spacing,
       contact_font_size,
       contact_align,
       contact_padding,
@@ -126,6 +133,11 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), (req, res) =>
       updates.push("receipt_header_text = ?");
       values.push(receipt_header_text);
     }
+    
+    if (receipt_extended_name !== undefined) {
+      updates.push("receipt_extended_name = ?");
+      values.push(receipt_extended_name);
+    }
 
     if (receipt_phone !== undefined) {
       updates.push("receipt_phone = ?");
@@ -144,7 +156,11 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), (req, res) =>
 
     if (use_logo_on_receipt !== undefined) {
       updates.push("use_logo_on_receipt = ?");
-      values.push(use_logo_on_receipt === "true" || use_logo_on_receipt === true ? 1 : 0);
+      values.push(use_logo_on_receipt === "true" || use_logo_on_receipt === true || use_logo_on_receipt === 1 ? 1 : 0);
+    }
+    if (use_text_on_receipt !== undefined) {
+      updates.push("use_text_on_receipt = ?");
+      values.push(use_text_on_receipt === "true" || use_text_on_receipt === true || use_text_on_receipt === 1 ? 1 : 0);
     }
 
     if (receipt_font_family !== undefined) {
@@ -164,6 +180,18 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), (req, res) =>
     if (header_spacing !== undefined) {
       updates.push("header_spacing = ?");
       values.push(parseInt(header_spacing) || 10);
+    }
+    if (extended_name_font_size !== undefined) {
+      updates.push("extended_name_font_size = ?");
+      values.push(parseInt(extended_name_font_size) || 10);
+    }
+    if (extended_name_font_weight !== undefined) {
+      updates.push("extended_name_font_weight = ?");
+      values.push(extended_name_font_weight);
+    }
+    if (extended_name_spacing !== undefined) {
+      updates.push("extended_name_spacing = ?");
+      values.push(parseInt(extended_name_spacing) || 2);
     }
     if (contact_font_size !== undefined) {
       updates.push("contact_font_size = ?");

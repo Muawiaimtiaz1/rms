@@ -233,16 +233,17 @@ router.post("/", requireAuth, (req, res) => {
         if (recipeLink) {
           // Check ingredients availability
           const recipeIngredients = db.prepare(`
-            SELECT ri.raw_stock_id, ri.quantity as amount_per_unit, rs.name as ing_name, rs.current_stock
+            SELECT ri.raw_stock_id, ri.quantity as amount_per_unit, rs.name as ing_name, rs.current_stock, rs.conversion_factor, rs.unit
             FROM recipe_ingredients ri
             JOIN raw_stocks rs ON ri.raw_stock_id = rs.id
             WHERE ri.recipe_id = ?
           `).all(recipeLink.recipe_id);
 
           for (const ing of recipeIngredients) {
-            const totalNeeded = ing.amount_per_unit * item.quantity;
-            if (ing.current_stock < totalNeeded) {
-              throw new Error(`Insufficient stock of ingredient "${ing.ing_name}" for "${product.name}"`);
+            const factor = ing.conversion_factor || 1;
+            const totalNeededLargeUnits = (ing.amount_per_unit * item.quantity) / factor;
+            if (ing.current_stock < totalNeededLargeUnits) {
+              throw new Error(`Insufficient stock of ingredient "${ing.ing_name}" for "${product.name}". Needed: ${totalNeededLargeUnits.toFixed(3)} ${ing.unit}, Available: ${ing.current_stock} ${ing.unit}`);
             }
           }
         } else if (product.stock < item.quantity) {
@@ -388,8 +389,13 @@ router.post("/", requireAuth, (req, res) => {
             `).all(link.recipe_id);
 
             for (const ing of recipeIngredients) {
-              const totalNeeded = ing.amount_per_unit * item.quantity;
-              let remaining = totalNeeded;
+              const stockItem = db.prepare('SELECT conversion_factor FROM raw_stocks WHERE id = ?').get(ing.raw_stock_id);
+              const factor = (stockItem && stockItem.conversion_factor) ? stockItem.conversion_factor : 1;
+              
+              const totalNeededSmallUnits = ing.amount_per_unit * item.quantity;
+              const totalNeededLargeUnits = totalNeededSmallUnits / factor;
+              
+              let remaining = totalNeededLargeUnits;
               const rsBatches = db.prepare(`
                 SELECT id, buying_price, quantity 
                 FROM raw_stock_batches 
@@ -405,7 +411,7 @@ router.post("/", requireAuth, (req, res) => {
               }
 
               // Deduct from main raw_stock total
-              db.prepare("UPDATE raw_stocks SET current_stock = current_stock - ? WHERE id = ?").run(totalNeeded, ing.raw_stock_id);
+              db.prepare("UPDATE raw_stocks SET current_stock = current_stock - ? WHERE id = ?").run(totalNeededLargeUnits, ing.raw_stock_id);
             }
           }
         } else {
@@ -613,6 +619,17 @@ router.get("/:id/bill", requireAuth, (req, res) => {
     )
     .all(saleId);
 
+  const payments = db
+    .prepare(
+      `
+    SELECT amount, note, created_at
+    FROM customer_ledger
+    WHERE sale_id = ? AND type = 'payment'
+    ORDER BY created_at DESC
+  `,
+    )
+    .all(saleId);
+
   const seller = db
     .prepare("SELECT name FROM users WHERE id = ?")
     .get(sale.user_id);
@@ -646,7 +663,7 @@ router.get("/:id/bill", requireAuth, (req, res) => {
     shop.use_logo_on_receipt = shop.use_logo_on_receipt === 1;
   }
 
-  res.json({ sale, items, seller, shop });
+  res.json({ sale, items, seller, shop, payments });
 });
 
 // POST /api/sales/:id/return — process a return for a sale

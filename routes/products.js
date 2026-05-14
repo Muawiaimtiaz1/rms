@@ -9,11 +9,15 @@ const router = express.Router();
 // MULTER CONFIG FOR PRODUCT IMAGES
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, "..", "public", "uploads", "products");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+      const uploadDir = path.join(__dirname, "..", "public", "uploads", "products");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      cb(null, uploadDir);
+    } catch (err) {
+      cb(err);
     }
-    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -112,7 +116,15 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // POST /api/products
-router.post('/', requireAuth, upload.single('image'), (req, res) => {
+router.post('/', requireAuth, (req, res, next) => {
+    upload.single('image')(req, res, (err) => {
+        if (err) {
+            console.error("[UPLOAD ERROR]", err);
+            return res.status(400).json({ error: err.message });
+        }
+        next();
+    });
+}, (req, res) => {
     let { sku, name, category, description, brand_id, buying_price, selling_price, stock, min_stock_level, components, ingredients } = req.body;
     
     // Coerce FormData strings to correct types
@@ -135,7 +147,7 @@ router.post('/', requireAuth, upload.single('image'), (req, res) => {
     const brand = db.prepare('SELECT id FROM brands WHERE id = ? AND shop_id = ?').get(brand_id, req.session.user.shop_id);
     if (!brand) return res.status(400).json({ error: 'Invalid brand' });
 
-    const image_path = req.file ? `/uploads/products/${req.file.filename}` : null;
+    const image_path = req.file ? "/uploads/products/" + req.file.filename : null;
 
     const transaction = db.transaction(() => {
         const result = db.prepare(
@@ -237,7 +249,7 @@ router.put('/:id', requireAuth, upload.single('image'), (req, res) => {
             const oldPath = path.join(__dirname, '..', 'public', product.image_path);
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
-        image_path = `/uploads/products/${req.file.filename}`;
+        image_path = "/uploads/products/" + req.file.filename;
     }
 
     const transaction = db.transaction(() => {

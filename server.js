@@ -1,6 +1,7 @@
 const express = require("express");
 const session = require("express-session");
 const path = require("path");
+const fs = require('fs');
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use("/api/shop-settings", require("./routes/shop-settings"));
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/tables", require("./routes/tables"));
 app.use("/api/kds", require("./routes/kds"));
+
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
@@ -59,6 +61,21 @@ function startServer(port = PORT) {
     console.log("   Login: admin / admin123");
   });
 }
+
+// Global Error Handler - Ensures all errors are returned as JSON
+app.use((err, req, res, next) => {
+  const errorLog = `${new Date().toISOString()} - ${req.method} ${req.url} - ${err.stack}\n`;
+  try {
+    fs.appendFileSync(path.join(__dirname, 'error_debug.log'), errorLog);
+  } catch (e) {
+    console.error("Failed to write to error_debug.log", e);
+  }
+  console.error("[SERVER ERROR]", err);
+  res.status(err.status || 500).json({ 
+    error: err.message || 'Internal Server Error',
+    stack: err.stack
+  });
+});
 
 if (require.main === module) {
   startServer();

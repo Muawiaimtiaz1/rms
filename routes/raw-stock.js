@@ -40,14 +40,14 @@ router.get('/', requireAuth, (req, res) => {
 
 // POST /api/raw-stock
 router.post('/', requireAuth, (req, res) => {
-    const { name, unit, min_stock_level, initial_stock, buying_price } = req.body;
+    const { name, unit, usage_unit, conversion_factor, min_stock_level, initial_stock, buying_price } = req.body;
     if (!name || !unit) return res.status(400).json({ error: 'Name and unit are required' });
 
     try {
         const transaction = db.transaction(() => {
             const result = db.prepare(
-                'INSERT INTO raw_stocks (shop_id, name, unit, current_stock, min_stock_level) VALUES (?, ?, ?, ?, ?)'
-            ).run(req.session.user.shop_id, name, unit, initial_stock || 0, min_stock_level || 0);
+                'INSERT INTO raw_stocks (shop_id, name, unit, usage_unit, conversion_factor, current_stock, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            ).run(req.session.user.shop_id, name, unit, usage_unit || null, conversion_factor || 1, initial_stock || 0, min_stock_level || 0);
 
             const stockId = result.lastInsertRowid;
 

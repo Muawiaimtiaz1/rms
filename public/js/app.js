@@ -7,11 +7,17 @@ async function api(url, method = "GET", body) {
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "API Error");
+  
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `API Error: ${res.status}`);
+    return data;
+  } else {
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Server Error (${res.status}): ${text.substring(0, 100)}...`);
+    return text;
   }
-  return data;
 }
 
 const toast = (msg, type = "success") => {
@@ -97,7 +103,8 @@ let _productCategories = [];
 let shops = [];
 let managedShopId = null;
 let _posCustomerResults = [];
-let _posSelectedCustomer = null; // ─── Setup ────────────────────────────────────────────────────────
+let _posSelectedCustomer = null;
+let _currentPage = "dashboard"; // ─── Setup ────────────────────────────────────────────────────────
 const AVAILABLE_PANELS = [
   {
     id: "dashboard",
@@ -188,8 +195,16 @@ const AVAILABLE_PANELS = [
     icon: `<path d="M12 2L2 7l10 5 10-5-10-5z" fill="#F97316"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="#F97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
     label: "Raw Ingredients",
     desc: "Manage base stock, track ingredient batches and record waste."
+  },
+  {
+    id: "pending-dues",
+    icon: `<rect x="3" y="5" width="18" height="14" rx="2" fill="#EF4444"/><path d="M3 10h18" stroke="white" stroke-width="2"/><circle cx="16" cy="14" r="2" fill="white"/><path d="M12 14h-4" stroke="white" stroke-width="2" stroke-linecap="round"/>`,
+    label: "Pending Dues",
+    desc: "Track and collect outstanding balances from customers."
   }
 ];
+
+const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions"];
 
 // ─── Init ────────────────────────────────────────────────────────────
 async function init() {
@@ -253,6 +268,12 @@ async function init() {
 
 // ─── Router ──────────────────────────────────────────────────────────
 function navigate(page) {
+  _currentPage = page;
+  if (currentUser.role === "superadmin" && !PLATFORM_OWNER_PANELS.includes(page)) {
+    // Superadmins can only access platform-level pages
+    return false;
+  }
+
   if (
     currentUser.role !== "superadmin" &&
     !AVAILABLE_PANELS.map((p) => p.id).includes(page)
@@ -304,6 +325,7 @@ function navigate(page) {
     delivery: "Delivery Orders",
     "raw-stock": "Raw Ingredients",
     recipes: "Manage Recipes",
+    "pending-dues": "Pending Dues Ledger",
   };
   if (page === "dashboard" && currentUser.role === "superadmin")
     titles.dashboard = "System Overview (Master Admin)";
@@ -330,6 +352,7 @@ function navigate(page) {
     delivery: renderDeliveryOrders,
     "raw-stock": renderRawStock,
     recipes: renderRecipes,
+    "pending-dues": () => renderSalesHistory(true),
   };
   if (pages[page]) pages[page]();
 
@@ -394,34 +417,6 @@ async function renderSettings(tab) {
             Account Profile
           </div>
           ${_activeSettingsTab === "profile" ? '<div class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>' : ""}
-        </button>
-
-        <button onclick="renderSettings('product-cats')" class="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-bold transition-all group ${_activeSettingsTab === "product-cats"
-      ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30"
-      : "text-slate-500 hover:bg-white dark:hover:bg-slate-900 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
-    }">
-          <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 ${_activeSettingsTab === "product-cats"
-      ? "text-white"
-      : "text-slate-400 group-hover:text-indigo-500"
-    }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-            Products
-          </div>
-          ${_activeSettingsTab === "product-cats" ? '<div class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>' : ""}
-        </button>
-
-        <button onclick="renderSettings('expense-cats')" class="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-bold transition-all group ${_activeSettingsTab === "expense-cats"
-      ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30"
-      : "text-slate-500 hover:bg-white dark:hover:bg-slate-900 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
-    }">
-          <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 ${_activeSettingsTab === "expense-cats"
-      ? "text-white"
-      : "text-slate-400 group-hover:text-indigo-500"
-    }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-            Expense
-          </div>
-          ${_activeSettingsTab === "expense-cats" ? '<div class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>' : ""}
         </button>
 
         <button onclick="renderSettings('receipt')" class="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-bold transition-all group ${_activeSettingsTab === "receipt"
@@ -511,6 +506,7 @@ function renderActiveSettingsContent() {
           <div class="space-y-3 sm:col-span-2">
              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Internal Reference</label>
              <div class="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 text-slate-400 font-mono text-xs cursor-default flex items-center justify-between">
+
                <div>
                   <span class="text-slate-300 font-normal mr-2">UID:</span>${currentUser.id}
                   <span class="mx-4 text-slate-800 opacity-10">|</span>
@@ -529,90 +525,149 @@ function renderActiveSettingsContent() {
     return renderReceiptSettings();
   }
 
-  const isProdView = _activeSettingsTab === "product-cats";
-  const typeKey = isProdView ? "product" : "expense";
-  const catList = isProdView ? _productCategories : _expenseCategories;
+  return "";
+}
 
-  return `
-    <div class="max-w-6xl animate-in fade-in slide-in-from-right-4 duration-500">
-      <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-8 mb-12 pb-8 border-b border-slate-100 dark:border-slate-800">
+
+function toggleAddCategoryMenu() {
+  const el = document.getElementById("add-category-menu");
+  if (el) el.classList.toggle("hidden");
+}
+
+function toggleLobbyCategoryMenu(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById("lobby-category-menu");
+  if (!menu) return;
+  menu.classList.toggle("hidden");
+
+  // Close menu when clicking outside
+  if (!menu.classList.contains("hidden")) {
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.classList.add("hidden");
+        document.removeEventListener("click", closeMenu);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", closeMenu), 10);
+  }
+}
+
+function openAddCategoryPopup(type) {
+  // Hide both potential menus
+  const menu1 = document.getElementById("add-category-menu");
+  const menu2 = document.getElementById("lobby-category-menu");
+  if (menu1) menu1.classList.add("hidden");
+  if (menu2) menu2.classList.add("hidden");
+
+  const isProduct = type === 'product';
+  const title = isProduct ? 'Add Product Category' : 'Add Expense Category';
+  const emojiHtml = !isProduct ? `
+    <div>
+      <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Emoji</label>
+      <input id="pop-cat-emoji" value="📦" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-xl text-xl text-center outline-none focus:border-indigo-500 transition-all font-bold" />
+    </div>` : '';
+
+  openModal(
+    title,
+    `
+    <div class="space-y-6">
+      <div class="p-4 bg-indigo-50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/50">
+        <p class="text-[10px] font-black text-indigo-800 dark:text-indigo-200 uppercase tracking-[0.2em] mb-1">New Category</p>
+        <p class="text-xs text-indigo-700/70 dark:text-indigo-400/70 italic">Organize your ${isProduct ? 'products' : 'expenses'} more effectively.</p>
+      </div>
+      <div class="space-y-4">
         <div>
-          <span class="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3 block w-fit">Data Architect</span>
-          <h3 class="text-4xl font-black text-slate-950 dark:text-white uppercase tracking-tighter">${isProdView ? "Product" : "Expense"
-    }</h3>
-          <p class="text-sm text-slate-500 lowercase italic mt-1">${isProdView ? "inventory ecosystem" : "operating overheads"
-    }</p>
-          ${isProdView ? `
-            <div class="mt-6 flex items-center gap-4 p-4 bg-indigo-50 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-900/50">
-              <div class="flex-1">
-                <h5 class="text-xs font-black text-indigo-900 dark:text-indigo-200 uppercase tracking-widest">Damage to Loss auto calculation</h5>
-                <p class="text-[10px] text-indigo-700/60 dark:text-indigo-400/60 italic mt-0.5">Automatically subtract net damage loss from profit in analytics.</p>
-              </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" onchange="toggleDamageAutoCalc(this)" class="sr-only peer" ${(_receiptSettings && _receiptSettings.auto_calculate_damage_to_loss) ? "checked" : ""}>
-                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-              </label>
-            </div>
-          ` : ""}
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Category Label</label>
+          <input id="pop-cat-name" onkeydown="if(event.key==='Enter') submitPopCategory('${type}')" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:border-indigo-500 transition-all outline-none font-bold text-lg" placeholder="e.g. ${isProduct ? 'Beverages' : 'Rent'}" />
         </div>
-        
-        <div class="bg-white dark:bg-slate-950 p-3 rounded-[2rem] flex items-center gap-3 border border-slate-200 dark:border-slate-800 shadow-2xl w-full xl:w-auto">
-           <div class="flex-1 xl:flex-none relative">
-              <input id="new-cat-name" placeholder="Category Label..." onkeydown="if(event.key==='Enter') addCategory('${typeKey}')"
-                class="w-full xl:w-64 bg-slate-50 dark:bg-slate-900 px-6 py-4 rounded-2xl text-sm font-bold border-transparent focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none" />
-           </div>
-           ${!isProdView
-      ? `<input id="new-cat-emoji" value="📦" class="bg-slate-50 dark:bg-slate-900 w-20 px-4 py-4 rounded-2xl text-center text-xl border-transparent focus:border-indigo-500 outline-none" />`
-      : ""
-    }
-           <button onclick="addCategory('${typeKey}')" class="px-8 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/30 active:scale-95 transition-all flex items-center gap-2">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-              ADD
-           </button>
-        </div>
+        ${emojiHtml}
+        <button onclick="submitPopCategory('${type}')" class="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+          Save Category
+        </button>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-        ${catList
-      .map(
-        (c) => `
-          <div class="group flex items-center justify-between p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900/50 hover:border-indigo-400 dark:hover:border-indigo-600 transition-all hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-1 relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div class="flex items-center gap-5">
-              ${!isProdView
-            ? `<div class="w-16 h-16 rounded-[1.25rem] bg-slate-100 dark:bg-slate-800/80 flex items-center justify-center text-3xl group-hover:scale-110 transition-transform duration-500 shadow-inner">${c.emoji || "📦"
-            }</div>`
-            : `<div class="w-4 h-12 rounded-full bg-indigo-50 dark:bg-indigo-900 flex items-center justify-center text-indigo-500 group-hover:bg-indigo-500 group-hover:text-white transition-all duration-500"><svg class="w-2 h-2" fill="currentColor" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg></div>`
-          }
-              <div>
-                <span class="text-lg font-black text-slate-900 dark:text-white tracking-tight">${c.name
-          }</span>
-                <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">${isProdView ? "System Asset" : "Expense Node"
-          }</div>
-              </div>
-            </div>
-            <button onclick="deleteCategory('${typeKey}', ${c.id
-          })" class="p-3 rounded-2xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all opacity-0 group-hover:opacity-100">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            </button>
-          </div>
-        `,
-      )
-      .join("")}
-        ${catList.length === 0
-      ? `
-            <div class="col-span-full py-20 bg-slate-50 dark:bg-slate-900/30 rounded-[3rem] border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-center">
-               <div class="w-20 h-20 rounded-[2rem] bg-white dark:bg-slate-900 flex items-center justify-center text-slate-300 mb-4 shadow-sm" style="margin: 0 auto 1rem auto">
-                  <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: auto"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-               </div>
-               <p class="text-slate-500 italic max-w-xs mx-auto">No entries found for this ledger. Initialise your data architecture by adding a category above.</p>
-            </div>
-          `
-      : ""
-    }
+      <div id="pop-cat-list-wrap" class="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
+         <p class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-1">Manage Existing Categories</p>
+         <div id="pop-cat-list" class="space-y-2 max-h-[250px] overflow-y-auto pr-2">
+            <!-- List injected here -->
+         </div>
       </div>
     </div>
-  `;
+    `
+  );
+  updateCategoryListInPopup(type);
+  setTimeout(() => {
+    const input = document.getElementById("pop-cat-name");
+    if (input) input.focus();
+  }, 50);
+}
+
+async function submitPopCategory(type) {
+  const name = document.getElementById("pop-cat-name").value.trim();
+  if (!name) return toast("Name required", "error");
+
+  const payload = { name };
+  if (type === "expense") {
+    payload.emoji = document.getElementById("pop-cat-emoji").value || "📦";
+  }
+
+  const url = type === "product" ? "/api/product-categories" : "/api/expense-categories";
+  const r = await api(url, "POST", payload);
+  if (r.error) return toast(r.error, "error");
+
+  const input = document.getElementById("pop-cat-name");
+  if (input) {
+    input.value = "";
+    input.focus();
+  }
+  
+  toast("Category added successfully!");
+  await fetchCategories();
+  updateCategoryListInPopup(type);
+  if (_currentPage === 'dashboard') renderDashboard();
+}
+
+function updateCategoryListInPopup(type) {
+  const container = document.getElementById("pop-cat-list");
+  if (!container) return;
+
+  const categories = type === "product" ? _productCategories : _expenseCategories;
+  
+  if (categories.length === 0) {
+    container.innerHTML = `<div class="text-xs text-slate-400 italic text-center py-4">No categories added yet.</div>`;
+    return;
+  }
+
+  container.innerHTML = categories.map(c => `
+    <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 transition-all hover:border-indigo-300 dark:hover:border-indigo-700 group">
+      <div class="flex items-center gap-3">
+        ${type === 'expense' && c.emoji ? `<span class="text-lg">${c.emoji}</span>` : `<div class="w-2 h-2 rounded-full bg-indigo-500"></div>`}
+        <span class="text-sm font-bold text-slate-800 dark:text-slate-200">${c.name}</span>
+      </div>
+      <button onclick="deleteCategoryFromPopup('${type}', ${c.id}, '${c.name.replace(/'/g, "\\'")}')" class="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+async function deleteCategoryFromPopup(type, id, name) {
+  if (!confirm(`Are you sure you want to delete the "${name}" category?`)) return;
+  
+  const url = type === 'product' ? `/api/product-categories/${id}` : `/api/expense-categories/${id}`;
+  
+  try {
+    const r = await api(url, 'DELETE');
+    if (r.error) return toast(r.error, 'error');
+    
+    toast('Category deleted successfully!');
+    await fetchCategories();
+    updateCategoryListInPopup(type);
+    if (_currentPage === 'dashboard') renderDashboard();
+  } catch (e) {
+    toast('Failed to delete category', 'error');
+  }
 }
 
 async function addCategory(type) {
@@ -688,10 +743,14 @@ async function fetchReceiptSettings() {
 function renderReceiptPreview() {
   const settings = _receiptSettings || {};
   const headerText = document.getElementById("receipt-header-text")?.value || settings.receipt_header_text || settings.name || "YOUR SHOP";
+  const extendedName = document.getElementById("receipt-extended-name")?.value || settings.receipt_extended_name || "";
   const phone = document.getElementById("receipt-phone")?.value || settings.receipt_phone || "";
   const address = document.getElementById("receipt-address")?.value || settings.receipt_address || "";
   const policies = document.getElementById("receipt-policies")?.value || settings.receipt_policies || "";
-  const useLogo = document.querySelector('input[name="logo_type"]:checked')?.value === "logo";
+  // Get logo/text flags from checkboxes
+  const useLogo = document.getElementById("use-logo-on-receipt")?.checked ?? (settings.use_logo_on_receipt !== false);
+  const useText = document.getElementById("use-text-on-receipt")?.checked ?? (settings.use_text_on_receipt !== false);
+
   // Use temporary logo URL if available (from file preview), otherwise use saved logo
   const savedLogoUrl = settings.logo_url || "";
   const hasSavedLogo = !!settings.logo_path;
@@ -704,6 +763,11 @@ function renderReceiptPreview() {
   const headerFontSize = document.getElementById("header-font-size")?.value || settings.header_font_size || 18;
   const headerFontWeight = document.getElementById("header-font-weight")?.value || settings.header_font_weight || "bold";
   const headerSpacing = document.getElementById("header-spacing")?.value || settings.header_spacing || 10;
+  
+  const extendedNameFontSize = document.getElementById("extended-name-font-size")?.value || settings.extended_name_font_size || 10;
+  const extendedNameFontWeight = document.getElementById("extended-name-font-weight")?.value || settings.extended_name_font_weight || "normal";
+  const extendedNameSpacing = document.getElementById("extended-name-spacing")?.value || settings.extended_name_spacing || 2;
+
   const contactFontSize = document.getElementById("contact-font-size")?.value || settings.contact_font_size || 10;
   const contactAlign = document.getElementById("contact-align")?.value || settings.contact_align || "center";
   const contactPadding = document.getElementById("contact-padding")?.value || settings.contact_padding || 10;
@@ -719,9 +783,16 @@ function renderReceiptPreview() {
   // Build header
   let headerHtml = "";
   if (useLogo && hasLogo) {
-    headerHtml = `<div style="margin-bottom: ${headerSpacing}px;"><img src="${logoUrl}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
-  } else {
-    headerHtml = `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
+    headerHtml += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${logoUrl}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
+  }
+  
+  if (useText) {
+    headerHtml += `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
+  }
+
+  // Tagline/Extended info (shown if either is selected or both)
+  if (extendedName) {
+    headerHtml += `<div style="font-size: ${extendedNameFontSize}px; font-weight: ${extendedNameFontWeight}; margin-top: ${extendedNameSpacing}px; text-align: center; text-transform: none; margin-bottom: ${headerSpacing}px;">${extendedName}</div>`;
   }
 
   // Build contact
@@ -864,24 +935,40 @@ function renderReceiptSettings() {
           
           <div class="flex flex-col md:flex-row gap-6 items-start">
             <div class="flex-1 w-full">
-              <div class="flex items-center gap-4 mb-4">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="logo_type" value="text" ${!settings.use_logo_on_receipt || !hasLogo ? "checked" : ""} 
-                         onchange="toggleLogoType('text'); updateReceiptPreview();" class="w-4 h-4 text-indigo-600">
-                  <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Use Text Header</span>
+              <div class="flex items-center gap-6 mb-6 pb-4 border-b border-slate-200/50 dark:border-slate-800/50">
+                <label class="flex items-center gap-3 cursor-pointer group">
+                  <div class="relative">
+                    <input type="checkbox" id="use-text-on-receipt" ${settings.use_text_on_receipt !== false ? "checked" : ""} 
+                           onchange="updateHeaderVisibility(); updateReceiptPreview();" class="peer sr-only">
+                    <div class="w-10 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:bg-indigo-600 transition-all"></div>
+                    <div class="absolute left-1 top-1 w-3 h-3 bg-white rounded-full peer-checked:translate-x-5 transition-all shadow-sm"></div>
+                  </div>
+                  <span class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 transition-colors">Show Text Header</span>
                 </label>
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="logo_type" value="logo" ${settings.use_logo_on_receipt ? "checked" : ""} 
-                         onchange="toggleLogoType('logo'); updateReceiptPreview();" class="w-4 h-4 text-indigo-600">
-                  <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Use Logo Image</span>
+                <label class="flex items-center gap-3 cursor-pointer group">
+                  <div class="relative">
+                    <input type="checkbox" id="use-logo-on-receipt" ${settings.use_logo_on_receipt ? "checked" : ""} 
+                           onchange="updateHeaderVisibility(); updateReceiptPreview();" class="peer sr-only">
+                    <div class="w-10 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:bg-indigo-600 transition-all"></div>
+                    <div class="absolute left-1 top-1 w-3 h-3 bg-white rounded-full peer-checked:translate-x-5 transition-all shadow-sm"></div>
+                  </div>
+                  <span class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 transition-colors">Show Logo Image</span>
                 </label>
               </div>
               
-              <div id="text-header-input" class="${settings.use_logo_on_receipt ? "hidden" : ""}">
-                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Shop Name on Receipt</label>
-                <input type="text" id="receipt-header-text" value="${settings.receipt_header_text || settings.name || ""}" 
-                       placeholder="Your Shop Name" oninput="updateReceiptPreview()"
-                       class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
+              <div id="text-header-input" class="${settings.use_text_on_receipt === false ? "hidden" : "space-y-4 mb-6"}">
+                <div>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Shop Name on Receipt</label>
+                  <input type="text" id="receipt-header-text" value="${settings.receipt_header_text || settings.name || ""}" 
+                         placeholder="Your Shop Name" oninput="updateReceiptPreview()"
+                         class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
+                </div>
+                <div>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Extended Name / Tagline</label>
+                  <input type="text" id="receipt-extended-name" value="${settings.receipt_extended_name || ""}" 
+                         placeholder="e.g. Fine Dining or Wholesale & Retail" oninput="updateReceiptPreview()"
+                         class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
+                </div>
               </div>
               
               <div id="logo-upload-input" class="${!settings.use_logo_on_receipt ? "hidden" : ""}">
@@ -993,12 +1080,12 @@ function renderReceiptSettings() {
               <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Header (Shop Name)</h5>
               <div class="grid grid-cols-3 gap-4">
                 <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Font Size (px)</label>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Font Size</label>
                   <input type="number" id="header-font-size" value="${settings.header_font_size || 18}" min="10" max="32" oninput="updateReceiptPreview()"
                          class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
                 </div>
                 <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Weight</label>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Weight</label>
                   <select id="header-font-weight" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
                     <option value="normal" ${settings.header_font_weight === "normal" ? "selected" : ""}>Normal</option>
                     <option value="bold" ${!settings.header_font_weight || settings.header_font_weight === "bold" ? "selected" : ""}>Bold</option>
@@ -1006,8 +1093,33 @@ function renderReceiptSettings() {
                   </select>
                 </div>
                 <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Spacing (px)</label>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Spacing</label>
                   <input type="number" id="header-spacing" value="${settings.header_spacing || 10}" min="0" max="30" oninput="updateReceiptPreview()"
+                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
+                </div>
+              </div>
+            </div>
+
+            <!-- Extended Name Styling -->
+            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
+              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Extended Name / Tagline</h5>
+              <div class="grid grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Font Size</label>
+                  <input type="number" id="extended-name-font-size" value="${settings.extended_name_font_size || 10}" min="8" max="24" oninput="updateReceiptPreview()"
+                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
+                </div>
+                <div>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Weight</label>
+                  <select id="extended-name-font-weight" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
+                    <option value="normal" ${!settings.extended_name_font_weight || settings.extended_name_font_weight === "normal" ? "selected" : ""}>Normal</option>
+                    <option value="bold" ${settings.extended_name_font_weight === "bold" ? "selected" : ""}>Bold</option>
+                    <option value="800" ${settings.extended_name_font_weight === "800" ? "selected" : ""}>Extra Bold</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Spacing</label>
+                  <input type="number" id="extended-name-spacing" value="${settings.extended_name_spacing || 2}" min="0" max="20" oninput="updateReceiptPreview()"
                          class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
                 </div>
               </div>
@@ -1118,33 +1230,43 @@ function renderReceiptSettings() {
   `;
 }
 
-function toggleLogoType(type) {
+function updateHeaderVisibility() {
+  const showText = document.getElementById("use-text-on-receipt")?.checked;
+  const showLogo = document.getElementById("use-logo-on-receipt")?.checked;
   const textInput = document.getElementById("text-header-input");
   const logoInput = document.getElementById("logo-upload-input");
-  if (type === "text") {
-    textInput.classList.remove("hidden");
-    logoInput.classList.add("hidden");
-  } else {
-    textInput.classList.add("hidden");
-    logoInput.classList.remove("hidden");
+  
+  if (textInput) {
+    if (showText) textInput.classList.remove("hidden");
+    else textInput.classList.add("hidden");
   }
+  
+  if (logoInput) {
+    if (showLogo) logoInput.classList.remove("hidden");
+    else logoInput.classList.add("hidden");
+  }
+}
+
+// Keep old function for compatibility if called elsewhere but point to new logic
+function toggleLogoType(type) {
+  updateHeaderVisibility();
 }
 
 async function saveReceiptSettings() {
   try {
     const formData = new FormData();
-
-    // Check logo type
-    const logoType = document.querySelector('input[name="logo_type"]:checked')?.value || "text";
-    formData.append("use_logo_on_receipt", logoType === "logo");
+    formData.append("use_logo_on_receipt", document.getElementById("use-logo-on-receipt")?.checked ? "true" : "false");
+    formData.append("use_text_on_receipt", document.getElementById("use-text-on-receipt")?.checked ? "true" : "false");
 
     // Text fields
     const headerText = document.getElementById("receipt-header-text")?.value || "";
+    const extendedName = document.getElementById("receipt-extended-name")?.value || "";
     const phone = document.getElementById("receipt-phone")?.value || "";
     const address = document.getElementById("receipt-address")?.value || "";
     const policies = document.getElementById("receipt-policies")?.value || "";
 
     formData.append("receipt_header_text", headerText);
+    formData.append("receipt_extended_name", extendedName);
     formData.append("receipt_phone", phone);
     formData.append("receipt_address", address);
     formData.append("receipt_policies", policies);
@@ -1154,6 +1276,9 @@ async function saveReceiptSettings() {
     formData.append("header_font_size", document.getElementById("header-font-size")?.value || "18");
     formData.append("header_font_weight", document.getElementById("header-font-weight")?.value || "bold");
     formData.append("header_spacing", document.getElementById("header-spacing")?.value || "10");
+    formData.append("extended_name_font_size", document.getElementById("extended-name-font-size")?.value || "10");
+    formData.append("extended_name_font_weight", document.getElementById("extended-name-font-weight")?.value || "normal");
+    formData.append("extended_name_spacing", document.getElementById("extended-name-spacing")?.value || "2");
     formData.append("contact_font_size", document.getElementById("contact-font-size")?.value || "10");
     formData.append("contact_align", document.getElementById("contact-align")?.value || "center");
     formData.append("contact_padding", document.getElementById("contact-padding")?.value || "10");
@@ -1451,6 +1576,12 @@ async function renderDashboard(period, brandId, from, to) {
     _dashTo !== "";
 
   $c("page-content").innerHTML = `
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+      <div>
+        <h3 class="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight">Main Dashboard</h3>
+        <p class="text-gray-500 dark:text-gray-400 text-sm font-medium mt-1">Real-time overview of your store performance</p>
+      </div>
+    </div>
     <!-- Filter Bar -->
     <div class="flex flex-wrap items-center justify-between gap-3 mb-6 p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm">
       <div class="flex items-center gap-2">
@@ -1896,9 +2027,9 @@ function productFormHtml(p = {}, brands = []) {
     <div class="col-span-2 sm:col-span-1">
       <label class="block text-xs text-slate-400 mb-1">${label}</label>
       <div class="flex items-center gap-2">
-        <button type="button" onclick="this.nextElementSibling.stepDown(); ${id === "add-cart-qty" ? "" : "if(window.calculateCartTotal) calculateCartTotal();"}" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xl font-bold">-</button>
+        <button type="button" onclick="const inp = this.nextElementSibling; inp.stepDown(); inp.dispatchEvent(new Event('input', {bubbles:true})); ${id === "add-cart-qty" ? "" : "if(window.calculateCartTotal) calculateCartTotal();"}" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xl font-bold">-</button>
         <input id="${id}" type="number" value="${value}" class="flex-1 w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="${placeholder}" />
-        <button type="button" onclick="this.previousElementSibling.stepUp(); ${id === "add-cart-qty" ? "" : "if(window.calculateCartTotal) calculateCartTotal();"}" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xl font-bold">+</button>
+        <button type="button" onclick="const inp = this.previousElementSibling; inp.stepUp(); inp.dispatchEvent(new Event('input', {bubbles:true})); ${id === "add-cart-qty" ? "" : "if(window.calculateCartTotal) calculateCartTotal();"}" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xl font-bold">+</button>
       </div>
     </div>`;
 
@@ -1962,16 +2093,16 @@ function productFormHtml(p = {}, brands = []) {
         </div>
 
         <div id="pricing-cost-container" class="col-span-2 sm:col-span-1">
-          ${numInput("pf-buy", "Cost Price", p.buying_price || 0)}
+          ${numInput("pf-buy", "Cost Price", p.buying_price ?? "")}
         </div>
         <div id="pricing-sell-container" class="col-span-2 sm:col-span-1">
-          ${numInput("pf-sell", "Selling Price", p.selling_price || 0)}
+          ${numInput("pf-sell", "Selling Price", p.selling_price ?? "")}
         </div>
         <div id="pricing-stock-container" class="col-span-2 sm:col-span-1">
-          ${numInput("pf-stock", "Initial Stock", p.stock || 0)}
+          ${numInput("pf-stock", "Initial Stock", p.stock ?? "")}
         </div>
         <div id="pricing-min-stock-container" class="col-span-2 sm:col-span-1">
-           ${numInput("pf-min-stock", "Minimum Stock Level", p.min_stock_level || 0, "Alert threshold")}
+           ${numInput("pf-min-stock", "Minimum Stock Level", p.min_stock_level ?? "", "Alert threshold")}
         </div>
         ${compHtml}
 
@@ -1980,9 +2111,9 @@ function productFormHtml(p = {}, brands = []) {
           <div class="flex items-start gap-4">
             <div id="pf-img-preview" class="w-20 h-20 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center flex-shrink-0">
               ${p.image_url
-        ? `<img src="${p.image_url}" class="w-full h-full object-cover" />`
-        : `<svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>`
-      }
+      ? `<img src="${p.image_url}" class="w-full h-full object-cover" />`
+      : `<svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>`
+    }
             </div>
             <div class="flex-1">
               <label class="block text-xs text-slate-500 mb-2">Upload a photo of this product (JPG, PNG, WebP, max 2MB)</label>
@@ -2018,9 +2149,10 @@ async function openAddProduct() {
   }
 
   window._formComponents = [];
+  const randomSku = 'SKU-' + Math.random().toString(36).substring(2, 10).toUpperCase();
   openModal(
     "Add Product",
-    productFormHtml({}, brands) +
+    productFormHtml({ sku: randomSku }, brands) +
     `<button onclick="saveProduct()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Save Product</button>`,
     "max-w-xl",
   );
@@ -2107,7 +2239,16 @@ async function saveProduct(id) {
     const method = id ? 'PUT' : 'POST';
 
     const res = await fetch(url, { method, body: formData });
-    const r = await res.json();
+    
+    let r;
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      r = await res.json();
+    } else {
+      const errorText = await res.text();
+      throw new Error(`Server returned non-JSON response (${res.status}): ${errorText.substring(0, 100)}...`);
+    }
+
     if (!res.ok || r.error) return toast(r.error || 'Error saving product', 'error');
 
     closeModal();
@@ -2171,11 +2312,12 @@ function recalculateComponentPrices() {
     components.forEach(c => {
       totalCost += (c.cost || 0) * (c.quantity || 1);
     });
-    buyEl.value = totalCost.toFixed(2);
-    buyEl.readOnly = count > 0;
-    if (buyEl.readOnly) {
+    if (count > 0) {
+      buyEl.value = totalCost.toFixed(2);
+      buyEl.readOnly = true;
       buyEl.classList.add('bg-slate-100', 'dark:bg-slate-800', 'cursor-not-allowed');
     } else {
+      buyEl.readOnly = false;
       buyEl.classList.remove('bg-slate-100', 'dark:bg-slate-800', 'cursor-not-allowed');
     }
 
@@ -2621,7 +2763,7 @@ async function renderPOS() {
                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Discount (Rs)</label>
                  <div class="flex items-center gap-1">
                    <button type="button" onclick="$c('pos-discount').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
-                   <input id="pos-discount" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <input id="pos-discount" type="number" min="0" value="" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
                    <button type="button" onclick="$c('pos-discount').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
                  </div>
                </div>
@@ -2629,13 +2771,33 @@ async function renderPOS() {
                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Tax (%)</label>
                  <div class="flex items-center gap-1">
                    <button type="button" onclick="$c('pos-tax').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
-                   <input id="pos-tax" type="number" min="0" value="0" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <input id="pos-tax" type="number" min="0" value="" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
                    <button type="button" onclick="$c('pos-tax').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
                  </div>
                </div>
             </div>
 
             <div class="grid grid-cols-2 gap-4 text-base pt-2 border-t border-slate-200 dark:border-slate-800">
+               <!-- Customer Identity for Pending Dues -->
+               <div class="col-span-1 relative">
+                 <label id="pos-cust-name-label" class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Cust. Name</label>
+                 <input id="pos-cust-name" type="text" placeholder="Optional" 
+                        oninput="suggestPOSCustomers(this.value, 'pos-cust-name')"
+                        autocomplete="off"
+                        class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-bold shadow-sm" />
+                 <!-- Suggestions Dropdown -->
+                 <div id="pos-cust-name-suggestions" class="hidden absolute z-[100] left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto"></div>
+               </div>
+               <div class="col-span-1 relative">
+                 <label id="pos-cust-phone-label" class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Cust. Phone</label>
+                 <input id="pos-cust-phone" type="tel" placeholder="Optional" 
+                        oninput="suggestPOSCustomers(this.value, 'pos-cust-phone')"
+                        autocomplete="off"
+                        class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-bold shadow-sm" />
+                 <!-- Suggestions Dropdown -->
+                 <div id="pos-cust-phone-suggestions" class="hidden absolute z-[100] left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto"></div>
+               </div>
+
                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 px-1">Payment</label>
                <select id="pos-method" onchange="handlePOSMethodChange(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-base shadow-sm font-bold">
                   <option value="cash">Cash</option>
@@ -2646,7 +2808,7 @@ async function renderPOS() {
                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Received</label>
                  <div class="flex items-center gap-1">
                    <button type="button" onclick="$c('pos-received').stepDown();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
-                   <input id="pos-received" type="number" min="0" value="0" oninput="calculateRemaining()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <input id="pos-received" type="number" min="0" value="" oninput="calculateRemaining()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
                    <button type="button" onclick="$c('pos-received').stepUp();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
                  </div>
                </div>
@@ -2786,7 +2948,7 @@ function renderPOSProducts(products) {
             ${(p.ingredients && p.ingredients.length > 0)
             ? `<span class="text-xs font-black text-amber-500 uppercase">🍳 Recipe</span>`
             : (p.components && p.components.length > 0)
-               ? `
+              ? `
                  <div class="flex flex-col items-end">
                     <div class="flex items-baseline gap-1">
                        <span class="text-sm font-black ${p.stock > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>
@@ -2794,7 +2956,7 @@ function renderPOSProducts(products) {
                     </div>
                  </div>
                  `
-               : `<span class="text-sm font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
+              : `<span class="text-sm font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
           }
           </div>
         </div>
@@ -2885,14 +3047,14 @@ function addToCart(productId) {
                 <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Current Loose</div>
                 <div class="text-xl font-black text-amber-500">
                    ${(() => {
-                      const c = product.components[0];
-                      const child = productMap[c.id];
-                      if (!child || child.stock <= 0) return '0';
-                      
-                      const looseUnits = Math.ceil(child.stock / c.quantity);
-                      const remnant = child.stock % c.quantity;
-                      return `${looseUnits} <span class="text-[10px] font-black opacity-60">(${remnant || c.quantity} pcs left)</span>`;
-                   })()}
+        const c = product.components[0];
+        const child = productMap[c.id];
+        if (!child || child.stock <= 0) return '0';
+
+        const looseUnits = Math.ceil(child.stock / c.quantity);
+        const remnant = child.stock % c.quantity;
+        return `${looseUnits} <span class="text-[10px] font-black opacity-60">(${remnant || c.quantity} pcs left)</span>`;
+      })()}
                 </div>
              </div>
           </div>
@@ -3197,10 +3359,10 @@ function renderCart() {
         <div class="group relative grid grid-cols-10 items-center gap-2 p-1.5 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl hover:shadow-lg hover:border-indigo-200 dark:hover:border-indigo-800 transition-all overflow-hidden">
           <!-- Image -->
           <div class="col-span-1 w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 flex-shrink-0 overflow-hidden">
-             ${(item.product && item.product.image_url) 
-               ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
-               : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
-             }
+             ${(item.product && item.product.image_url)
+      ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
+      : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
+    }
           </div>
 
           <!-- Name -->
@@ -3263,10 +3425,10 @@ function showCartModal() {
               <td class="py-2 px-2">
                 <div class="flex items-center gap-4">
                   <div class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex-shrink-0 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm transition-transform hover:scale-110">
-                    ${(item.product && item.product.image_url) 
-                      ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
-                      : `<svg class="w-6 h-6 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
-                    }
+                    ${(item.product && item.product.image_url)
+            ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
+            : `<svg class="w-6 h-6 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
+          }
                   </div>
                   <div>
                     <div class="font-bold text-slate-800 dark:text-slate-200 leading-tight">${item.product ? item.product.name : item.name}</div>
@@ -3363,25 +3525,126 @@ function calculateCartTotal() {
 function calculateRemaining() {
   const grandTotal = parseFloat($c("cart-total").dataset.total) || 0;
   const received = parseFloat($c("pos-received").value) || 0;
-  // Use toFixed(2) and Number() to avoid floating point precision issues
   const remaining = Number((grandTotal - received).toFixed(2));
 
   const el = $c("cart-remaining");
-  const reqName = $c("req-name");
-  const reqPhone = $c("req-phone");
+  const nameInp = $c("pos-cust-name");
+  const phoneInp = $c("pos-cust-phone");
+  const nameLabel = $c("pos-cust-name-label");
+  const phoneLabel = $c("pos-cust-phone-label");
 
   if (remaining <= 0) {
     el.textContent = "Change: Rs. " + Math.abs(remaining).toFixed(2);
     el.className = "font-bold text-emerald-400 text-xl";
-    if (reqName) reqName.classList.add("hidden");
-    if (reqPhone) reqPhone.classList.add("hidden");
+    if (nameInp) {
+      nameInp.placeholder = "Optional";
+      nameInp.classList.remove("border-rose-500", "bg-rose-50", "dark:bg-rose-950/20");
+    }
+    if (nameLabel) nameLabel.classList.remove("text-rose-500");
+    if (phoneInp) {
+      phoneInp.placeholder = "Optional";
+      phoneInp.classList.remove("border-rose-500", "bg-rose-50", "dark:bg-rose-950/20");
+    }
+    if (phoneLabel) phoneLabel.classList.remove("text-rose-500");
   } else {
     el.textContent = "Due: Rs. " + remaining.toFixed(2);
     el.className = "font-bold text-rose-400 text-xl";
-    if (reqName) reqName.classList.remove("hidden");
-    if (reqPhone) reqPhone.classList.remove("hidden");
+    if (nameInp) {
+      nameInp.placeholder = "REQUIRED for Dues";
+      nameInp.classList.add("border-rose-500", "bg-rose-50", "dark:bg-rose-950/20");
+    }
+    if (nameLabel) nameLabel.classList.add("text-rose-500");
+    if (phoneInp) {
+      phoneInp.placeholder = "REQUIRED for Dues";
+      phoneInp.classList.add("border-rose-500", "bg-rose-50", "dark:bg-rose-950/20");
+    }
+    if (phoneLabel) phoneLabel.classList.add("text-rose-500");
   }
 }
+
+let _posCustSuggestTimeout = null;
+async function suggestPOSCustomers(query, targetId) {
+  const q = String(query || "").trim();
+  const suggestionEl = document.getElementById(targetId + "-suggestions");
+  if (!suggestionEl) return;
+
+  // Hide the other one if open
+  const otherId = targetId === 'pos-cust-name' ? 'pos-cust-phone' : 'pos-cust-name';
+  const otherEl = document.getElementById(otherId + "-suggestions");
+  if (otherEl) otherEl.classList.add("hidden");
+
+  if (q.length < 1) {
+    suggestionEl.innerHTML = "";
+    suggestionEl.classList.add("hidden");
+    return;
+  }
+
+  // Clear previous timeout for debouncing
+  if (_posCustSuggestTimeout) clearTimeout(_posCustSuggestTimeout);
+
+  _posCustSuggestTimeout = setTimeout(async () => {
+    try {
+      const customers = await api(`/api/customers?status=active&search=${encodeURIComponent(q)}`);
+      const results = Array.isArray(customers) ? customers.slice(0, 5) : [];
+      
+      if (results.length === 0) {
+        suggestionEl.innerHTML = "";
+        suggestionEl.classList.add("hidden");
+        return;
+      }
+
+      suggestionEl.innerHTML = results.map(c => {
+        const balBadge = c.current_balance > 0 
+          ? `<span class="px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-[8px] font-black">DUE: RS. ${c.current_balance}</span>`
+          : '';
+          
+        return `
+        <button type="button" onclick="selectSuggestedCustomer(${JSON.stringify(c).replace(/"/g, '&quot;')})" 
+                class="w-full text-left px-4 py-3 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all border-b border-slate-100 dark:border-slate-800 last:border-0 flex flex-col gap-0.5">
+          <div class="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-tight">${c.name}</div>
+          <div class="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <span>${c.phone || 'No Phone'}</span>
+            ${balBadge}
+          </div>
+        </button>`;
+      }).join("");
+      
+      suggestionEl.classList.remove("hidden");
+    } catch (err) {
+      console.error("Suggestion error:", err);
+    }
+  }, 300);
+}
+
+function selectSuggestedCustomer(c) {
+  const nameInp = document.getElementById("pos-cust-name");
+  const phoneInp = document.getElementById("pos-cust-phone");
+  
+  if (nameInp) nameInp.value = c.name;
+  if (phoneInp) phoneInp.value = c.phone || "";
+  
+  // Hide both containers
+  ['pos-cust-name-suggestions', 'pos-cust-phone-suggestions'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.innerHTML = "";
+      el.classList.add("hidden");
+    }
+  });
+}
+
+// Hide suggestions when clicking outside
+document.addEventListener('click', (e) => {
+  const nameInp = document.getElementById("pos-cust-name");
+  const phoneInp = document.getElementById("pos-cust-phone");
+  
+  ['pos-cust-name-suggestions', 'pos-cust-phone-suggestions'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.contains(e.target) && e.target !== nameInp && e.target !== phoneInp) {
+      el.classList.add("hidden");
+    }
+  });
+});
 
 function toggleQuotationMode(isQuotation) {
   const btn = $c("checkout-btn");
@@ -3444,6 +3707,20 @@ async function checkout() {
   } else if (orderType === 'takeaway') {
     token_number = $c('pos-token')?.value.trim() || `TK-${Date.now()}`;
     customer_name = $c('pos-takeaway-name')?.value.trim() || '';
+  }
+
+  // Unified Customer Details (override if set in the new sidebar fields)
+  const sidebarName = $c('pos-cust-name')?.value.trim();
+  const sidebarPhone = $c('pos-cust-phone')?.value.trim();
+  if (sidebarName) customer_name = sidebarName;
+  if (sidebarPhone) customer_phone = sidebarPhone;
+
+  // Validation for Pending Dues
+  if (amount_received < grandTotal - 0.01) {
+    if (!customer_name || !customer_phone) {
+      $c('pos-cust-name').focus();
+      return toast("Customer Name & Phone are REQUIRED for Pending Dues", "error");
+    }
   }
 
   // Legacy credit validation: only apply for dine-in
@@ -3560,12 +3837,14 @@ async function printBill(saleId) {
   // Build receipt header based on settings
   let headerHtml = "";
   const useLogo = shop?.use_logo_on_receipt && shop?.logo_path;
+  const useText = shop?.use_text_on_receipt !== false; // Default true
   const headerText = shop?.receipt_header_text || shop?.name || "STORE";
 
   if (useLogo) {
-    headerHtml = `<div style="margin-bottom: ${headerSpacing}px;"><img src="${shop.logo_path}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
-  } else {
-    headerHtml = `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
+    headerHtml += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${shop.logo_path}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
+  }
+  if (useText) {
+    headerHtml += `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
   }
 
   // Build contact details section
@@ -3878,12 +4157,14 @@ async function printReturnReceipt(returnId) {
   // Build receipt header based on settings
   let headerHtml = "";
   const useLogo = shop?.use_logo_on_receipt && shop?.logo_path;
+  const useText = shop?.use_text_on_receipt !== false;
   const headerText = shop?.receipt_header_text || shop?.name || "STORE";
 
   if (useLogo) {
-    headerHtml = `<img src="${shop.logo_path}" style="max-width: 60mm; max-height: 20mm; margin: 0 auto; display: block;" alt="${headerText}">`;
-  } else {
-    headerHtml = `<h1>${headerText}</h1>`;
+    headerHtml += `<img src="${shop.logo_path}" style="max-width: 60mm; max-height: 20mm; margin: 0 auto; display: block;" alt="${headerText}">`;
+  }
+  if (useText) {
+    headerHtml += `<h1>${headerText}</h1>`;
   }
 
   // Build contact details section
@@ -3997,7 +4278,10 @@ async function renderSalesHistory(onlyPendingDues = false) {
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-2xl font-bold ${statusColor} mb-1">${statusLabel}</h2>
-          <p class="text-slate-500 dark:text-slate-400 text-sm">Showing <span id="sales-count" class="font-bold">0</span> records</p>
+          <div class="flex items-center gap-4">
+            <p class="text-slate-500 dark:text-slate-400 text-sm">Showing <span id="sales-count" class="font-bold">0</span> records</p>
+            ${onlyPendingDues ? `<p class="text-rose-500 font-black text-sm px-3 py-1 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20">Total Dues: Rs. <span id="sales-total-dues">0</span></p>` : ""}
+          </div>
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
@@ -4026,7 +4310,8 @@ async function renderSalesHistory(onlyPendingDues = false) {
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Date</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Customer</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Total</th>
-          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Received</th>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Paid</th>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Pending</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Served By</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase text-right">Actions</th>
         </tr></thead>
@@ -4104,7 +4389,11 @@ function _renderSalesTable() {
       });
     }
 
-    $c("sales-count").textContent = displayList.length;
+    if ($c("sales-count")) $c("sales-count").textContent = displayList.length;
+    if ($c("sales-total-dues")) {
+      const totalPending = displayList.reduce((sum, s) => sum + (Number(s.total || 0) - Number(s.amount_received || 0)), 0);
+      $c("sales-total-dues").textContent = totalPending.toLocaleString("en-IN", { minimumFractionDigits: 0 });
+    }
 
     const totalPages = Math.ceil(displayList.length / _salesPageSize) || 1;
     if (_salesPage > totalPages) _salesPage = 1;
@@ -4143,13 +4432,19 @@ function _renderSalesTable() {
           </td>
           <td class="px-5 py-4 text-slate-700 dark:text-slate-200 font-bold">Rs. ${parseFloat(s.total || 0).toFixed(0)}</td>
           <td class="px-5 py-4 text-emerald-600 dark:text-emerald-400 font-medium">Rs. ${parseFloat(s.amount_received || 0).toFixed(0)}</td>
+          <td class="px-5 py-4 font-black">
+             ${isPending ? `<span class="text-rose-600 dark:text-rose-400">Rs. ${parseFloat(due).toFixed(0)}</span>` : `<span class="text-slate-400 dark:text-slate-600 font-normal">None</span>`}
+          </td>
           <td class="px-5 py-4">
             <span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[11px] font-bold border border-slate-200 dark:border-slate-700 uppercase">${s.served_by_name || s.served_by_username || "Staff"}</span>
           </td>
           <td class="px-5 py-4 text-right">
             <div class="flex items-center justify-end gap-2">
-              ${s.customer_id ? `<button onclick="viewCustomerLedger(${s.customer_id})" class="p-1.5 rounded bg-indigo-100 dark:bg-indigo-500/10 hover:bg-indigo-200 dark:hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 transition-colors" title="Open Customer Account"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg></button>` : ""}
+              ${s.customer_id && !_salesPendingFilter ? `<button onclick="viewCustomerLedger(${s.customer_id})" class="p-1.5 rounded bg-indigo-100 dark:bg-indigo-500/10 hover:bg-indigo-200 dark:hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 transition-colors" title="Open Customer Account"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg></button>` : ""}
               ${isPending ? `<button onclick="markSalePaid(${s.id}, ${s.total}, ${s.amount_received})" class="p-1.5 rounded bg-amber-100 dark:bg-amber-500/10 hover:bg-amber-200 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 transition-colors" title="Collect Payment / Update Dues"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></button>` : ""}
+              <button onclick="showSaleDuesDetails(${s.id})" class="p-1.5 rounded bg-blue-100 dark:bg-blue-500/10 hover:bg-blue-200 dark:hover:bg-blue-500/20 text-blue-700 dark:text-blue-400 transition-colors" title="View Due Details & History">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </button>
               <button onclick="returnSaleItems(${s.id})" class="p-1.5 rounded bg-rose-100 dark:bg-rose-500/10 hover:bg-rose-200 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors" title="Return Items">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 15L12 19M12 19L8 15M12 19V9C12 5.68629 14.6863 3 18 3" /></svg>
               </button>
@@ -4161,7 +4456,7 @@ function _renderSalesTable() {
         </tr>`;
         })
         .join("")
-      : `<tr><td colspan="7" class="px-5 py-10 text-center text-slate-400 dark:text-slate-600 text-sm italic border-t border-slate-100 dark:border-slate-800">No sales found for this filter.</td></tr>`;
+      : `<tr><td colspan="8" class="px-5 py-10 text-center text-slate-400 dark:text-slate-600 text-sm italic border-t border-slate-100 dark:border-slate-800">No sales found for this filter.</td></tr>`;
 
     $c("sales-pagination").innerHTML =
       totalPages > 1
@@ -4221,6 +4516,58 @@ async function doMarkSalePaid(saleId, currentReceived) {
   toast("Dues updated successfully!");
   closeModal();
   renderSalesHistory(_salesPendingFilter); // Refresh list
+}
+
+async function showSaleDuesDetails(saleId) {
+  try {
+    const data = await api(`/api/sales/${saleId}/bill`);
+    const { sale, payments } = data;
+    const totalDue = Number(sale.total || 0);
+    const amountReceived = Number(sale.amount_received || 0);
+    const balance = totalDue - amountReceived;
+
+    const historyHtml = payments.length 
+      ? payments.map(p => `
+          <div class="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800 last:border-0">
+            <div>
+              <div class="text-sm font-bold text-slate-900 dark:text-white">Rs. ${Number(p.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+              <div class="text-[10px] text-slate-500">${new Date(p.created_at).toLocaleString()}</div>
+            </div>
+            <div class="text-[10px] text-slate-400 italic font-medium max-w-[150px] text-right truncate">${p.note || 'No note'}</div>
+          </div>
+        `).join('')
+      : '<div class="py-10 text-center text-slate-400 text-sm italic">No installment payments recorded yet.</div>';
+
+    const html = `
+      <div class="space-y-6">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800">
+            <p class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Total Bill</p>
+            <p class="text-xl font-black text-indigo-700 dark:text-indigo-300">Rs. ${totalDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+          </div>
+          <div class="p-4 rounded-2xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800">
+            <p class="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">Remaining Due</p>
+            <p class="text-xl font-black text-rose-700 dark:text-rose-300">Rs. ${balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+          </div>
+        </div>
+
+        <div>
+          <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">Payment Timeline</h4>
+          <div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 overflow-y-auto max-h-[300px]">
+            ${historyHtml}
+          </div>
+        </div>
+
+        <div class="text-center pt-2">
+           <p class="text-xs text-slate-500 italic font-medium">Customer: <span class="font-bold text-slate-700 dark:text-slate-300">${sale.customer_name || 'Walk-in'}</span></p>
+        </div>
+      </div>
+    `;
+
+    openModal(`Due Details — SALE #${saleId}`, html, "max-w-md");
+  } catch (err) {
+    toast("Error loading details", "error");
+  }
 }
 
 // ─── Expenses ───────────────────────────────────────────────────────
@@ -4304,7 +4651,7 @@ async function renderExpenses() {
              Pay Brand
           </button>
 
-          <button onclick="renderManageCategories('expense')" title="Manage Expense" class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 dark:hover:border-indigo-900 shadow-sm transition-all active:scale-95 group">
+          <button onclick="openAddCategoryPopup('expense')" title="Add Expense Category" class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 dark:hover:border-indigo-900 shadow-sm transition-all active:scale-95 group">
             <svg class="w-6 h-6 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           </button>
 
@@ -4951,46 +5298,20 @@ function toggleUserPanelPicker(role) {
 // ─── Shop Management Helpers ──────────────────────────────────────────
 function allPanels() {
   return [
-    {
-      id: "core_pos",
-      name: "Core POS",
-      icon: "🛒",
-      panels: [
-        "dashboard",
-        "brands",
-        "products",
-        "pos",
-        "sales-history",
-        "customers",
-        "analytics",
-      ],
-    },
-    {
-      id: "composite_products",
-      name: "Advanced Kits",
-      icon: "🍱",
-      panels: ["composite_products"],
-    },
-    { id: "expenses", name: "Expenses", icon: "💸", panels: ["expenses"] },
-    {
-      id: "restaurant_pack",
-      name: "Restaurant Operations",
-      icon: "🍳",
-      panels: ["tables", "kds", "delivery"],
-    },
-    {
-      id: "raw_materials",
-      name: "RMS (Ingredients)",
-      icon: "🥦",
-      panels: ["raw-stock", "recipes"],
-    },
-    { id: "analytics", name: "Analytics", icon: "📈", panels: ["analytics"] },
-    {
-      id: "subscriptions",
-      name: "Subscriptions",
-      icon: "💳",
-      panels: ["subscriptions"],
-    },
+    { id: "dashboard", name: "Main Dashboard", icon: "📊", panels: ["dashboard"] },
+    { id: "pos", name: "POS Terminal", icon: "🛒", panels: ["pos"] },
+    { id: "sales-history", name: "Sales History", icon: "📜", panels: ["sales-history"] },
+    { id: "products", name: "Products & Menu", icon: "📦", panels: ["products", "brands", "product-categories"] },
+    { id: "customers", name: "Customer CRM", icon: "👥", panels: ["customers"] },
+    { id: "analytics", name: "Analytics & Reports", icon: "📈", panels: ["analytics"] },
+    { id: "raw-stock", name: "Raw Stock (Inv)", icon: "🥦", panels: ["raw-stock"] },
+    { id: "recipes", name: "Recipes & Formulas", icon: "🧪", panels: ["recipes"] },
+    { id: "expenses", name: "Expense Tracker", icon: "💸", panels: ["expenses", "expense-categories"] },
+    { id: "tables", name: "Table Management", icon: "🪑", panels: ["tables"] },
+    { id: "kds", name: "Kitchen Display", icon: "👨‍🍳", panels: ["kds"] },
+    { id: "delivery", name: "Delivery Ops", icon: "🚚", panels: ["delivery"] },
+    { id: "composite_products", name: "Combo Kits", icon: "🍱", panels: ["composite_products"] },
+    { id: "subscriptions", name: "Subscriptions", icon: "💳", panels: ["subscriptions"] },
   ];
 }
 
@@ -5805,6 +6126,10 @@ function renderHierarchyBlock(
             <button onclick="event.preventDefault(); event.stopPropagation(); toggleShopStatus(${shop.id}, '${shop.status}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn ${shop.status === "active" ? "text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 hover:border-rose-200 dark:hover:border-rose-800" : "text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:border-emerald-200 dark:hover:border-emerald-800"}" title="${shop.status === "active" ? "Suspend Store" : "Reactivate Store"}">
               <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${shop.status === "active" ? "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" : "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"}"></path></svg>
             </button>
+            <div class="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
+            <button onclick="event.preventDefault(); event.stopPropagation(); deleteShop(${shop.id}, '${(name || "").replace(/'/g, "\\'")}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/50 hover:border-rose-300 dark:hover:border-rose-800" title="Delete Shop Permanently">
+              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
           `
         : ""
     }
@@ -5866,9 +6191,18 @@ function renderHierarchyBlock(
       `;
 }
 
+async function deleteShop(id, name) {
+  if (!confirm(`CAUTION: You are about to PERMANENTLY DELETE "${name}".\n\nThis will remove all associated data, users, products, and sales permanently. This action cannot be undone.\n\nAre you sure you want to proceed?`)) return;
+  
+  const r = await api(`/api/shops/${id}`, "DELETE");
+  if (r.error) return toast(r.error, "error");
+  toast("Shop Deleted Successfully");
+  renderHierarchy();
+}
+
 async function toggleShopStatus(id, current) {
   const next = current === "active" ? "blocked" : "active";
-  const r = await api(`/api/shops/${id}`, "PATCH", { status: next });
+  const r = await api(`/api/admin/store/${id}/status`, "PATCH", { status: next });
   if (r.error) return toast(r.error, "error");
   toast(`Shop ${next === "active" ? "Activated" : "Blocked"} `);
   renderHierarchy();
@@ -5901,7 +6235,8 @@ function openShopWizard() {
     adminUsername: "",
     adminPassword: "",
     services: { dine_in: true, takeaway: true, delivery: true },
-    panels: ["dashboard"] // Always include dashboard
+    panels: [],
+    employees: []
   };
   renderWizard();
 }
@@ -5925,7 +6260,7 @@ function wizardNext() {
   if (_wizardStep === 3) {
     const selectedTiles = Array.from(document.querySelectorAll('.wiz-panel-tile[data-selected="true"]'));
     if (!selectedTiles.length) return toast("Select at least one module", "warning");
-    const panels = ["dashboard"];
+    const panels = [];
     selectedTiles.forEach(el => {
       const p = JSON.parse(el.dataset.panels || "[]");
       panels.push(...p);
@@ -5951,7 +6286,8 @@ async function submitWizard(btn) {
     shop_type: _wizardData.type,
     allowed_panels: _wizardData.panels,
     adminUsername: _wizardData.adminUsername,
-    adminPassword: _wizardData.adminPassword
+    adminPassword: _wizardData.adminPassword,
+    employees: _wizardData.employees
   };
 
   if (btn) {
@@ -5982,6 +6318,7 @@ function renderWizard() {
     "Configure Your Shop",
     "Select Access Modules",
     "Admin Credentials",
+    "Staff Management",
     "Summary & Launch"
   ];
 
@@ -6115,6 +6452,35 @@ function renderWizard() {
     `;
   } else if (_wizardStep === 5) {
     content = `
+      <div class="space-y-6 py-4">
+        <div class="flex items-center justify-between">
+           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Initial Staff Members</label>
+           <button onclick="showWizAddEmployee()" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-500 transition-colors">+ Add Employee</button>
+        </div>
+        <div class="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+           ${_wizardData.employees.length === 0 ? `
+             <div class="p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+                <p class="text-xs text-slate-400 font-medium italic">No additional staff added. You can add them later from the Staff panel.</p>
+             </div>
+           ` : _wizardData.employees.map((emp, idx) => `
+             <div class="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-center justify-between group">
+                <div class="flex items-center gap-3">
+                   <div class="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-black text-xs uppercase">${emp.role.substring(0, 2)}</div>
+                   <div>
+                      <div class="font-bold text-sm text-slate-900 dark:text-white">${emp.name} <span class="text-[10px] text-slate-400 ml-1">(@${emp.username})</span></div>
+                      <div class="text-[10px] text-slate-500 font-medium uppercase tracking-widest">${emp.role} • ${emp.allowed_panels.length} Panels • ${emp.password ? '🔐 Has Login' : '🚫 No Login'}</div>
+                   </div>
+                </div>
+                <button onclick="removeWizardEmployee(${idx})" class="p-2 text-rose-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg">
+                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+             </div>
+           `).join('')}
+        </div>
+      </div>
+    `;
+  } else if (_wizardStep === 6) {
+    content = `
       <div class="py-6 text-center space-y-6 animate-[scaleIn_0.4s_ease-out]">
         <div class="relative w-32 h-32 mx-auto">
            <div class="absolute inset-0 bg-indigo-600/20 rounded-full animate-ping"></div>
@@ -6130,6 +6496,10 @@ function renderWizard() {
               <span class="text-slate-700 dark:text-slate-200">@${_wizardData.adminUsername}</span>
            </div>
            <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              <span>Staff:</span>
+              <span class="text-indigo-600">${_wizardData.employees.length + 1} Total</span>
+           </div>
+           <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
               <span>Modules:</span>
               <span class="text-emerald-600">${_wizardData.panels.length} Enabled</span>
            </div>
@@ -6142,9 +6512,9 @@ function renderWizard() {
     <div class="flex justify-between items-center pt-8 border-t border-slate-100 dark:border-slate-800 mt-4">
       <button onclick="wizardPrev()" class="px-6 py-2.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white font-bold transition-all ${_wizardStep === 1 ? "opacity-0 pointer-events-none" : ""}">Back</button>
       <div class="hidden sm:flex gap-1.5">
-        ${[1, 2, 3, 4, 5].map(i => `<div class="w-3 h-1.5 rounded-full transition-all duration-300 ${i === _wizardStep ? "bg-indigo-600 w-8" : (i < _wizardStep ? "bg-indigo-300" : "bg-slate-200 dark:bg-slate-800")}"></div>`).join("")}
+        ${[1, 2, 3, 4, 5, 6].map(i => `<div class="w-3 h-1.5 rounded-full transition-all duration-300 ${i === _wizardStep ? "bg-indigo-600 w-8" : (i < _wizardStep ? "bg-indigo-300" : "bg-slate-200 dark:bg-slate-800")}"></div>`).join("")}
       </div>
-      ${_wizardStep === 5
+      ${_wizardStep === 6
       ? `<button onclick="submitWizard(this)" class="px-10 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest text-xs transition-all shadow-xl shadow-indigo-600/30 hover:scale-105 active:scale-95">Complete Launch</button>`
       : `<button onclick="wizardNext()" class="px-10 py-3 rounded-xl bg-slate-950 dark:bg-indigo-600 hover:scale-105 active:scale-95 text-white font-black uppercase tracking-widest text-xs transition-all shadow-lg ${_wizardStep === 1 ? 'hidden' : ''}">Proceed Next</button>`
     }
@@ -6157,6 +6527,109 @@ function renderWizard() {
       ${footer}
     </div>
   `, "max-w-2xl");
+}
+
+function showWizAddEmployee() {
+  const modal = document.createElement("div");
+  modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
+      <h3 class="text-2xl font-black text-slate-950 dark:text-white mb-6">Add Staff Member</h3>
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+           <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Full Name</label>
+              <input id="wiz-emp-name" placeholder="John Doe" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 outline-none text-sm font-bold transition-all" />
+           </div>
+           <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Role</label>
+              <select id="wiz-emp-role" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 outline-none text-sm font-bold appearance-none transition-all">
+                 <option value="user">General Staff</option>
+                 <option value="rider">Rider / Delivery</option>
+                 <option value="waiter">Waiter / Server</option>
+                 <option value="manager">Manager</option>
+                 <option value="receptionist">Receptionist</option>
+              </select>
+           </div>
+        </div>
+        <div>
+           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Username (For Login Reference)</label>
+           <input id="wiz-emp-user" placeholder="john_d" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 outline-none text-sm font-bold transition-all" />
+        </div>
+        
+        <div class="p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl">
+           <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" id="wiz-emp-has-login" onchange="document.getElementById('wiz-emp-pass-box').classList.toggle('hidden', !this.checked)" class="w-5 h-5 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500">
+              <span class="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-widest">Enable System Login</span>
+           </label>
+           <div id="wiz-emp-pass-box" class="mt-4 hidden">
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Login Password</label>
+              <input id="wiz-emp-pass" type="password" placeholder="••••••••" class="w-full px-5 py-3 rounded-xl bg-white dark:bg-slate-900 border-transparent focus:border-indigo-500 outline-none text-sm font-bold transition-all" />
+           </div>
+        </div>
+
+        <div>
+           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Assigned Modules</label>
+           <div class="grid grid-cols-3 gap-2">
+              ${allPanels().filter(p => _wizardData.panels.includes(p.panels[0])).map(p => `
+                <div onclick="toggleWizEmpPanel(this)" data-panels='${JSON.stringify(p.panels)}' data-selected="false" class="wiz-emp-panel-tile cursor-pointer p-2 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center gap-1 transition-all hover:border-indigo-300">
+                   <span class="text-xl">${p.icon}</span>
+                   <span class="text-[8px] font-black uppercase text-slate-500 dark:text-slate-400 text-center">${p.name}</span>
+                </div>
+              `).join('')}
+           </div>
+        </div>
+      </div>
+      <div class="flex gap-3 mt-8">
+        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
+        <button onclick="addWizEmployee(this)" class="flex-1 py-3 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">Add Staff</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function toggleWizEmpPanel(el) {
+  const isSelected = el.dataset.selected === "true";
+  const next = !isSelected;
+  el.dataset.selected = next;
+  if (next) {
+    el.classList.add('border-indigo-600', 'bg-indigo-50', 'dark:bg-indigo-900/20');
+    el.classList.remove('border-slate-100', 'dark:border-slate-800');
+  } else {
+    el.classList.remove('border-indigo-600', 'bg-indigo-50', 'dark:bg-indigo-900/20');
+    el.classList.add('border-slate-100', 'dark:border-slate-800');
+  }
+}
+
+function addWizEmployee(btn) {
+  const name = document.getElementById("wiz-emp-name").value.trim();
+  const username = document.getElementById("wiz-emp-user").value.trim();
+  const role = document.getElementById("wiz-emp-role").value;
+  const hasLogin = document.getElementById("wiz-emp-has-login").checked;
+  const password = document.getElementById("wiz-emp-pass").value;
+
+  if (!name || !username) return toast("Name and Username required", "error");
+  if (hasLogin && !password) return toast("Password required for login", "error");
+
+  const selectedPanels = [];
+  document.querySelectorAll(".wiz-emp-panel-tile[data-selected='true']").forEach(el => {
+    selectedPanels.push(...JSON.parse(el.dataset.panels));
+  });
+
+  _wizardData.employees.push({
+    name, username, role,
+    password: hasLogin ? password : null,
+    allowed_panels: [...new Set(selectedPanels)]
+  });
+
+  btn.closest(".fixed").remove();
+  renderWizard();
+}
+
+function removeWizardEmployee(idx) {
+  _wizardData.employees.splice(idx, 1);
+  renderWizard();
 }
 
 function toggleWizPanel(el) {
@@ -6487,6 +6960,8 @@ async function saveNewCustomer() {
   }
 }
 
+
+
 async function openEditCustomerModal(customerId) {
   try {
     const data = await api(`/api/customers/${customerId}`);
@@ -6577,7 +7052,11 @@ async function submitPayment(customerId) {
       `Payment of Rs. ${r.payment_amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })} recorded!`,
     );
     closeModal();
-    renderCustomers();
+    if (_currentPage === 'pending-dues') {
+      renderPendingDues();
+    } else {
+      renderCustomers();
+    }
   } catch (err) {
     toast(err.message, "error");
   }
@@ -6998,7 +7477,9 @@ function renderLobby() {
 
   // Filter panels based on user permissions
   const allowed = AVAILABLE_PANELS.filter(p => {
-    if (currentUser.role === 'superadmin') return true;
+    if (currentUser.role === 'superadmin') {
+      return PLATFORM_OWNER_PANELS.includes(p.id);
+    }
     const allowedPanels = currentUser.allowed_panels || [];
     return allowedPanels.includes(p.id);
   });
@@ -7009,17 +7490,83 @@ function renderLobby() {
   }
 
   content.innerHTML = `
+    <div class="flex items-center justify-between gap-4 mb-10 pb-6 border-b border-indigo-200 dark:border-indigo-900/50">
+      <div>
+        <h3 class="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">Switch Modules</h3>
+        <p class="text-sm text-slate-500 font-medium italic mt-1">Select an active node to manage your operations</p>
+      </div>
+    </div>
+
     <div class="lobby-grid">
-        ${allowed.map((p, i) => `
-            <div class="lobby-item" onclick="navigate('${p.id}')" style="animation-delay: ${i * 50}ms">
-                <div class="lobby-icon-wrap">
-                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
-                        ${p.icon}
+        ${(() => {
+          // Prepare the "Add Category" module (Hidden for superadmins)
+          const addBtn = currentUser.role === 'superadmin' ? '' : `
+            <div class="lobby-item relative group" onclick="toggleLobbyCategoryMenu(event)" style="animation-delay: 300ms">
+                <div class="lobby-icon-wrap bg-indigo-50 dark:bg-indigo-900/20 border-2 border-dashed border-indigo-200 dark:border-indigo-800 group-hover:border-indigo-500 transition-all">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
                     </svg>
                 </div>
-                <div class="lobby-label">${p.label}</div>
-            </div>
-        `).join('')}
+                <div class="lobby-label font-bold text-indigo-600 dark:text-indigo-400">Add Category</div>
+                
+                <!-- Lobby Specific Category Menu -->
+                <div id="lobby-category-menu" class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-64 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-[100] overflow-hidden backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200 origin-bottom">
+                   <div class="px-5 py-4 border-b border-slate-50 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-800/30">
+                      <p class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Quick Actions</p>
+                   </div>
+                   <button onclick="openAddCategoryPopup('product')" class="w-full text-left px-6 py-4 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-b border-slate-50 dark:border-slate-800 flex items-center gap-4 transition-all group/item">
+                      <div class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center group-hover/item:scale-110 transition-transform">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7 v10l8 4"/></svg>
+                      </div>
+                      <div>
+                        <div class="font-black text-slate-900 dark:text-white text-xs">Product Category</div>
+                        <div class="text-[9px] text-slate-400 font-normal">Catalog organization</div>
+                      </div>
+                   </button>
+                   <button onclick="openAddCategoryPopup('expense')" class="w-full text-left px-6 py-4 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40 flex items-center gap-4 transition-all group/item">
+                      <div class="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover/item:scale-110 transition-transform">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                      </div>
+                      <div>
+                        <div class="font-black text-slate-900 dark:text-white text-xs">Expense Category</div>
+                        <div class="text-[9px] text-slate-400 font-normal">Financial ledger nodes</div>
+                      </div>
+                   </button>
+                </div>
+            </div>`;
+
+          // Find where to insert it (next to contacts)
+          const contactsIndex = allowed.findIndex(p => p.id === 'customers');
+          const pendingDuesPanel = AVAILABLE_PANELS.find(p => p.id === 'pending-dues');
+          
+          return allowed.map((p, i) => {
+            const item = `
+              <div class="lobby-item" onclick="navigate('${p.id}')" style="animation-delay: ${i * 50}ms">
+                  <div class="lobby-icon-wrap">
+                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
+                          ${p.icon}
+                      </svg>
+                  </div>
+                  <div class="lobby-label">${p.label}</div>
+              </div>
+            `;
+            // If this is the contacts item, append the pending dues button AND add button right after it
+            if (i === contactsIndex) {
+              const pendingDuesBtn = `
+                <div class="lobby-item" onclick="navigate('pending-dues')" style="animation-delay: ${(i + 1) * 50}ms">
+                    <div class="lobby-icon-wrap bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
+                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
+                            ${pendingDuesPanel.icon}
+                        </svg>
+                    </div>
+                    <div class="lobby-label font-bold text-rose-600 dark:text-rose-400">Pending Dues</div>
+                </div>
+              `;
+              return item + pendingDuesBtn + addBtn;
+            }
+            return item;
+          }).join("");
+        })()}
     </div>
   `;
 }
@@ -7369,10 +7916,12 @@ async function renderRawStock() {
                 <div class="text-right">
                   <span class="text-xs font-black uppercase tracking-widest text-slate-400">Current Stock</span>
                   <div class="text-2xl font-black text-slate-950 dark:text-white">${rs.current_stock} <span class="text-sm font-bold text-slate-400">${rs.unit}</span></div>
+                  ${rs.usage_unit ? `<div class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">= ${ (rs.current_stock * rs.conversion_factor).toFixed(1) } ${rs.usage_unit}</div>` : ''}
                 </div>
               </div>
               <h4 class="text-lg font-black text-slate-900 dark:text-white mb-2">${rs.name}</h4>
-              <p class="text-xs text-slate-500 italic mb-6">Min. stock alert level: ${rs.min_stock_level} ${rs.unit}</p>
+              <p class="text-xs text-slate-500 italic mb-2">Min. stock alert level: ${rs.min_stock_level} ${rs.unit}</p>
+              ${rs.usage_unit ? `<p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-4">1 ${rs.unit} = ${rs.conversion_factor} ${rs.usage_unit}</p>` : '<div class="mb-4"></div>'}
               
               <div class="flex gap-2">
                 <button onclick="showUpdateRawStockModal(${rs.id}, '${rs.name}')" class="flex-1 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-indigo-50 hover:text-indigo-600 transition-all">Restock</button>
@@ -7405,21 +7954,48 @@ function showAddRawStockModal() {
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Unit</label>
-            <input id="rs-unit" placeholder="kg, liter, pcs" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Purchase Unit (Large)</label>
+            <select id="rs-unit" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold appearance-none">
+              <option value="kg">kg (Kilogram)</option>
+              <option value="liter">liter (Liter)</option>
+              <option value="piece">piece (Pcs)</option>
+              <option value="packet">packet (Pkt)</option>
+              <option value="box">box</option>
+              <option value="dozen">dozen</option>
+              <option value="bag">bag</option>
+              <option value="crate">crate</option>
+              <option value="lb">lb (Pound)</option>
+            </select>
           </div>
           <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Min Level</label>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Min Level (Large Unit)</label>
             <input id="rs-min" type="number" value="0" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Initial Stock</label>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Usage Unit (Small)</label>
+            <select id="rs-usage-unit" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold appearance-none">
+              <option value="g">g (Gram)</option>
+              <option value="ml">ml (Milliliter)</option>
+              <option value="piece">piece (Pcs)</option>
+              <option value="mg">mg</option>
+              <option value="oz">oz</option>
+              <option value="lb">lb</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Conv. Factor (1 Large = ? Small)</label>
+            <input id="rs-factor" type="number" value="1000" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Initial Stock (Large Unit)</label>
             <input id="rs-initial" type="number" value="0" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
           </div>
           <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Cost Price</label>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Cost Price (Large Unit)</label>
             <input id="rs-cost" type="number" value="0" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
           </div>
         </div>
@@ -7432,10 +8008,36 @@ function showAddRawStockModal() {
   `;
   document.body.appendChild(modal);
 
+  const unitSelect = document.getElementById("rs-unit");
+  const usageSelect = document.getElementById("rs-usage-unit");
+  const factorInput = document.getElementById("rs-factor");
+
+  unitSelect.onchange = () => {
+    const val = unitSelect.value;
+    if (val === "kg") {
+      usageSelect.value = "g";
+      factorInput.value = 1000;
+    } else if (val === "liter") {
+      usageSelect.value = "ml";
+      factorInput.value = 1000;
+    } else if (val === "dozen") {
+      usageSelect.value = "piece";
+      factorInput.value = 12;
+    } else if (val === "lb") {
+      usageSelect.value = "oz";
+      factorInput.value = 16;
+    } else {
+      usageSelect.value = "piece";
+      factorInput.value = 1;
+    }
+  };
+
   document.getElementById("save-rs").onclick = async () => {
     const payload = {
       name: $c("rs-name").value.trim(),
       unit: $c("rs-unit").value.trim(),
+      usage_unit: $c("rs-usage-unit").value.trim(),
+      conversion_factor: parseFloat($c("rs-factor").value) || 1,
       min_stock_level: parseFloat($c("rs-min").value),
       initial_stock: parseFloat($c("rs-initial").value),
       buying_price: parseFloat($c("rs-cost").value)
@@ -7609,7 +8211,16 @@ async function renderRecipes() {
 
 async function showRecipeModal(existing = null) {
   const ingredients = await api("/api/raw-stock");
-  let selectedIngs = existing ? existing.ingredients.map(i => ({ raw_stock_id: i.raw_stock_id, name: i.ingredient_name, unit: i.unit, quantity: i.quantity })) : [];
+  let selectedIngs = existing ? existing.ingredients.map(i => {
+    const raw = ingredients.find(ri => ri.id === i.raw_stock_id);
+    return { 
+      raw_stock_id: i.raw_stock_id, 
+      name: i.ingredient_name, 
+      unit: i.unit, 
+      usage_unit: raw ? raw.usage_unit : i.unit,
+      quantity: i.quantity 
+    };
+  }) : [];
 
   const modal = document.createElement("div");
   modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
@@ -7621,7 +8232,7 @@ async function showRecipeModal(existing = null) {
         <span class="flex-1 text-sm font-bold">${si.name}</span>
         <div class="flex items-center gap-2">
           <input type="number" value="${si.quantity}" onchange="updateRecipeQty(${idx}, this.value)" class="w-16 px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-center font-black" />
-          <span class="text-[10px] font-black text-slate-400 w-8">${si.unit}</span>
+          <span class="text-[10px] font-black text-slate-400 w-12">${si.usage_unit || si.unit}</span>
         </div>
         <button onclick="removeRecipeIng(${idx})" class="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-all">✕</button>
       </div>
@@ -7663,7 +8274,10 @@ async function showRecipeModal(existing = null) {
               ${ingredients.map(ing => `
                 <button onclick="addIngToRecipe(${JSON.stringify(ing).replace(/"/g, '&quot;')})" 
                   class="w-full flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/50 dark:hover:bg-indigo-900/20 text-left transition-all group">
-                  <span class="text-xs font-bold text-slate-700 dark:text-slate-300">${ing.name}</span>
+                  <div class="flex flex-col">
+                    <span class="text-xs font-bold text-slate-700 dark:text-slate-300">${ing.name}</span>
+                    <span class="text-[9px] text-slate-400 font-medium">Use in: ${ing.usage_unit || ing.unit}</span>
+                  </div>
                   <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-indigo-600">+ Add</span>
                 </button>
               `).join('')}
@@ -7682,7 +8296,7 @@ async function showRecipeModal(existing = null) {
 
   window.addIngToRecipe = (ing) => {
     if (selectedIngs.find(si => si.raw_stock_id === ing.id)) return toast("Ingredient already added", "error");
-    selectedIngs.push({ raw_stock_id: ing.id, name: ing.name, unit: ing.unit, quantity: 1 });
+    selectedIngs.push({ raw_stock_id: ing.id, name: ing.name, unit: ing.unit, usage_unit: ing.usage_unit || ing.unit, quantity: 1 });
     updateList();
   };
 

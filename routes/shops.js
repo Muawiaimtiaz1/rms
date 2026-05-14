@@ -37,9 +37,19 @@ router.post('/', requireSuperAdmin, async (req, res) => {
             db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id, allowed_panels) VALUES (?, ?, ?, ?, ?, ?)')
                 .run(`${name} Admin`, adminUsername, hash, 'admin', shopId, panelsJson);
 
-            // 3. Log the creation in Activity Logs
+            // 3. Create Additional Employees (if provided)
+            if (Array.isArray(req.body.employees)) {
+                const insertUser = db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id, allowed_panels) VALUES (?, ?, ?, ?, ?, ?)');
+                req.body.employees.forEach(emp => {
+                    const empHash = emp.password ? bcrypt.hashSync(emp.password, 10) : null;
+                    const empPanels = JSON.stringify(emp.allowed_panels || []);
+                    insertUser.run(emp.name, emp.username, empHash, emp.role || 'user', shopId, empPanels);
+                });
+            }
+
+            // 4. Log the creation in Activity Logs
             db.prepare('INSERT INTO activity_logs (shop_id, action, details) VALUES (?, ?, ?)')
-                .run(shopId, 'Store Created', `Store ${name} created by System Owner`);
+                .run(shopId, 'Store Created', `Store ${name} created with initial staff members`);
 
             return shopId;
         });
