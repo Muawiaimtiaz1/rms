@@ -582,6 +582,32 @@ router.patch("/:id/pay", requireAuth, (req, res) => {
   }
 });
 
+// PATCH /api/sales/:id/details — Updates sale customer and payment details
+router.patch("/:id/details", requireAuth, (req, res) => {
+  const { customer_name, customer_phone, payment_method, amount_received } = req.body;
+  try {
+    db.prepare(`
+      UPDATE sales 
+      SET customer_name = ?, 
+          customer_phone = ?, 
+          payment_method = ?, 
+          amount_received = ?
+      WHERE id = ? AND shop_id = ?
+    `).run(
+      customer_name || '', 
+      customer_phone || '', 
+      payment_method || 'cash', 
+      amount_received || 0, 
+      req.params.id, 
+      req.session.user.shop_id
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Sale update error:", err);
+    res.status(500).json({ error: "Failed to update sale details" });
+  }
+});
+
 // GET /api/sales/:id/bill — get full bill details
 router.get("/:id/bill", requireAuth, (req, res) => {
   const saleId = parseInt(req.params.id, 10);
@@ -635,9 +661,10 @@ router.get("/:id/bill", requireAuth, (req, res) => {
     .get(sale.user_id);
   const shop = db
     .prepare(
-      `SELECT id, name, status, logo_path, receipt_header_text, receipt_phone, 
+      `SELECT id, name, status, logo_path, receipt_header_text, receipt_extended_name, receipt_phone, 
               receipt_address, receipt_images_json, receipt_policies, use_logo_on_receipt, receipt_font_family,
               header_font_size, header_font_weight, header_spacing,
+              extended_name_font_size, extended_name_font_weight, extended_name_spacing,
               contact_font_size, contact_align, contact_padding,
               footer_font_size, footer_font_style, footer_margin,
               divider_style, divider_width, section_gap,
@@ -867,9 +894,10 @@ router.get("/returns/:id/receipt", requireAuth, (req, res) => {
   const user = db.prepare("SELECT name FROM users WHERE id = ?").get(ret.user_id);
   const shop = db
     .prepare(
-      `SELECT id, name, status, logo_path, receipt_header_text, receipt_phone, 
+      `SELECT id, name, status, logo_path, receipt_header_text, receipt_extended_name, receipt_phone, 
               receipt_address, receipt_images_json, receipt_policies, use_logo_on_receipt, receipt_font_family,
               header_font_size, header_font_weight, header_spacing,
+              extended_name_font_size, extended_name_font_weight, extended_name_spacing,
               contact_font_size, contact_align, contact_padding,
               footer_font_size, footer_font_style, footer_margin,
               divider_style, divider_width, section_gap,

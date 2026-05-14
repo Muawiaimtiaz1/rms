@@ -38,6 +38,25 @@ try {
   db.exec("ALTER TABLE raw_stocks ADD COLUMN usage_unit TEXT;");
   console.log("✅ DB Migration Applied: added usage_unit to raw_stocks");
 } catch (e) {}
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS floors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+    );
+  `);
+  console.log("✅ DB Migration Applied: created floors table");
+} catch (e) {
+  console.error("❌ Error creating floors table:", e.message);
+}
+
+try {
+  db.exec("ALTER TABLE tables ADD COLUMN floor_id INTEGER REFERENCES floors(id);");
+  console.log("✅ DB Migration Applied: added floor_id to tables");
+} catch (e) {}
 // --- END MIGRATIONS ---
 
 // Initialize tables from schema only if they don't exist

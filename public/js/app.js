@@ -98,6 +98,9 @@ function getLooseUnits(p) {
 let _expenseView = "list";
 let _expenseMonth = new Date().toISOString().slice(0, 7);
 let _expensePage = 1;
+let _posFloors = [];
+let _posAllTables = [];
+let _posActiveOrders = [];
 let _expenseCategories = [];
 let _productCategories = [];
 let shops = [];
@@ -2621,12 +2624,15 @@ async function submitRecovery(productId) {
 
 // ─── POS ─────────────────────────────────────────────────────────────
 async function renderPOS() {
-  const [products, tables, waiters] = await Promise.all([
+  const [products, tables, waiters, floors] = await Promise.all([
     api("/api/products"),
     api("/api/tables").catch(() => []),
-    api("/api/users").catch(() => [])
+    api("/api/users").catch(() => []),
+    api("/api/tables/floors").catch(() => [])
   ]);
   allProducts = products;
+  _posFloors = floors;
+  _posAllTables = tables;
   syncProductMap(products);
   updateLowStockBadge(products);
 
@@ -2656,9 +2662,12 @@ async function renderPOS() {
         <button id="otype-delivery" onclick="switchOrderType('delivery')" class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
           🚚 Delivery
         </button>
+        <button id="otype-orders" onclick="switchOrderType('orders')" class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+          📋 Orders
+        </button>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 h-full transition-all">
+      <div id="pos-content-grid" class="grid grid-cols-1 lg:grid-cols-5 gap-6 h-full transition-all">
         <!-- Products Panel -->
         <div class="lg:col-span-3 space-y-4">
           <div class="flex gap-2">
@@ -2686,17 +2695,20 @@ async function renderPOS() {
           <div id="pos-restaurant-fields" class="${isRetail ? 'hidden' : ''} mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
             <!-- Dine-in specific: Table & Waiter -->
             <div id="pos-dine-fields" class="mb-2 space-y-2">
-              <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Floor</label>
+                <select id="pos-floor" onchange="onPosFloorChange()" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
+                  <option value="">-- All Floors --</option>
+                  ${(_posFloors || []).map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
+                </select>
+              </div>
+              <div class="grid grid-cols-1 gap-2">
                 <div>
                   <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Table</label>
                   <select id="pos-table" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                     <option value="">-- Select Table --</option>
                     ${(tables || []).map(t => `<option value="${t.id}">${t.table_number} (${t.status})</option>`).join('')}
                   </select>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Guests</label>
-                  <input id="pos-guests" type="number" min="1" value="1" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
                 </div>
               </div>
               <div>
@@ -2839,6 +2851,43 @@ async function renderPOS() {
           </div>
         </div>
       </div>
+
+      <!-- Orders View (Hidden by default) -->
+      <div id="pos-orders-container" class="hidden">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[70vh]">
+          <div class="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+            <h3 class="font-black text-slate-900 dark:text-white flex items-center gap-2">
+              <span class="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white text-sm">📋</span>
+              Active Orders
+            </h3>
+            <button onclick="renderPOSOrders()" class="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-400 transition-all active:scale-95">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 dark:bg-slate-800/50">
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Order ID</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Type</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Table / Details</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pos-orders-table-body">
+                <tr>
+                  <td colspan="7" class="px-4 py-20 text-center text-slate-400">
+                    <div class="animate-pulse">Loading orders...</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>`;
 
   // Track current order type state
@@ -2863,11 +2912,10 @@ async function renderPOS() {
 
 function switchOrderType(type) {
   window._posOrderType = type;
-  ['dine_in', 'takeaway', 'delivery'].forEach(t => {
+  ['dine_in', 'takeaway', 'delivery', 'orders'].forEach(t => {
     const btn = $c(`otype-${t}`);
     if (!btn) return;
     if (t === type) {
-      btn.className = btn.className.replace(/text-slate-[^\s]+|dark:text-slate-[^\s]+|hover:[^\s]+/g, '').trim();
       btn.className = 'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm transition-all';
     } else {
       btn.className = 'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all';
@@ -2877,11 +2925,165 @@ function switchOrderType(type) {
   const dineEl = $c('pos-dine-fields');
   const deliveryEl = $c('pos-delivery-fields');
   const takeawayEl = $c('pos-takeaway-fields');
+  const contentGrid = $c('pos-content-grid');
+  const ordersContainer = $c('pos-orders-container');
 
   const isRetail = (currentUser && currentUser.shop_type === 'retail');
-  if (dineEl) dineEl.classList.toggle('hidden', type !== 'dine_in' || isRetail);
-  if (deliveryEl) deliveryEl.classList.toggle('hidden', type !== 'delivery' || isRetail);
-  if (takeawayEl) takeawayEl.classList.toggle('hidden', type !== 'takeaway' || isRetail);
+  
+  if (type === 'orders') {
+    if (contentGrid) contentGrid.classList.add('hidden');
+    if (ordersContainer) ordersContainer.classList.remove('hidden');
+    renderPOSOrders();
+  } else {
+    if (contentGrid) contentGrid.classList.remove('hidden');
+    if (ordersContainer) ordersContainer.classList.add('hidden');
+    if (dineEl) dineEl.classList.toggle('hidden', type !== 'dine_in' || isRetail);
+    if (deliveryEl) deliveryEl.classList.toggle('hidden', type !== 'delivery' || isRetail);
+    if (takeawayEl) takeawayEl.classList.toggle('hidden', type !== 'takeaway' || isRetail);
+  }
+}
+
+async function renderPOSOrders() {
+  const tbody = $c('pos-orders-table-body');
+  if (!tbody) return;
+
+  try {
+    const sales = await api('/api/sales');
+    // Filter for active orders (not completed, or from today)
+    const activeOrders = (sales || []).filter(s => s.order_status !== 'completed').slice(0, 50);
+    _posActiveOrders = activeOrders;
+
+    if (activeOrders.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-20 text-center text-slate-400">No active orders found</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = activeOrders.map(s => {
+      const date = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const typeLabel = s.order_type === 'dine_in' ? '🍽️ Dine-in' : s.order_type === 'takeaway' ? '🛍️ Takeaway' : '🚚 Delivery';
+      const detail = s.order_type === 'dine_in' ? `Table: ${s.table_number || 'N/A'}` : s.customer_name || 'Walk-in';
+      
+      let statusColor = 'bg-slate-100 text-slate-600';
+      if (s.order_status === 'pending') statusColor = 'bg-amber-100 text-amber-600';
+      if (s.order_status === 'preparing') statusColor = 'bg-blue-100 text-blue-600';
+      if (s.order_status === 'ready') statusColor = 'bg-emerald-100 text-emerald-600';
+
+      return `
+        <tr class="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-all">
+          <td class="px-4 py-4 font-bold text-slate-900 dark:text-white text-sm">#${s.id}</td>
+          <td class="px-4 py-4 text-xs font-bold text-slate-500">${typeLabel}</td>
+          <td class="px-4 py-4">
+            <div class="text-sm font-black text-slate-700 dark:text-slate-200">${detail}</div>
+            <div class="text-[10px] text-slate-400 font-medium">${s.waiter_name ? 'Waiter: ' + s.waiter_name : ''}</div>
+          </td>
+          <td class="px-4 py-4">
+            <span class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${statusColor}">
+              ${s.order_status}
+            </span>
+          </td>
+          <td class="px-4 py-4 font-black text-slate-900 dark:text-white text-sm">PKR ${Number(s.total).toLocaleString()}</td>
+          <td class="px-4 py-4 text-xs font-medium text-slate-400">${date}</td>
+          <td class="px-4 py-4 text-right">
+            <div class="flex justify-end gap-2">
+              <button onclick="navigate('kds')" class="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase hover:bg-indigo-100 transition-all">
+                View
+              </button>
+              <button onclick="showOrderPrintModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
+                Print
+              </button>
+              <button onclick="completeOrderFromPOS(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
+                Complete
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-20 text-center text-rose-500">Failed to load orders: ${e.message}</td></tr>`;
+  }
+}
+
+async function completeOrderFromPOS(id) {
+  if(!confirm('Are you sure you want to complete this order and move it to sales history?')) return;
+  try {
+    await api(`/api/kds/${id}/status`, 'PATCH', { status: 'completed' });
+    toast('Order completed!');
+    renderPOSOrders();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function showOrderPrintModal(id) {
+  const s = _posActiveOrders.find(o => o.id === id);
+  if (!s) return toast('Order not found', 'error');
+
+  const name = s.customer_name || '';
+  const phone = s.customer_phone || '';
+  const method = s.payment_method || 'cash';
+  const received = s.amount_received || s.total;
+  const total = s.total;
+
+  openModal('Order Payment Details', `
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Customer Name</label>
+          <input id="op-name" type="text" placeholder="Customer name" value="${name}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Phone Number</label>
+          <input id="op-phone" type="text" placeholder="Phone" value="${phone}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Payment Method</label>
+          <select id="op-method" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold">
+            <option value="cash" ${method === 'cash' ? 'selected' : ''}>Cash</option>
+            <option value="card" ${method === 'card' ? 'selected' : ''}>Card</option>
+            <option value="online" ${method === 'online' ? 'selected' : ''}>Online Transfer</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Amount Received</label>
+          <input id="op-received" type="number" step="0.01" value="${received}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+        </div>
+      </div>
+      <div class="pt-2">
+        <div class="flex justify-between text-sm mb-2 px-1">
+          <span class="text-slate-500 font-bold">Order Total:</span>
+          <span class="text-slate-900 dark:text-white font-black">PKR ${total.toLocaleString()}</span>
+        </div>
+        <button onclick="updateAndPrintOrder(${id})" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/25 transition-all">
+          🖨️ Update & Print Receipt
+        </button>
+      </div>
+    </div>
+  `, 'max-w-md');
+}
+
+async function updateAndPrintOrder(id) {
+  const nameEl = $c('op-name');
+  if (!nameEl) return;
+  
+  const data = {
+    customer_name: nameEl.value.trim(),
+    customer_phone: $c('op-phone').value.trim(),
+    payment_method: $c('op-method').value,
+    amount_received: parseFloat($c('op-received').value) || 0
+  };
+
+  try {
+    await api(`/api/sales/${id}/details`, 'PATCH', data);
+    toast('Order details updated!');
+    closeModal();
+    printBill(id);
+    renderPOSOrders(); 
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 function filterPOSByCategory(cat) {
@@ -2895,6 +3097,21 @@ function filterPOSByCategory(cat) {
     ? allProducts.filter(p => p.is_component !== 1 && p.category === cat)
     : allProducts.filter(p => p.is_component !== 1);
   renderPOSProducts(filtered);
+}
+
+function onPosFloorChange() {
+  const floorId = $c('pos-floor').value;
+  const tableSelect = $c('pos-table');
+  if (!tableSelect) return;
+
+  const filteredTables = floorId 
+    ? _posAllTables.filter(t => t.floor_id == floorId)
+    : _posAllTables;
+
+  tableSelect.innerHTML = `
+    <option value="">-- Select Table --</option>
+    ${filteredTables.map(t => `<option value="${t.id}">${t.table_number} (${t.status})</option>`).join('')}
+  `;
 }
 
 function renderPOSProducts(products) {
@@ -3694,7 +3911,7 @@ async function checkout() {
   if (orderType === 'dine_in') {
     table_id = parseInt($c('pos-table')?.value) || null;
     waiter_id = parseInt($c('pos-waiter')?.value) || null;
-    guest_count = parseInt($c('pos-guests')?.value) || 1;
+    guest_count = 1;
     customer_name = '';
     customer_phone = '';
   } else if (orderType === 'delivery') {
@@ -3808,7 +4025,7 @@ async function printBill(saleId) {
   const taxPct = Number(sale.tax_percentage || 0);
   const methodMap = {
     'cash': 'Cash',
-    'card': 'Card / POS',
+    'card': 'Card',
     'online': 'Online Transfer'
   };
   const method = methodMap[sale.payment_method] || sale.payment_method?.toUpperCase() || "Cash";
@@ -3845,6 +4062,12 @@ async function printBill(saleId) {
   }
   if (useText) {
     headerHtml += `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
+  }
+  if (shop?.receipt_extended_name) {
+    const extFontSize = shop.extended_name_font_size || 10;
+    const extFontWeight = shop.extended_name_font_weight || "normal";
+    const extSpacing = shop.extended_name_spacing || 2;
+    headerHtml += `<div style="font-size: ${extFontSize}px; font-weight: ${extFontWeight}; margin-top: ${extSpacing}px; text-align: center; text-transform: none;">${shop.receipt_extended_name}</div>`;
   }
 
   // Build contact details section
@@ -4165,6 +4388,12 @@ async function printReturnReceipt(returnId) {
   }
   if (useText) {
     headerHtml += `<h1>${headerText}</h1>`;
+  }
+  if (shop?.receipt_extended_name) {
+    const extFontSize = shop.extended_name_font_size || 10;
+    const extFontWeight = shop.extended_name_font_weight || "normal";
+    const extSpacing = shop.extended_name_spacing || 2;
+    headerHtml += `<div style="font-size: ${extFontSize}px; font-weight: ${extFontWeight}; margin-top: ${extSpacing}px; text-align: center; text-transform: none;">${shop.receipt_extended_name}</div>`;
   }
 
   // Build contact details section
@@ -7578,6 +7807,7 @@ async function renderTables() {
   try { tables = await api('/api/tables'); } catch (e) { }
   _allTables = tables;
 
+  const isReadOnly = currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'manager';
   const statusColor = { available: 'bg-emerald-500', occupied: 'bg-red-500', reserved: 'bg-amber-500' };
   const statusLabel = { available: '✅ Available', occupied: '🔴 Occupied', reserved: '🟡 Reserved' };
   const statusBg = { available: 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800', occupied: 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800', reserved: 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800' };
@@ -7593,10 +7823,17 @@ async function renderTables() {
             <p class="text-xs text-slate-500">${tables.filter(t => t.status === 'available').length} available, ${tables.filter(t => t.status === 'occupied').length} occupied</p>
           </div>
         </div>
-        <button onclick="showAddTableModal()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-          Add Table
-        </button>
+        ${!isReadOnly ? `
+        <div class="flex gap-2">
+          <button onclick="renderFloors()" class="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm transition-all border border-slate-200 dark:border-slate-700 flex items-center gap-2">
+            🏢 Floors
+          </button>
+          <button onclick="showAddTableModal()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            Add Table
+          </button>
+        </div>
+        ` : ''}
       </div>
 
       <!-- Status Legend -->
@@ -7629,9 +7866,101 @@ async function renderTables() {
   `;
 }
 
-function showAddTableModal() {
+// ─── FLOOR MANAGEMENT ─────────────────────────────────────────────────────────
+async function renderFloors() {
+  let floors = [];
+  try { floors = await api('/api/tables/floors'); } catch (e) { }
+
+  $c('page-content').innerHTML = `
+    <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div class="flex items-center justify-between gap-4 bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center text-white text-xl">🏢</div>
+          <div>
+            <h3 class="font-black text-slate-900 dark:text-white text-sm">Floor Management</h3>
+            <p class="text-xs text-slate-500">${floors.length} floors configured</p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="renderTables()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs transition-all">
+            Back to Tables
+          </button>
+          <button onclick="showAddFloorModal()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2">
+            + Add Floor
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        ${floors.length === 0 ? `
+          <div class="col-span-full flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
+            <p class="text-slate-500 text-sm font-medium">No floors configured yet</p>
+          </div>
+        ` : floors.map(f => `
+          <div class="flex items-center justify-between p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm transition-all hover:shadow-md">
+            <div class="flex items-center gap-4">
+              <div class="text-2xl">🏢</div>
+              <div class="font-black text-slate-900 dark:text-white">${f.name}</div>
+            </div>
+            <button onclick="deleteFloor(${f.id})" class="p-2 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 transition-all">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function showAddFloorModal() {
+  openModal('Add New Floor', `
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Floor Name</label>
+        <input id="new-floor-name" type="text" placeholder="e.g. Ground Floor, Rooftop" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+      </div>
+      <button onclick="addFloor()" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all">Create Floor</button>
+    </div>
+  `, 'max-w-sm');
+}
+
+async function addFloor() {
+  const name = $c('new-floor-name').value.trim();
+  if (!name) return toast('Floor name is required', 'error');
+  try {
+    await api('/api/tables/floors', 'POST', { name });
+    toast('Floor created!');
+    closeModal();
+    renderFloors();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function deleteFloor(id) {
+  if (!confirm('Are you sure you want to delete this floor? Tables assigned to it will remain but won\'t have a floor.')) return;
+  try {
+    await api(`/api/tables/floors/${id}`, 'DELETE');
+    toast('Floor deleted');
+    renderFloors();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function showAddTableModal() {
+  let floors = [];
+  try { floors = await api('/api/tables/floors'); } catch (e) { }
+
   openModal('Add New Table', `
     <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Floor</label>
+        <select id="new-table-floor" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 font-bold">
+          <option value="">-- No Floor --</option>
+          ${floors.map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
+        </select>
+      </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1">Table Number / Name</label>
         <input id="new-table-number" type="text" placeholder="e.g. T5, VIP-1, Terrace-2" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 font-bold" />
@@ -7648,9 +7977,10 @@ function showAddTableModal() {
 async function addTable() {
   const table_number = $c('new-table-number').value.trim();
   const capacity = parseInt($c('new-table-capacity').value) || 4;
+  const floor_id = parseInt($c('new-table-floor')?.value) || null;
   if (!table_number) return toast('Table number/name is required', 'error');
   try {
-    await api('/api/tables', 'POST', { table_number, capacity });
+    await api('/api/tables', 'POST', { table_number, capacity, floor_id });
     toast('Table added!');
     closeModal();
     renderTables();
@@ -7660,13 +7990,16 @@ async function addTable() {
 }
 
 function showTableActions(id, tableNumber, status, capacity) {
+  const isReadOnly = currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'manager';
   openModal(`Table ${tableNumber}`, `
     <div class="space-y-3">
       <p class="text-slate-500 text-sm">Current status: <span class="font-bold ${status === 'available' ? 'text-emerald-600' : status === 'occupied' ? 'text-red-600' : 'text-amber-600'}">${status.toUpperCase()}</span></p>
       <div class="grid grid-cols-1 gap-2">
+        ${!isReadOnly ? `
         <button onclick="setTableStatus(${id},'available')" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all flex items-center justify-center gap-2">✅ Mark Available</button>
         <button onclick="setTableStatus(${id},'occupied')" class="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-all flex items-center justify-center gap-2">🔴 Mark Occupied</button>
         <button onclick="setTableStatus(${id},'reserved')" class="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold transition-all flex items-center justify-center gap-2">🟡 Mark Reserved</button>
+        ` : ''}
         <button onclick="closeModal();navigate('pos')" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all flex items-center justify-center gap-2">🍽️ New Order for this Table</button>
       </div>
     </div>
@@ -7737,6 +8070,7 @@ async function renderKDS() {
 
 async function loadKDSOrders() {
   try {
+    const isReadOnly = currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'manager';
     const orders = await api('/api/kds');
     const pending = orders.filter(o => o.order_status === 'pending');
     const preparing = orders.filter(o => o.order_status === 'preparing');
@@ -7763,7 +8097,8 @@ async function loadKDSOrders() {
             ${item.special_instructions ? `<div class="text-[10px] text-rose-500 italic ml-2">📝 ${item.special_instructions}</div>` : ''}
           `).join('')}
         </div>
-        ${nextStatus ? `
+        </div>
+        ${!isReadOnly ? (nextStatus ? `
           <button onclick="updateKDSStatus(${order.id},'${nextStatus}')" class="w-full py-2 rounded-xl text-white font-bold text-xs transition-all ${nextStatus === 'preparing' ? 'bg-blue-600 hover:bg-blue-500' : nextStatus === 'ready' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-600 hover:bg-slate-500'}">
             → ${nextLabel}
           </button>
@@ -7771,7 +8106,7 @@ async function loadKDSOrders() {
           <button onclick="updateKDSStatus(${order.id},'completed')" class="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all">
             ✅ Mark Completed
           </button>
-        `}
+        `) : ''}
       </div>
     `;
 

@@ -71,14 +71,24 @@ CREATE TABLE IF NOT EXISTS products (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS floors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS tables (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   shop_id INTEGER NOT NULL,
+  floor_id INTEGER,
   table_number TEXT NOT NULL,
   capacity INTEGER DEFAULT 4,
   status TEXT DEFAULT 'available', -- available, occupied, reserved
   created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (floor_id) REFERENCES floors(id)
 );
 
 CREATE TABLE IF NOT EXISTS sales (
