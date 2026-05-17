@@ -57,6 +57,10 @@ try {
   db.exec("ALTER TABLE tables ADD COLUMN floor_id INTEGER REFERENCES floors(id);");
   console.log("✅ DB Migration Applied: added floor_id to tables");
 } catch (e) {}
+try {
+  db.exec("ALTER TABLE sales ADD COLUMN kitchen_id INTEGER REFERENCES users(id);");
+  console.log("✅ DB Migration Applied: added kitchen_id to sales");
+} catch (e) {}
 // --- END MIGRATIONS ---
 
 // Initialize tables from schema only if they don't exist

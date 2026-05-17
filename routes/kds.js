@@ -6,17 +6,24 @@ const router = express.Router();
 // GET /api/kds — Fetches active orders for the Kitchen Display System
 router.get("/", requireAuth, (req, res) => {
   try {
-    const activeOrders = db
-      .prepare(`
+    let query = `
         SELECT s.id, s.order_type, s.order_status, s.table_id, s.token_number, s.guest_count, s.created_at,
                t.table_number, u.name as waiter_name, s.special_instructions as order_notes
         FROM sales s
         LEFT JOIN tables t ON s.table_id = t.id
         LEFT JOIN users u ON s.waiter_id = u.id
-        WHERE s.shop_id = ? AND s.order_status IN ('pending', 'preparing', 'ready')
-        ORDER BY s.created_at ASC
-      `)
-      .all(req.session.user.shop_id);
+        WHERE s.shop_id = ? AND s.order_status IN ('pending', 'preparing', 'ready', 'completed')
+    `;
+    const params = [req.session.user.shop_id];
+
+    if (req.session.user.role === 'kitchen') {
+      query += " AND s.kitchen_id = ?";
+      params.push(req.session.user.id);
+    }
+
+    query += " ORDER BY s.created_at ASC";
+
+    const activeOrders = db.prepare(query).all(...params);
 
     // Attach items to each order
     for (let order of activeOrders) {

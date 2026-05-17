@@ -7,7 +7,7 @@ async function api(url, method = "GET", body) {
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
-  
+
   const contentType = res.headers.get("content-type");
   if (contentType && contentType.includes("application/json")) {
     const data = await res.json();
@@ -83,6 +83,16 @@ function debounce(func, timeout = 150) {
   };
 }
 
+function formatTimeAgo(date) {
+  const diff = Date.now() - new Date(date).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(date).toLocaleDateString();
+}
+
 function getLooseUnits(p) {
   if (!p.components || p.components.length === 0) return 0;
   let maxLoose = 0;
@@ -103,6 +113,7 @@ let _posAllTables = [];
 let _posActiveOrders = [];
 let _expenseCategories = [];
 let _productCategories = [];
+let _kdsOrdersCache = [];
 let shops = [];
 let managedShopId = null;
 let _posCustomerResults = [];
@@ -140,6 +151,12 @@ const AVAILABLE_PANELS = [
     desc: "Review past transactions, handle returns, and audit sales."
   },
   {
+    id: "analytics",
+    icon: `<path d="M3 3v18h18M7 16l4-4 4 4 6-6" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
+    label: "Analytics & Reports",
+    desc: "Store performance, order rates, and activity heatmaps."
+  },
+  {
     id: "expenses",
     icon: `<circle cx="12" cy="12" r="9" fill="#3B82F6"/><path d="M12 7v10M9 10l3-3 3 3" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
     label: "Expenses",
@@ -148,7 +165,7 @@ const AVAILABLE_PANELS = [
   {
     id: "customers",
     icon: `<circle cx="12" cy="8" r="4" fill="#10B981"/><path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" fill="#10B981" opacity="0.6"/>`,
-    label: "Contacts",
+    label: "Customer Ledger",
     desc: "Client relationship management and credit history tracking."
   },
   {
@@ -199,12 +216,6 @@ const AVAILABLE_PANELS = [
     label: "Raw Ingredients",
     desc: "Manage base stock, track ingredient batches and record waste."
   },
-  {
-    id: "pending-dues",
-    icon: `<rect x="3" y="5" width="18" height="14" rx="2" fill="#EF4444"/><path d="M3 10h18" stroke="white" stroke-width="2"/><circle cx="16" cy="14" r="2" fill="white"/><path d="M12 14h-4" stroke="white" stroke-width="2" stroke-linecap="round"/>`,
-    label: "Pending Dues",
-    desc: "Track and collect outstanding balances from customers."
-  }
 ];
 
 const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions"];
@@ -285,6 +296,7 @@ function navigate(page) {
     const parentMap = {
       "products-low-stock": "products",
       "sales-pending": "sales-history",
+      "pending-dues": "sales-history",
     };
     const parent = parentMap[page];
     if (
@@ -318,7 +330,7 @@ function navigate(page) {
     pos: "POS / Checkout",
     "sales-history": "Sales History",
     expenses: "Expenses",
-    customers: "Customer Accounts",
+    customers: "Customer Ledger",
     settings: "Settings",
     users: "Users (Admin)",
     subscriptions: "Subscription Tracking",
@@ -329,6 +341,7 @@ function navigate(page) {
     "raw-stock": "Raw Ingredients",
     recipes: "Manage Recipes",
     "pending-dues": "Pending Dues Ledger",
+    analytics: "Analytics & Reports",
   };
   if (page === "dashboard" && currentUser.role === "superadmin")
     titles.dashboard = "System Overview (Master Admin)";
@@ -356,8 +369,22 @@ function navigate(page) {
     "raw-stock": renderRawStock,
     recipes: renderRecipes,
     "pending-dues": () => renderSalesHistory(true),
+    analytics: renderAnalytics,
   };
-  if (pages[page]) pages[page]();
+  if (pages[page]) {
+    try {
+      const res = pages[page]();
+      if (res instanceof Promise) {
+        res.catch(err => {
+          console.error("Page load error:", err);
+          content.innerHTML = `<div class="flex items-center justify-center h-40 text-red-500 font-bold">Error loading page: ${err.message}</div>`;
+        });
+      }
+    } catch (err) {
+      console.error("Page load sync error:", err);
+      content.innerHTML = `<div class="flex items-center justify-center h-40 text-red-500 font-bold">Error loading page: ${err.message}</div>`;
+    }
+  }
 
   // Highlight active menu for sub-filters
   if (page === "products-low-stock") {
@@ -624,7 +651,7 @@ async function submitPopCategory(type) {
     input.value = "";
     input.focus();
   }
-  
+
   toast("Category added successfully!");
   await fetchCategories();
   updateCategoryListInPopup(type);
@@ -636,7 +663,7 @@ function updateCategoryListInPopup(type) {
   if (!container) return;
 
   const categories = type === "product" ? _productCategories : _expenseCategories;
-  
+
   if (categories.length === 0) {
     container.innerHTML = `<div class="text-xs text-slate-400 italic text-center py-4">No categories added yet.</div>`;
     return;
@@ -657,13 +684,13 @@ function updateCategoryListInPopup(type) {
 
 async function deleteCategoryFromPopup(type, id, name) {
   if (!confirm(`Are you sure you want to delete the "${name}" category?`)) return;
-  
+
   const url = type === 'product' ? `/api/product-categories/${id}` : `/api/expense-categories/${id}`;
-  
+
   try {
     const r = await api(url, 'DELETE');
     if (r.error) return toast(r.error, 'error');
-    
+
     toast('Category deleted successfully!');
     await fetchCategories();
     updateCategoryListInPopup(type);
@@ -725,788 +752,6 @@ async function deleteCategory(type, id) {
   } catch (e) {
     toast("Network error during decommission.", "error");
   }
-}
-
-// ─── Receipt Settings ─────────────────────────────────────────────────
-
-let _receiptSettings = null;
-
-async function fetchReceiptSettings() {
-  try {
-    const res = await fetch("/api/shop-settings");
-    if (!res.ok) throw new Error("Failed to fetch settings");
-    _receiptSettings = await res.json();
-    return _receiptSettings;
-  } catch (e) {
-    console.error("Receipt settings fetch error:", e);
-    return null;
-  }
-}
-
-function renderReceiptPreview() {
-  const settings = _receiptSettings || {};
-  const headerText = document.getElementById("receipt-header-text")?.value || settings.receipt_header_text || settings.name || "YOUR SHOP";
-  const extendedName = document.getElementById("receipt-extended-name")?.value || settings.receipt_extended_name || "";
-  const phone = document.getElementById("receipt-phone")?.value || settings.receipt_phone || "";
-  const address = document.getElementById("receipt-address")?.value || settings.receipt_address || "";
-  const policies = document.getElementById("receipt-policies")?.value || settings.receipt_policies || "";
-  // Get logo/text flags from checkboxes
-  const useLogo = document.getElementById("use-logo-on-receipt")?.checked ?? (settings.use_logo_on_receipt !== false);
-  const useText = document.getElementById("use-text-on-receipt")?.checked ?? (settings.use_text_on_receipt !== false);
-
-  // Use temporary logo URL if available (from file preview), otherwise use saved logo
-  const savedLogoUrl = settings.logo_url || "";
-  const hasSavedLogo = !!settings.logo_path;
-  const logoUrl = _tempLogoUrl || savedLogoUrl;
-  const hasLogo = _tempLogoUrl || hasSavedLogo;
-  const images = settings.receipt_images || [];
-
-  // Get typography settings from form or saved settings
-  const receiptFontFamily = document.getElementById("receipt-font-family")?.value || settings.receipt_font_family || "'Courier New', Courier, monospace";
-  const headerFontSize = document.getElementById("header-font-size")?.value || settings.header_font_size || 18;
-  const headerFontWeight = document.getElementById("header-font-weight")?.value || settings.header_font_weight || "bold";
-  const headerSpacing = document.getElementById("header-spacing")?.value || settings.header_spacing || 10;
-  
-  const extendedNameFontSize = document.getElementById("extended-name-font-size")?.value || settings.extended_name_font_size || 10;
-  const extendedNameFontWeight = document.getElementById("extended-name-font-weight")?.value || settings.extended_name_font_weight || "normal";
-  const extendedNameSpacing = document.getElementById("extended-name-spacing")?.value || settings.extended_name_spacing || 2;
-
-  const contactFontSize = document.getElementById("contact-font-size")?.value || settings.contact_font_size || 10;
-  const contactAlign = document.getElementById("contact-align")?.value || settings.contact_align || "center";
-  const contactPadding = document.getElementById("contact-padding")?.value || settings.contact_padding || 10;
-  const footerFontSize = document.getElementById("footer-font-size")?.value || settings.footer_font_size || 9;
-  const footerFontStyle = document.getElementById("footer-font-style")?.value || settings.footer_font_style || "normal";
-  const footerMargin = document.getElementById("footer-margin")?.value || settings.footer_margin || 10;
-  const dividerStyle = document.getElementById("divider-style")?.value || settings.divider_style || "dashed";
-  const dividerWidth = document.getElementById("divider-width")?.value || settings.divider_width || 1;
-  const sectionGap = document.getElementById("section-gap")?.value || settings.section_gap || 10;
-
-  const dividerCss = dividerStyle === "none" ? "none" : `${dividerWidth}px ${dividerStyle} #000`;
-
-  // Build header
-  let headerHtml = "";
-  if (useLogo && hasLogo) {
-    headerHtml += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${logoUrl}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
-  }
-  
-  if (useText) {
-    headerHtml += `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
-  }
-
-  // Tagline/Extended info (shown if either is selected or both)
-  if (extendedName) {
-    headerHtml += `<div style="font-size: ${extendedNameFontSize}px; font-weight: ${extendedNameFontWeight}; margin-top: ${extendedNameSpacing}px; text-align: center; text-transform: none; margin-bottom: ${headerSpacing}px;">${extendedName}</div>`;
-  }
-
-  // Build contact
-  let contactHtml = "";
-  if (phone || address) {
-    contactHtml = `<div style="font-size: ${contactFontSize}px; margin-top: 5px; text-align: ${contactAlign}; border-bottom: ${dividerCss}; padding-bottom: ${contactPadding}px;">`;
-    if (phone) contactHtml += `<div style="display: flex; align-items: center; justify-content: ${contactAlign}; gap: 4px;"><svg width="${parseInt(contactFontSize) + 2}" height="${parseInt(contactFontSize) + 2}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> ${phone}</div>`;
-    if (address) contactHtml += `<div style="display: flex; align-items: center; justify-content: ${contactAlign}; gap: 4px;"><svg width="${parseInt(contactFontSize) + 2}" height="${parseInt(contactFontSize) + 2}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> ${address}</div>`;
-    contactHtml += `</div>`;
-  }
-
-  // Build promo images
-  let promoHtml = "";
-  if (images.length > 0) {
-    promoHtml = `<div style="margin-top: ${sectionGap}px; border-top: ${dividerCss}; padding-top: ${sectionGap}px;">`;
-    images.forEach((img) => {
-      promoHtml += `<img src="${img.path}" style="max-width: 70mm; max-height: 25mm; margin: 5px auto; display: block;" alt="${img.description || ""}">`;
-      if (img.description) {
-        promoHtml += `<div style="font-size: ${footerFontSize}px; text-align: center; margin-top: 2px;">${img.description}</div>`;
-      }
-    });
-    promoHtml += `</div>`;
-  }
-
-  // Build footer
-  let footerHtml = "";
-  if (policies) {
-    footerHtml += `<div style="font-size: ${footerFontSize}px; font-style: ${footerFontStyle}; margin: ${footerMargin}px 0; text-align: center; white-space: pre-wrap; border-top: ${dividerCss}; padding-top: ${footerMargin}px;">${policies.replace(/\n/g, "<br>")}</div>`;
-  }
-  footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px; text-align: center; margin-top: ${footerMargin}px;">Thank you for your purchase!</div>`;
-
-  return `
-    <div style="font-family: ${receiptFontFamily}; width: 80mm; padding: 5mm; background: #fff; color: #000; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 0 auto;">
-      <div style="text-align: center; margin-bottom: ${sectionGap}px;">
-        ${headerHtml}
-        <div style="font-weight: bold; font-size: 14px; margin-top: 5px;">Sales Receipt</div>
-        ${contactHtml}
-      </div>
-      
-      <div style="font-size: 11px; margin: ${sectionGap}px 0;">
-        <strong>Bill #:</strong> 1001<br>
-        <strong>Date:</strong> ${new Date().toLocaleString()}<br>
-        <strong>Seller:</strong> Staff<br>
-        <strong>Customer:</strong> Walk-in<br>
-      </div>
-
-      <div style="border-top: ${dividerCss}; border-bottom: ${dividerCss}; padding: ${sectionGap}px 0; margin: ${sectionGap}px 0;">
-        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 5px; font-size: 10px; font-weight: bold;">
-          <span style="flex: 2;">Item</span>
-          <span style="flex: 1; text-align: center;">Qty</span>
-          <span style="flex: 1; text-align: right;">Price</span>
-          <span style="flex: 1; text-align: right;">Total</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-          <span style="flex: 2;">Sample Product</span>
-          <span style="flex: 1; text-align: center;">2</span>
-          <span style="flex: 1; text-align: right;">500</span>
-          <span style="flex: 1; text-align: right;">1000</span>
-        </div>
-      </div>
-
-      <div style="text-align: right;">
-        <div>Subtotal: Rs. 1000</div>
-        <div style="font-weight: bold; font-size: 15px; margin-top: 5px;">GRAND TOTAL: Rs. 1000</div>
-      </div>
-
-      <div style="font-size: 11px; margin-top: ${sectionGap}px; border-top: ${dividerCss}; padding-top: ${sectionGap}px;">
-        <div><strong>Method:</strong> Cash</div>
-        <div><strong>Received:</strong> Rs. 1000</div>
-        <div style="font-weight: bold;"><strong>Change:</strong> Rs. 0</div>
-      </div>
-
-      ${promoHtml}
-      ${footerHtml}
-    </div>
-  `;
-}
-
-function updateReceiptPreview() {
-  const previewContainer = document.getElementById("receipt-preview-content");
-  if (previewContainer) {
-    previewContainer.innerHTML = renderReceiptPreview();
-  }
-}
-
-// Store temporary logo URL for preview
-let _tempLogoUrl = null;
-
-function previewLogoFile(input) {
-  if (input.files && input.files[0]) {
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      _tempLogoUrl = e.target.result;
-      // Show preview in the upload area
-      const previewContainer = document.getElementById("logo-preview-container");
-      const previewImg = document.getElementById("logo-preview-img");
-      const removeBtn = document.getElementById("remove-logo-btn");
-      if (previewContainer && previewImg) {
-        previewContainer.classList.remove("hidden");
-        previewImg.src = _tempLogoUrl;
-        previewImg.classList.remove("hidden");
-      }
-      if (removeBtn) {
-        removeBtn.classList.remove("hidden");
-      }
-      // Update receipt preview with temporary logo
-      updateReceiptPreview();
-    };
-    reader.readAsDataURL(input.files[0]);
-  }
-}
-
-function renderReceiptSettings() {
-  const settings = _receiptSettings || {};
-  const hasLogo = !!settings.logo_path;
-  const logoUrl = settings.logo_url || "";
-  const images = settings.receipt_images || [];
-
-  // Delay preview update until after render
-  setTimeout(updateReceiptPreview, 0);
-
-  return `
-    <div class="w-full animate-in fade-in slide-in-from-right-4 duration-500">
-      <header class="mb-10">
-        <span class="px-4 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px] font-black uppercase tracking-widest mb-3 block w-fit">Receipt Customization</span>
-        <h3 class="text-4xl font-black text-slate-950 dark:text-white uppercase tracking-tighter">Bill Receipt</h3>
-        <p class="text-sm text-slate-500 lowercase italic mt-2">Personalize your customer receipts with your logo, contact details, and promotional content.</p>
-      </header>
-
-      <div class="flex flex-col xl:flex-row gap-8">
-        <!-- Settings Form -->
-        <div class="flex-1">
-          <form id="receipt-settings-form" onsubmit="event.preventDefault(); saveReceiptSettings();" class="space-y-8">
-        <!-- Logo Section -->
-        <div class="bg-slate-50 dark:bg-slate-900/50 rounded-[2rem] p-8 border border-slate-200 dark:border-slate-800">
-          <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
-            <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            Shop Logo / Header
-          </h4>
-          
-          <div class="flex flex-col md:flex-row gap-6 items-start">
-            <div class="flex-1 w-full">
-              <div class="flex items-center gap-6 mb-6 pb-4 border-b border-slate-200/50 dark:border-slate-800/50">
-                <label class="flex items-center gap-3 cursor-pointer group">
-                  <div class="relative">
-                    <input type="checkbox" id="use-text-on-receipt" ${settings.use_text_on_receipt !== false ? "checked" : ""} 
-                           onchange="updateHeaderVisibility(); updateReceiptPreview();" class="peer sr-only">
-                    <div class="w-10 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:bg-indigo-600 transition-all"></div>
-                    <div class="absolute left-1 top-1 w-3 h-3 bg-white rounded-full peer-checked:translate-x-5 transition-all shadow-sm"></div>
-                  </div>
-                  <span class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 transition-colors">Show Text Header</span>
-                </label>
-                <label class="flex items-center gap-3 cursor-pointer group">
-                  <div class="relative">
-                    <input type="checkbox" id="use-logo-on-receipt" ${settings.use_logo_on_receipt ? "checked" : ""} 
-                           onchange="updateHeaderVisibility(); updateReceiptPreview();" class="peer sr-only">
-                    <div class="w-10 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:bg-indigo-600 transition-all"></div>
-                    <div class="absolute left-1 top-1 w-3 h-3 bg-white rounded-full peer-checked:translate-x-5 transition-all shadow-sm"></div>
-                  </div>
-                  <span class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 transition-colors">Show Logo Image</span>
-                </label>
-              </div>
-              
-              <div id="text-header-input" class="${settings.use_text_on_receipt === false ? "hidden" : "space-y-4 mb-6"}">
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Shop Name on Receipt</label>
-                  <input type="text" id="receipt-header-text" value="${settings.receipt_header_text || settings.name || ""}" 
-                         placeholder="Your Shop Name" oninput="updateReceiptPreview()"
-                         class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Extended Name / Tagline</label>
-                  <input type="text" id="receipt-extended-name" value="${settings.receipt_extended_name || ""}" 
-                         placeholder="e.g. Fine Dining or Wholesale & Retail" oninput="updateReceiptPreview()"
-                         class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
-                </div>
-              </div>
-              
-              <div id="logo-upload-input" class="${!settings.use_logo_on_receipt ? "hidden" : ""}">
-                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Logo Image</label>
-                <div class="flex flex-col gap-4">
-                  <div id="logo-preview-container" class="${hasLogo ? "" : "hidden"}">
-                    ${hasLogo ? `<img id="logo-preview-img" src="${logoUrl}" class="w-24 h-24 object-contain rounded-xl border border-slate-200 dark:border-slate-700 bg-white">` : `<img id="logo-preview-img" class="w-24 h-24 object-contain rounded-xl border border-slate-200 dark:border-slate-700 bg-white hidden">`}
-                  </div>
-                  <div class="flex-1">
-                    <input type="file" id="logo-file" accept="image/*" onchange="previewLogoFile(this)" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-300">
-                    <button type="button" id="remove-logo-btn" onclick="deleteLogo()" class="mt-2 text-xs text-rose-500 hover:text-rose-600 font-medium ${hasLogo ? "" : "hidden"}">Remove Logo</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Contact Details -->
-        <div class="bg-slate-50 dark:bg-slate-900/50 rounded-[2rem] p-8 border border-slate-200 dark:border-slate-800">
-          <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
-            <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            Contact Details
-          </h4>
-          
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Phone Number</label>
-              <input type="text" id="receipt-phone" value="${settings.receipt_phone || ""}" 
-                     placeholder="+92 300 1234567" oninput="updateReceiptPreview()"
-                     class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
-            </div>
-            <div>
-              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Address</label>
-              <input type="text" id="receipt-address" value="${settings.receipt_address || ""}" 
-                     placeholder="123 Main Street, City" oninput="updateReceiptPreview()"
-                     class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
-            </div>
-          </div>
-        </div>
-
-        <!-- Promotional Images -->
-        <div class="bg-slate-50 dark:bg-slate-900/50 rounded-[2rem] p-8 border border-slate-200 dark:border-slate-800">
-          <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
-            <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-            Additional Images (QR Code / Promotions)
-          </h4>
-          
-          <div class="mb-6">
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Upload Image</label>
-            <div class="flex gap-4">
-              <input type="file" id="receipt-image-file" accept="image/*" class="flex-1 block text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-300">
-              <input type="text" id="receipt-image-desc" placeholder="Description (e.g., QR Code for payment)" 
-                     class="flex-1 px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm">
-              <button type="button" onclick="addReceiptImage()" class="px-6 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all">Add</button>
-            </div>
-          </div>
-          
-          <div id="receipt-images-list" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            ${images.map(img => `
-              <div class="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white">
-                <img src="${img.path}" class="w-full h-24 object-contain">
-                <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <button type="button" onclick="deleteReceiptImage('${img.id}')" class="text-white text-xs font-bold bg-rose-500 hover:bg-rose-600 px-3 py-1 rounded-lg">Remove</button>
-                </div>
-                <p class="text-[10px] text-center text-slate-500 p-2 truncate">${img.description || ""}</p>
-              </div>
-            `).join("")}
-          </div>
-          ${images.length === 0 ? `<p class="text-sm text-slate-400 italic">No additional images added yet.</p>` : ""}
-        </div>
-
-        <!-- Shop Policies -->
-        <div class="bg-slate-50 dark:bg-slate-900/50 rounded-[2rem] p-8 border border-slate-200 dark:border-slate-800">
-          <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
-            <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            Shop Policies / Footer Text
-          </h4>
-          <textarea id="receipt-policies" rows="4" placeholder="Enter your shop policies, return policy, thank you message, etc. This will appear at the bottom of every receipt." oninput="updateReceiptPreview()"
-                    class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all resize-none">${settings.receipt_policies || ""}</textarea>
-        </div>
-
-        <!-- Typography & Spacing -->
-        <div class="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-[2rem] p-8 border border-indigo-200 dark:border-indigo-800">
-          <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
-            <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
-            Typography & Spacing
-          </h4>
-          
-          <div class="space-y-6">
-            <!-- Global Font -->
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
-              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Global Receipt Font</h5>
-              <div>
-                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Printer Font Family</label>
-                <select id="receipt-font-family" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                  <option value="'Courier New', Courier, monospace" ${!settings.receipt_font_family || settings.receipt_font_family === "'Courier New', Courier, monospace" ? "selected" : ""}>Courier New (Classic POS)</option>
-                  <option value="'bit array-a2', 'Courier New', monospace" ${settings.receipt_font_family === "'bit array-a2', 'Courier New', monospace" ? "selected" : ""}>Bit Array A2 / Dot Matrix</option>
-                  <option value="monospace" ${settings.receipt_font_family === "monospace" ? "selected" : ""}>System Monospace</option>
-                  <option value="Arial, sans-serif" ${settings.receipt_font_family === "Arial, sans-serif" ? "selected" : ""}>Arial (Thermal Clear)</option>
-                  <option value="'Inter', sans-serif" ${settings.receipt_font_family === "'Inter', sans-serif" ? "selected" : ""}>Inter (Modern Smooth)</option>
-                  <option value="'Roboto Mono', monospace" ${settings.receipt_font_family === "'Roboto Mono', monospace" ? "selected" : ""}>Roboto Mono</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Header Text Styling -->
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
-              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Header (Shop Name)</h5>
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Font Size</label>
-                  <input type="number" id="header-font-size" value="${settings.header_font_size || 18}" min="10" max="32" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Weight</label>
-                  <select id="header-font-weight" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                    <option value="normal" ${settings.header_font_weight === "normal" ? "selected" : ""}>Normal</option>
-                    <option value="bold" ${!settings.header_font_weight || settings.header_font_weight === "bold" ? "selected" : ""}>Bold</option>
-                    <option value="800" ${settings.header_font_weight === "800" ? "selected" : ""}>Extra Bold</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Spacing</label>
-                  <input type="number" id="header-spacing" value="${settings.header_spacing || 10}" min="0" max="30" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-              </div>
-            </div>
-
-            <!-- Extended Name Styling -->
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
-              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Extended Name / Tagline</h5>
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Font Size</label>
-                  <input type="number" id="extended-name-font-size" value="${settings.extended_name_font_size || 10}" min="8" max="24" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Weight</label>
-                  <select id="extended-name-font-weight" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                    <option value="normal" ${!settings.extended_name_font_weight || settings.extended_name_font_weight === "normal" ? "selected" : ""}>Normal</option>
-                    <option value="bold" ${settings.extended_name_font_weight === "bold" ? "selected" : ""}>Bold</option>
-                    <option value="800" ${settings.extended_name_font_weight === "800" ? "selected" : ""}>Extra Bold</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Spacing</label>
-                  <input type="number" id="extended-name-spacing" value="${settings.extended_name_spacing || 2}" min="0" max="20" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-              </div>
-            </div>
-
-            <!-- Contact Details Styling -->
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
-              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Contact Details (Phone/Address)</h5>
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Font Size (px)</label>
-                  <input type="number" id="contact-font-size" value="${settings.contact_font_size || 10}" min="8" max="16" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Align</label>
-                  <select id="contact-align" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                    <option value="left" ${settings.contact_align === "left" ? "selected" : ""}>Left</option>
-                    <option value="center" ${!settings.contact_align || settings.contact_align === "center" ? "selected" : ""}>Center</option>
-                    <option value="right" ${settings.contact_align === "right" ? "selected" : ""}>Right</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Padding (px)</label>
-                  <input type="number" id="contact-padding" value="${settings.contact_padding || 10}" min="0" max="20" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-              </div>
-            </div>
-
-            <!-- Policies/Footer Styling -->
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
-              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Footer / Policies</h5>
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Font Size (px)</label>
-                  <input type="number" id="footer-font-size" value="${settings.footer_font_size || 9}" min="7" max="14" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Style</label>
-                  <select id="footer-font-style" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                    <option value="normal" ${!settings.footer_font_style || settings.footer_font_style === "normal" ? "selected" : ""}>Normal</option>
-                    <option value="italic" ${settings.footer_font_style === "italic" ? "selected" : ""}>Italic</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Top Margin (px)</label>
-                  <input type="number" id="footer-margin" value="${settings.footer_margin || 10}" min="0" max="30" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-              </div>
-            </div>
-
-            <!-- Section Dividers -->
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
-              <h5 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4">Section Spacing</h5>
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Line Style</label>
-                  <select id="divider-style" onchange="updateReceiptPreview()" class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                    <option value="dashed" ${!settings.divider_style || settings.divider_style === "dashed" ? "selected" : ""}>Dashed</option>
-                    <option value="solid" ${settings.divider_style === "solid" ? "selected" : ""}>Solid</option>
-                    <option value="dotted" ${settings.divider_style === "dotted" ? "selected" : ""}>Dotted</option>
-                    <option value="none" ${settings.divider_style === "none" ? "selected" : ""}>None</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Line Width (px)</label>
-                  <input type="number" id="divider-width" value="${settings.divider_width || 1}" min="0" max="3" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-                <div>
-                  <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Gap (px)</label>
-                  <input type="number" id="section-gap" value="${settings.section_gap || 10}" min="0" max="25" oninput="updateReceiptPreview()"
-                         class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Save Button -->
-        <div class="flex justify-end pt-4">
-          <button type="submit" class="px-10 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold uppercase tracking-widest text-sm shadow-xl shadow-indigo-600/30 transition-all active:scale-95 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-            Save Receipt Settings
-          </button>
-        </div>
-      </form>
-        </div>
-
-        <!-- Receipt Preview Panel -->
-        <div class="xl:w-[420px] shrink-0">
-          <div class="sticky top-24 bg-slate-100 dark:bg-slate-800/50 rounded-[2rem] p-6 border border-slate-200 dark:border-slate-700">
-            <h4 class="text-sm font-black text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-              Live Preview
-            </h4>
-            <div id="receipt-preview-content" class="overflow-auto max-h-[800px] rounded-xl bg-slate-200 dark:bg-slate-900 p-3">
-              <!-- Preview rendered here -->
-            </div>
-            <p class="text-[10px] text-slate-400 mt-3 text-center">Preview updates as you type</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function updateHeaderVisibility() {
-  const showText = document.getElementById("use-text-on-receipt")?.checked;
-  const showLogo = document.getElementById("use-logo-on-receipt")?.checked;
-  const textInput = document.getElementById("text-header-input");
-  const logoInput = document.getElementById("logo-upload-input");
-  
-  if (textInput) {
-    if (showText) textInput.classList.remove("hidden");
-    else textInput.classList.add("hidden");
-  }
-  
-  if (logoInput) {
-    if (showLogo) logoInput.classList.remove("hidden");
-    else logoInput.classList.add("hidden");
-  }
-}
-
-// Keep old function for compatibility if called elsewhere but point to new logic
-function toggleLogoType(type) {
-  updateHeaderVisibility();
-}
-
-async function saveReceiptSettings() {
-  try {
-    const formData = new FormData();
-    formData.append("use_logo_on_receipt", document.getElementById("use-logo-on-receipt")?.checked ? "true" : "false");
-    formData.append("use_text_on_receipt", document.getElementById("use-text-on-receipt")?.checked ? "true" : "false");
-
-    // Text fields
-    const headerText = document.getElementById("receipt-header-text")?.value || "";
-    const extendedName = document.getElementById("receipt-extended-name")?.value || "";
-    const phone = document.getElementById("receipt-phone")?.value || "";
-    const address = document.getElementById("receipt-address")?.value || "";
-    const policies = document.getElementById("receipt-policies")?.value || "";
-
-    formData.append("receipt_header_text", headerText);
-    formData.append("receipt_extended_name", extendedName);
-    formData.append("receipt_phone", phone);
-    formData.append("receipt_address", address);
-    formData.append("receipt_policies", policies);
-
-    // Typography settings
-    formData.append("receipt_font_family", document.getElementById("receipt-font-family")?.value || "'Courier New', Courier, monospace");
-    formData.append("header_font_size", document.getElementById("header-font-size")?.value || "18");
-    formData.append("header_font_weight", document.getElementById("header-font-weight")?.value || "bold");
-    formData.append("header_spacing", document.getElementById("header-spacing")?.value || "10");
-    formData.append("extended_name_font_size", document.getElementById("extended-name-font-size")?.value || "10");
-    formData.append("extended_name_font_weight", document.getElementById("extended-name-font-weight")?.value || "normal");
-    formData.append("extended_name_spacing", document.getElementById("extended-name-spacing")?.value || "2");
-    formData.append("contact_font_size", document.getElementById("contact-font-size")?.value || "10");
-    formData.append("contact_align", document.getElementById("contact-align")?.value || "center");
-    formData.append("contact_padding", document.getElementById("contact-padding")?.value || "10");
-    formData.append("footer_font_size", document.getElementById("footer-font-size")?.value || "9");
-    formData.append("footer_font_style", document.getElementById("footer-font-style")?.value || "normal");
-    formData.append("footer_margin", document.getElementById("footer-margin")?.value || "10");
-    formData.append("divider_style", document.getElementById("divider-style")?.value || "dashed");
-    formData.append("divider_width", document.getElementById("divider-width")?.value || "1");
-    formData.append("section_gap", document.getElementById("section-gap")?.value || "10");
-
-    // Logo file
-    const logoFile = document.getElementById("logo-file")?.files[0];
-    if (logoFile) {
-      formData.append("logo", logoFile);
-    }
-
-    const res = await fetch("/api/shop-settings", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await res.json();
-    if (data.error) {
-      toast(data.error, "error");
-      return;
-    }
-
-    toast("Receipt settings saved successfully!");
-    _tempLogoUrl = null; // Clear temporary logo after save
-    await fetchReceiptSettings();
-    renderSettings("receipt");
-  } catch (e) {
-    console.error("Save receipt settings error:", e);
-    toast("Failed to save settings", "error");
-  }
-}
-
-async function deleteLogo() {
-  if (!confirm("Remove logo and use text header instead?")) return;
-
-  // Clear temporary logo preview
-  _tempLogoUrl = null;
-  document.getElementById("logo-file").value = "";
-
-  // Check if there's a saved logo to delete
-  if (!_receiptSettings?.logo_path) {
-    // No saved logo, just clear the preview
-    const previewContainer = document.getElementById("logo-preview-container");
-    const previewImg = document.getElementById("logo-preview-img");
-    const removeBtn = document.getElementById("remove-logo-btn");
-    if (previewContainer) previewContainer.classList.add("hidden");
-    if (previewImg) previewImg.classList.add("hidden");
-    if (removeBtn) removeBtn.classList.add("hidden");
-    updateReceiptPreview();
-    return;
-  }
-
-  try {
-    const res = await fetch("/api/shop-settings/logo", { method: "DELETE" });
-    if (!res.ok) throw new Error("Failed to delete logo");
-
-    toast("Logo removed");
-    await fetchReceiptSettings();
-    renderSettings("receipt");
-  } catch (e) {
-    toast("Failed to remove logo", "error");
-  }
-}
-
-async function addReceiptImage() {
-  const fileInput = document.getElementById("receipt-image-file");
-  const descInput = document.getElementById("receipt-image-desc");
-
-  if (!fileInput.files[0]) {
-    toast("Please select an image", "error");
-    return;
-  }
-
-  try {
-    const formData = new FormData();
-    formData.append("image", fileInput.files[0]);
-    formData.append("description", descInput.value || "");
-
-    const res = await fetch("/api/shop-settings/images", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await res.json();
-    if (data.error) {
-      toast(data.error, "error");
-      return;
-    }
-
-    toast("Image added successfully!");
-    fileInput.value = "";
-    descInput.value = "";
-    await fetchReceiptSettings();
-    renderSettings("receipt");
-  } catch (e) {
-    console.error("Add image error:", e);
-    toast("Failed to add image", "error");
-  }
-}
-
-async function deleteReceiptImage(imageId) {
-  if (!confirm("Remove this image from receipts?")) return;
-
-  try {
-    const res = await fetch(`/api/shop-settings/images/${imageId}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("Failed to delete image");
-
-    toast("Image removed");
-    await fetchReceiptSettings();
-    renderSettings("receipt");
-  } catch (e) {
-    toast("Failed to remove image", "error");
-  }
-}
-
-// ... existing logic ...
-
-function updateLowStockBadge(productsArray) {
-  const lowItems = productsArray.filter((p) => {
-    const isRecipe = p.ingredients && p.ingredients.length > 0;
-    return !isRecipe && p.stock <= p.min_stock_level;
-  });
-  const countSpan = $c("low-stock-count");
-  if (countSpan) {
-    if (lowItems.length > 0) {
-      countSpan.textContent = lowItems.length;
-      countSpan.classList.remove("hidden");
-    } else {
-      countSpan.classList.add("hidden");
-    }
-  }
-}
-
-function updatePendingDuesBadge(salesArray) {
-  const pendingSales = salesArray.filter(
-    (s) => s.total - s.amount_received > 0,
-  );
-  const countSpan = $c("pending-dues-count");
-  if (countSpan) {
-    if (pendingSales.length > 0) {
-      countSpan.textContent = pendingSales.length;
-      countSpan.classList.remove("hidden");
-    } else {
-      countSpan.classList.add("hidden");
-    }
-  }
-}
-
-
-
-function openModal(title, bodyHtml, sizeClass = "max-w-lg", isStatic = false) {
-  const modal = document.getElementById("modal");
-  const closeBtn = modal.querySelector('button[onclick="closeModal()"]');
-
-  document.getElementById("modal-title").textContent = title;
-  document.getElementById("modal-body").innerHTML = bodyHtml;
-  document.getElementById("modal-box").className =
-    `glass rounded-2xl w-full shadow-xl transition-all overflow-y-auto max-h-[85vh] custom-scrollbar ${sizeClass}`;
-
-  if (isStatic) {
-    if (closeBtn) closeBtn.classList.add("hidden");
-    modal.dataset.static = "true";
-  } else {
-    if (closeBtn) closeBtn.classList.remove("hidden");
-    delete modal.dataset.static;
-  }
-
-  modal.classList.remove("hidden");
-}
-
-function closeModal() {
-  $c("modal").classList.add("hidden");
-}
-
-// Click outside to close modal (if not static)
-document.getElementById("modal").addEventListener("click", function (e) {
-  if (e.target === this && this.dataset.static !== "true") {
-    closeModal();
-  }
-});
-
-function statCard(label, value, sub, color = "blue") {
-  const themes = {
-    blue: {
-      light: "bg-blue-50 border-blue-200",
-      dark: "dark:bg-blue-950/30 dark:border-blue-800",
-      label: "text-blue-700 dark:text-blue-300",
-      val: "text-blue-900 dark:text-white",
-    },
-    emerald: {
-      light: "bg-emerald-50 border-emerald-200",
-      dark: "dark:bg-emerald-950/30 dark:border-emerald-800",
-      label: "text-emerald-700 dark:text-emerald-300",
-      val: "text-emerald-900 dark:text-white",
-    },
-    rose: {
-      light: "bg-rose-50 border-rose-200",
-      dark: "dark:bg-rose-950/30 dark:border-rose-800",
-      label: "text-rose-700 dark:text-rose-300",
-      val: "text-rose-900 dark:text-white",
-    },
-    amber: {
-      light: "bg-amber-50 border-amber-200",
-      dark: "dark:bg-amber-950/30 dark:border-amber-800",
-      label: "text-amber-700 dark:text-amber-300",
-      val: "text-amber-900 dark:text-white",
-    },
-    purple: {
-      light: "bg-purple-50 border-purple-200",
-      dark: "dark:bg-purple-950/30 dark:border-purple-800",
-      label: "text-purple-700 dark:text-purple-300",
-      val: "text-purple-900 dark:text-white",
-    },
-  };
-  const t = themes[color] || themes.blue;
-  return `<div class="rounded-2xl p-6 border ${t.light} ${t.dark} shadow-sm transition-all duration-300">
-    <div class="text-xs font-semibold ${t.label} uppercase tracking-wider mb-2">${label}</div>
-    <div class="text-3xl font-bold ${t.val} mb-1 leading-tight">${value}</div>
-    ${sub ? `<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">${sub}</div>` : ""}
-  </div>`;
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────
@@ -1926,7 +1171,10 @@ async function renderProducts(onlyLowStock = false) {
         <p class="text-slate-400 text-sm">${displayList.length} ${listTitle}</p>
         ${onlyLowStock ? `<button onclick="navigate('products')" class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Clear Filter</button>` : ""}
       </div>
-      <button onclick="openAddProduct()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all">+ Add Product</button>
+      <div class="flex items-center gap-2">
+        <button onclick="openAddCategoryPopup('product')" class="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 transition-all">+ Add Category</button>
+        <button onclick="openAddProduct()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all">+ Add Product</button>
+      </div>
     </div>
     <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
       <table class="w-full text-sm">
@@ -1982,9 +1230,11 @@ async function renderProducts(onlyLowStock = false) {
                        </span>`
             }
                   ${(() => {
-              const loose = getLooseUnits(p);
-              if (loose === 0) return "";
-              return `<div class="text-[10px] font-bold text-indigo-500 uppercase tracking-widest pl-1">+ ${loose} Unit in Loose</div>`;
+              if (!p.components || p.components.length === 0) return "";
+              return p.components.map(c => {
+                if (!c.stock || c.stock <= 0) return "";
+                return `<div class="text-[10px] font-bold text-indigo-500 uppercase tracking-widest pl-1">+ ${c.stock} ${c.name} (Loose)</div>`;
+              }).join("");
             })()}
                   ${!(p.ingredients && p.ingredients.length > 0) ? `<div class="text-[10px] text-slate-500 pl-1 italic">Threshold: ${p.min_stock_level}</div>` : ""}
                 </div>
@@ -2037,11 +1287,11 @@ function productFormHtml(p = {}, brands = []) {
     </div>`;
 
   const isRestaurant = currentUser.shop_type === "restaurant";
-  const labelComp = isRestaurant ? "Ingredients (Recipe)" : "Composition (BOM)";
+  const labelComp = isRestaurant ? "Ingredients (Recipe)" : "Unit Breakdown / Loose Items";
   const descComp = isRestaurant
     ? "Define raw ingredients for this item. Cost will be auto-calculated from raw stock prices."
-    : "Define sub-parts for this product. Selling this product will deduct stock from these parts.";
-  const btnComp = isRestaurant ? "Add Ingredient" : "Add Component";
+    : "Define how many smaller items (e.g. pieces in a box) are in one unit. Selling these will automatically break a unit from stock.";
+  const btnComp = isRestaurant ? "Add Ingredient" : "Add Loose Item";
 
   const hasCompositePermission =
     currentUser.allowed_panels &&
@@ -2242,7 +1492,7 @@ async function saveProduct(id) {
     const method = id ? 'PUT' : 'POST';
 
     const res = await fetch(url, { method, body: formData });
-    
+
     let r;
     const contentType = res.headers.get("content-type");
     if (contentType && contentType.includes("application/json")) {
@@ -2273,17 +1523,29 @@ async function addComponentToForm(isIngredient = false) {
     window._formComponents.push({ name: "", quantity: 1, price: 0, cost: 0, is_ingredient: false });
   }
   recalculateComponentPrices();
+  renderFormCompositionList();
 }
 
 function removeComponentFromForm(idx) {
   window._formComponents.splice(idx, 1);
   recalculateComponentPrices();
+  renderFormCompositionList();
 }
 
 function updateComponentQtyInForm(index, qty) {
   const comp = window._formComponents[index];
   if (comp) comp.quantity = parseFloat(qty) || 1;
   recalculateComponentPrices();
+}
+
+function updateComponentNameInForm(index, name) {
+  const comp = window._formComponents[index];
+  if (comp) comp.name = name;
+}
+
+function updateComponentPriceInForm(index, price) {
+  const comp = window._formComponents[index];
+  if (comp) comp.price = parseFloat(price) || 0;
 }
 
 function updateIngredientInForm(index, rawStockId) {
@@ -2336,13 +1598,19 @@ function recalculateComponentPrices() {
     const shareBuy = parentBuy / count;
     const shareSell = parentSell / count;
 
-    components.forEach((c) => {
-      c.cost = Number((shareBuy / (c.quantity || 1)).toFixed(2));
-      c.price = Number((shareSell / (c.quantity || 1)).toFixed(2));
+    components.forEach((c, idx) => {
+      // Auto-define price based on parent / quantity
+      const qty = parseFloat(c.quantity) || 1;
+      c.cost = Number((shareBuy / qty).toFixed(2));
+      c.price = Number((shareSell / qty).toFixed(2));
+
+      // Direct DOM Update to prevent focus loss
+      const costEl = document.getElementById(`comp-cost-${idx}`);
+      const priceEl = document.getElementById(`comp-price-${idx}`);
+      if (costEl) costEl.value = c.cost;
+      if (priceEl) priceEl.value = c.price;
     });
   }
-
-  renderFormCompositionList();
 }
 
 function renderFormCompositionList() {
@@ -2378,13 +1646,13 @@ function renderFormCompositionList() {
              <!-- Cost -->
              <div class="col-span-4 sm:col-span-2">
                 <label class="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-1 block">Unit Cost</label>
-                <input type="number" value="${c.cost || 0}" readonly
+                <input id="comp-cost-${idx}" type="number" value="${c.cost || 0}" readonly
                    class="w-full px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold outline-none text-rose-500 cursor-not-allowed" />
              </div>
              <!-- Price -->
              <div class="col-span-4 sm:col-span-3">
                 <label class="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-1 block">Unit Price (Sell)</label>
-                <input type="number" value="${c.price || 0}" min="0" oninput="updateComponentPriceInForm(${idx}, this.value)"
+                <input id="comp-price-${idx}" type="number" value="${c.price || 0}" min="0" oninput="updateComponentPriceInForm(${idx}, this.value)"
                    class="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold focus:border-indigo-500 outline-none text-indigo-500" />
              </div>`
         }
@@ -2640,6 +1908,7 @@ async function renderPOS() {
   _posCustomerResults = [];
   _posSelectedCustomer = null;
   const waiterList = (waiters || []).filter(u => ['admin', 'user', 'waiter'].includes(u.role));
+  const kitchenList = (waiters || []).filter(u => u.role === 'kitchen');
 
   let baseShopType = currentUser.shop_type;
   if (currentUser.role === 'superadmin' && managedShopId) {
@@ -2716,6 +1985,13 @@ async function renderPOS() {
                 <select id="pos-waiter" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                   <option value="">-- Select Waiter --</option>
                   ${waiterList.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Kitchen</label>
+                <select id="pos-kitchen" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
+                  <option value="">-- Select Kitchen --</option>
+                  ${kitchenList.map(k => `<option value="${k.id}">${k.username} (${k.name})</option>`).join('')}
                 </select>
               </div>
             </div>
@@ -2860,9 +2136,21 @@ async function renderPOS() {
               <span class="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white text-sm">📋</span>
               Active Orders
             </h3>
-            <button onclick="renderPOSOrders()" class="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-400 transition-all active:scale-95">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            </button>
+            <div class="flex items-center gap-3">
+              <div class="relative">
+                <input type="text" id="pos-orders-search" oninput="renderPOSOrders()" placeholder="Search Order ID..." class="px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-indigo-500 w-40 transition-all" />
+                <svg class="w-3.5 h-3.5 absolute right-3 top-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              </div>
+              <select id="pos-orders-type-filter" onchange="renderPOSOrders()" class="px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-indigo-500 transition-all">
+                <option value="">All Types</option>
+                <option value="dine_in">Dine-in</option>
+                <option value="takeaway">Takeaway</option>
+                <option value="delivery">Delivery</option>
+              </select>
+              <button onclick="renderPOSOrders()" class="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-400 transition-all active:scale-95">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            </div>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
@@ -2871,6 +2159,7 @@ async function renderPOS() {
                   <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Order ID</th>
                   <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Type</th>
                   <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Table / Details</th>
+                  <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Waiter</th>
                   <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                   <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total</th>
                   <th class="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
@@ -2929,7 +2218,7 @@ function switchOrderType(type) {
   const ordersContainer = $c('pos-orders-container');
 
   const isRetail = (currentUser && currentUser.shop_type === 'retail');
-  
+
   if (type === 'orders') {
     if (contentGrid) contentGrid.classList.add('hidden');
     if (ordersContainer) ordersContainer.classList.remove('hidden');
@@ -2947,22 +2236,36 @@ async function renderPOSOrders() {
   const tbody = $c('pos-orders-table-body');
   if (!tbody) return;
 
+  const searchQuery = $c('pos-orders-search')?.value || '';
+  const typeFilter = $c('pos-orders-type-filter')?.value || '';
+
   try {
     const sales = await api('/api/sales');
-    // Filter for active orders (not completed, or from today)
-    const activeOrders = (sales || []).filter(s => s.order_status !== 'completed').slice(0, 50);
-    _posActiveOrders = activeOrders;
+    // Show active orders (pending, preparing, ready) but hide fully completed ones
+    let filteredOrders = (sales || []).filter(s => s.order_status !== 'completed');
 
-    if (activeOrders.length === 0) {
+    if (typeFilter) {
+      filteredOrders = filteredOrders.filter(o => o.order_type === typeFilter);
+    }
+
+    if (searchQuery) {
+      filteredOrders = filteredOrders.filter(o => String(o.id).includes(searchQuery));
+    }
+
+    filteredOrders = filteredOrders.slice(0, 50);
+
+    _posActiveOrders = filteredOrders;
+
+    if (filteredOrders.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-20 text-center text-slate-400">No active orders found</td></tr>`;
       return;
     }
 
-    tbody.innerHTML = activeOrders.map(s => {
+    tbody.innerHTML = filteredOrders.map(s => {
       const date = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const typeLabel = s.order_type === 'dine_in' ? '🍽️ Dine-in' : s.order_type === 'takeaway' ? '🛍️ Takeaway' : '🚚 Delivery';
       const detail = s.order_type === 'dine_in' ? `Table: ${s.table_number || 'N/A'}` : s.customer_name || 'Walk-in';
-      
+
       let statusColor = 'bg-slate-100 text-slate-600';
       if (s.order_status === 'pending') statusColor = 'bg-amber-100 text-amber-600';
       if (s.order_status === 'preparing') statusColor = 'bg-blue-100 text-blue-600';
@@ -2974,7 +2277,9 @@ async function renderPOSOrders() {
           <td class="px-4 py-4 text-xs font-bold text-slate-500">${typeLabel}</td>
           <td class="px-4 py-4">
             <div class="text-sm font-black text-slate-700 dark:text-slate-200">${detail}</div>
-            <div class="text-[10px] text-slate-400 font-medium">${s.waiter_name ? 'Waiter: ' + s.waiter_name : ''}</div>
+          </td>
+          <td class="px-4 py-4 text-xs font-bold text-slate-500">
+            ${s.waiter_name || '-'}
           </td>
           <td class="px-4 py-4">
             <span class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${statusColor}">
@@ -2985,15 +2290,18 @@ async function renderPOSOrders() {
           <td class="px-4 py-4 text-xs font-medium text-slate-400">${date}</td>
           <td class="px-4 py-4 text-right">
             <div class="flex justify-end gap-2">
-              <button onclick="navigate('kds')" class="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase hover:bg-indigo-100 transition-all">
-                View
-              </button>
               <button onclick="showOrderPrintModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
                 Print
               </button>
+              ${s.order_status !== 'pending' ? `
               <button onclick="completeOrderFromPOS(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
                 Complete
               </button>
+              ` : `
+              <button disabled class="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-400 font-bold text-[10px] uppercase cursor-not-allowed">
+                Complete
+              </button>
+              `}
             </div>
           </td>
         </tr>
@@ -3005,7 +2313,7 @@ async function renderPOSOrders() {
 }
 
 async function completeOrderFromPOS(id) {
-  if(!confirm('Are you sure you want to complete this order and move it to sales history?')) return;
+  if (!confirm('Are you sure you want to complete this order and move it to sales history?')) return;
   try {
     await api(`/api/kds/${id}/status`, 'PATCH', { status: 'completed' });
     toast('Order completed!');
@@ -3067,7 +2375,7 @@ function showOrderPrintModal(id) {
 async function updateAndPrintOrder(id) {
   const nameEl = $c('op-name');
   if (!nameEl) return;
-  
+
   const data = {
     customer_name: nameEl.value.trim(),
     customer_phone: $c('op-phone').value.trim(),
@@ -3080,7 +2388,7 @@ async function updateAndPrintOrder(id) {
     toast('Order details updated!');
     closeModal();
     printBill(id);
-    renderPOSOrders(); 
+    renderPOSOrders();
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -3104,7 +2412,7 @@ function onPosFloorChange() {
   const tableSelect = $c('pos-table');
   if (!tableSelect) return;
 
-  const filteredTables = floorId 
+  const filteredTables = floorId
     ? _posAllTables.filter(t => t.floor_id == floorId)
     : _posAllTables;
 
@@ -3170,6 +2478,14 @@ function renderPOSProducts(products) {
                     <div class="flex items-baseline gap-1">
                        <span class="text-sm font-black ${p.stock > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>
                        <span class="text-[8px] font-bold text-slate-400 uppercase">Units</span>
+                    </div>
+                    <div class="flex flex-wrap justify-end gap-x-2 gap-y-0.5 mt-0.5">
+                      ${p.components.map(c => `
+                        <div class="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                          <span class="text-indigo-500">${c.stock || 0}</span>
+                          <span class="text-[8px] text-slate-400">${c.name}</span>
+                        </div>
+                      `).join('')}
                     </div>
                  </div>
                  `
@@ -3300,13 +2616,7 @@ function addToCart(productId) {
         </div>
 
         <div class="flex flex-col gap-2 pt-2">
-          <div class="flex gap-2">
-            <button onclick="harvestBuild(${product.id})" class="flex-1 py-2.5 px-4 rounded-xl bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800 hover:bg-amber-600 hover:text-white transition-all flex items-center justify-center gap-2 text-xs">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-              Break Down 1 Unit
-            </button>
-            <button onclick="closeModal()" class="flex-1 py-2.5 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 font-bold transition-all text-xs text-center">Cancel</button>
-          </div>
+        
           <button onclick="commitAddCart(${product.id})" class="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center justify-center gap-2">
              <span>Add Full Product to Cart</span>
              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
@@ -3803,7 +3113,7 @@ async function suggestPOSCustomers(query, targetId) {
     try {
       const customers = await api(`/api/customers?status=active&search=${encodeURIComponent(q)}`);
       const results = Array.isArray(customers) ? customers.slice(0, 5) : [];
-      
+
       if (results.length === 0) {
         suggestionEl.innerHTML = "";
         suggestionEl.classList.add("hidden");
@@ -3811,10 +3121,10 @@ async function suggestPOSCustomers(query, targetId) {
       }
 
       suggestionEl.innerHTML = results.map(c => {
-        const balBadge = c.current_balance > 0 
+        const balBadge = c.current_balance > 0
           ? `<span class="px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-[8px] font-black">DUE: RS. ${c.current_balance}</span>`
           : '';
-          
+
         return `
         <button type="button" onclick="selectSuggestedCustomer(${JSON.stringify(c).replace(/"/g, '&quot;')})" 
                 class="w-full text-left px-4 py-3 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all border-b border-slate-100 dark:border-slate-800 last:border-0 flex flex-col gap-0.5">
@@ -3825,7 +3135,7 @@ async function suggestPOSCustomers(query, targetId) {
           </div>
         </button>`;
       }).join("");
-      
+
       suggestionEl.classList.remove("hidden");
     } catch (err) {
       console.error("Suggestion error:", err);
@@ -3836,10 +3146,10 @@ async function suggestPOSCustomers(query, targetId) {
 function selectSuggestedCustomer(c) {
   const nameInp = document.getElementById("pos-cust-name");
   const phoneInp = document.getElementById("pos-cust-phone");
-  
+
   if (nameInp) nameInp.value = c.name;
   if (phoneInp) phoneInp.value = c.phone || "";
-  
+
   // Hide both containers
   ['pos-cust-name-suggestions', 'pos-cust-phone-suggestions'].forEach(id => {
     const el = document.getElementById(id);
@@ -3854,7 +3164,7 @@ function selectSuggestedCustomer(c) {
 document.addEventListener('click', (e) => {
   const nameInp = document.getElementById("pos-cust-name");
   const phoneInp = document.getElementById("pos-cust-phone");
-  
+
   ['pos-cust-name-suggestions', 'pos-cust-phone-suggestions'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el.contains(e.target) && e.target !== nameInp && e.target !== phoneInp) {
@@ -3905,7 +3215,7 @@ async function checkout() {
 
   // Gather restaurant-specific fields
   const orderType = window._posOrderType || 'dine_in';
-  let table_id = null, waiter_id = null, rider_id = null, token_number = null,
+  let table_id = null, waiter_id = null, rider_id = null, kitchen_id = null, token_number = null,
     delivery_address = '', customer_name = '', customer_phone = '', guest_count = 1;
 
   if (orderType === 'dine_in') {
@@ -3925,6 +3235,9 @@ async function checkout() {
     token_number = $c('pos-token')?.value.trim() || `TK-${Date.now()}`;
     customer_name = $c('pos-takeaway-name')?.value.trim() || '';
   }
+
+  // Common field for all restaurant types
+  kitchen_id = parseInt($c('pos-kitchen')?.value) || null;
 
   // Unified Customer Details (override if set in the new sidebar fields)
   const sidebarName = $c('pos-cust-name')?.value.trim();
@@ -3975,6 +3288,7 @@ async function checkout() {
     table_id,
     waiter_id,
     rider_id,
+    kitchen_id,
     guest_count,
     token_number,
   };
@@ -4169,6 +3483,7 @@ async function printBill(saleId) {
       <strong>Seller:</strong> ${seller ? seller.name : "Staff"}<br>
       <strong>Customer:</strong> ${sale.customer_name || "Walk-in"}<br>
       ${sale.customer_phone ? `<strong>Phone:</strong> ${sale.customer_phone}<br>` : ""}
+      <strong>Order Type:</strong> ${sale.order_type === 'dine_in' ? 'Dine-in' : sale.order_type === 'takeaway' ? 'Takeaway' : 'Delivery'}<br>
     </div>
 
     <hr class="divider" />
@@ -4521,7 +3836,18 @@ async function renderSalesHistory(onlyPendingDues = false) {
             <label class="text-[10px] uppercase font-bold text-slate-400">To</label>
             <input type="date" id="sales-to" value="${today}" onchange="_renderSalesTable()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
           </div>
-          ${onlyPendingDues ? `<button onclick="navigate('sales-history')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors bg-indigo-50 dark:bg-indigo-500/10 px-4 py-2 rounded-xl font-medium border border-indigo-100 dark:border-transparent">View Paid Slips</button>` : ""}
+          <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
+            <label class="text-[10px] uppercase font-bold text-slate-400">Type</label>
+            <select id="sales-type-filter" onchange="_renderSalesTable()" class="bg-transparent text-sm focus:outline-none dark:text-white font-bold cursor-pointer">
+              <option value="">All Types</option>
+              <option value="dine_in">Dine-in</option>
+              <option value="takeaway">Takeaway</option>
+              <option value="delivery">Delivery</option>
+            </select>
+          </div>
+          <button onclick="navigate('${onlyPendingDues ? 'sales-history' : 'pending-dues'}')" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-100 dark:border-transparent hover:bg-indigo-100 transition-all text-xs">
+            ${onlyPendingDues ? '📄 View Paid Slips' : '🔴 View Pending Dues'}
+          </button>
         </div>
       </div>
 
@@ -4564,6 +3890,7 @@ function _renderSalesTable() {
     const searchInput = $c("sales-search");
     const fromInput = $c("sales-from");
     const toInput = $c("sales-to");
+    const typeFilter = $c("sales-type-filter")?.value;
     if (!searchInput || !fromInput || !toInput) return;
 
     const query = (searchInput.value || "").toLowerCase().trim();
@@ -4598,6 +3925,11 @@ function _renderSalesTable() {
         if (toDate && sDate > toDate) return false;
         return true;
       });
+    }
+
+    // Filter by Order Type
+    if (typeFilter) {
+      displayList = displayList.filter(s => s.order_type === typeFilter);
     }
 
     // Filter by Search Query
@@ -4755,7 +4087,7 @@ async function showSaleDuesDetails(saleId) {
     const amountReceived = Number(sale.amount_received || 0);
     const balance = totalDue - amountReceived;
 
-    const historyHtml = payments.length 
+    const historyHtml = payments.length
       ? payments.map(p => `
           <div class="flex items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800 last:border-0">
             <div>
@@ -4880,8 +4212,9 @@ async function renderExpenses() {
              Pay Brand
           </button>
 
-          <button onclick="openAddCategoryPopup('expense')" title="Add Expense Category" class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 dark:hover:border-indigo-900 shadow-sm transition-all active:scale-95 group">
-            <svg class="w-6 h-6 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <button onclick="openAddCategoryPopup('expense')" class="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold shadow-sm transition-all hover:bg-slate-50 dark:hover:bg-slate-800 hover:-translate-y-0.5 active:scale-95 group">
+             <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+             Add Category
           </button>
 
           <button onclick="toggleExpenseView('add')" class="flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-700 hover:from-indigo-500 hover:to-blue-600 text-white text-sm font-bold shadow-lg shadow-indigo-900/10 transition-all hover:-translate-y-0.5 active:scale-95">
@@ -5297,1692 +4630,6 @@ async function updateExpense(id) {
   } catch (e) {
     toast(e.message, "error");
   }
-}
-
-// ─── Users (Admin) ────────────────────────────────────────────────────
-async function renderUsers() {
-  const users = await api("/api/users");
-  const isMaster = currentUser.role === "superadmin";
-
-  // ── Shop Admin: Card view (read + edit only, no create/delete) ──
-  if (!isMaster) {
-    const ROLE_COLORS = {
-      admin: {
-        bg: "bg-indigo-500",
-        badge:
-          "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
-      },
-      pos_user: {
-        bg: "bg-emerald-500",
-        badge:
-          "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-      },
-      manager: {
-        bg: "bg-amber-500",
-        badge:
-          "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-      },
-    };
-    const getColor = (role) =>
-      ROLE_COLORS[role] || {
-        bg: "bg-slate-400",
-        badge:
-          "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400",
-      };
-
-    const cardsHtml = users
-      .map((u) => {
-        const initials = (u.name || u.username)
-          .split(" ")
-          .map((n) => n[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase();
-        const { bg, badge } = getColor(u.role);
-        const statusOk = !u.status || u.status === "active";
-        return `
-        <div class="glass rounded-2xl p-6 border border-gray-200 dark:border-gray-800 hover:shadow-xl hover:-translate-y-1 transition-all bg-white dark:bg-gray-900 flex flex-col gap-4">
-          <div class="flex flex-col items-center text-center gap-3">
-            <div class="w-16 h-16 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold mb-5 shadow-lg relative">
-              ${initials}
-              <span class="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-900 ${statusOk ? "bg-emerald-400" : "bg-red-400"}"></span>
-            </div>
-            <div>
-              <div class="font-bold text-gray-900 dark:text-white text-base">${u.name}</div>
-              <div class="text-xs text-gray-400 dark:text-gray-500">@${u.username}</div>
-            </div>
-            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${badge}">${u.role.replace("_", " ")}</span>
-          </div>
-          <div class="mt-auto pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center">
-            <div class="text-xs text-gray-400">${u.email || "—"}</div>
-            <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}','${u.username}','${u.email || ""}','${u.phone || ""}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, "&quot;")}, ${u.shop_id}, '${u.status || "active"}')"
-              class="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all" title="Edit User">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            </button>
-          </div>
-        </div>`;
-      })
-      .join("");
-
-    $c("page-content").innerHTML = `
-      <div class="flex items-end justify-between gap-4 mb-8">
-        <div>
-          <h3 class="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">Your Team</h3>
-          <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">${users.length} staff member${users.length !== 1 ? "s" : ""} in your shop</p>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
-        ${cardsHtml || `<div class="col-span-full py-24 text-center text-gray-400 italic">No staff members found.</div>`}
-      </div>`;
-    return;
-  }
-
-  // ── Superadmin: full table view ──
-  $c("page-content").innerHTML = `
-    <div class="flex justify-between items-center mb-6">
-      <p class="text-slate-400 text-sm">${users.length} user(s)</p>
-      <button onclick="openCreateUser()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all">+ Create User</button>
-    </div>
-    <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
-      <table class="w-full text-sm">
-        <thead><tr class="border-b border-slate-200 dark:border-slate-800 text-left bg-slate-50 dark:bg-black/20">
-          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Name</th>
-          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop</th>
-          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Username</th>
-          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Role</th>
-          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
-          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 text-right">Actions</th>
-        </tr></thead>
-        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-          ${users
-      .map(
-        (u) => `
-            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group">
-              <td class="px-5 py-4 font-medium text-slate-700 dark:text-slate-200">${u.name}</td>
-              <td class="px-5 py-4 text-sm text-slate-600 dark:text-slate-300 font-medium">${u.shop_name || '<span class="italic text-slate-400">System</span>'}</td>
-              <td class="px-5 py-4 text-slate-500 dark:text-slate-400">@${u.username}</td>
-              <td class="px-5 py-4">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-center justify-center min-w-[60px] ${u.role === "superadmin" ? "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30" : u.role === "admin" ? "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}">
-                  ${u.role.toUpperCase().replace("_", " ")}
-                </span>
-              </td>
-              <td class="px-5 py-4">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-center justify-center min-w-[60px] ${u.status === "active" || !u.status ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}">
-                  ${(u.status || "active").toUpperCase()}
-                </span>
-              </td>
-              <td class="px-5 py-4 text-right space-x-1">
-                <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}','${u.username}','${u.email || ""}','${u.phone || ""}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, "&quot;")}, ${u.shop_id}, '${u.status || "active"}')" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all">Edit</button>
-                ${u.id !== currentUser.id
-            ? `
-                  <button onclick="deleteUser(${u.id})" class="px-2 py-1 text-xs rounded-lg bg-red-100 dark:bg-red-900/30 text-rose-700 dark:text-rose-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all">Del</button>
-                `
-            : ""
-          }
-              </td>
-            </tr>`,
-      )
-      .join("")}
-        </tbody>
-      </table>
-    </div>`;
-}
-
-function userFormHtml(u = {}) {
-  return `
-    <div class="space-y-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div class="sm:col-span-2 lg:col-span-1">
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Full Name *</label>
-          <input id="uf-name" value="${u.name || ""}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Full name" />
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Username *</label>
-          <input id="uf-username" value="${u.username || ""}" ${u.id ? "readonly" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all ${u.id ? "opacity-50" : ""} shadow-sm" placeholder="username" />
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Password ${u.id ? "(Optional)" : "*"}</label>
-          <input id="uf-password" type="password" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="••••••••" />
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Phone</label>
-          <input id="uf-phone" value="${u.phone || ""}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="03xx-xxxxxxx" />
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Email</label>
-          <input id="uf-email" value="${u.email || ""}" type="email" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="user@example.com" />
-        </div>
-        ${u.role === "superadmin"
-      ? ""
-      : `
-        <div>
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Role</label>
-          <select id="uf-role" onchange="toggleUserPanelPicker(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
-            <option value="pos_user" ${u.role === "pos_user" ? "selected" : ""}>POS User</option>
-            <option value="manager" ${u.role === "manager" ? "selected" : ""}>Manager</option>
-            <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin/Shop Owner</option>
-          </select>
-        </div>
-        `
-    }
-        <div class="${u.role === "superadmin" ? "sm:col-span-2 lg:col-span-1" : ""}">
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Status</label>
-          <select id="uf-status" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
-            <option value="active" ${u.status === "active" || !u.status ? "selected" : ""}>Active</option>
-            <option value="blocked" ${u.status === "blocked" ? "selected" : ""}>Blocked</option>
-          </select>
-        </div>
-        ${u.role === "superadmin"
-      ? `<input type="hidden" id="uf-role" value="superadmin" /><input type="hidden" id="uf-shop" value="" />`
-      : `
-        <div class="sm:col-span-2">
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Assign Shop</label>
-          <select id="uf-shop" ${currentUser.role !== "superadmin" ? "disabled" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
-            ${currentUser.role === "superadmin"
-        ? shops
-          .map(
-            (s) =>
-              `<option value="${s.id}" ${u.shop_id === s.id ? "selected" : ""}>${s.name}</option>`,
-          )
-          .join("")
-        : `<option value="${currentUser.shop_id}" selected>${currentUser.shop_name || "My Shop"}</option>`
-      }
-          </select>
-        </div>
-        `
-    }
-        ${u.role === "superadmin"
-      ? ""
-      : `
-        <div class="sm:col-span-2 lg:col-span-3" id="uf-panels-container" style="display: ${u.role === "admin" ? "none" : "block"}">
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-3 font-bold uppercase tracking-wider">Allowed Panels (Inherited from Shop)</label>
-          <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3" id="panel-picker">
-            ${AVAILABLE_PANELS.map(
-        (p) => `
-              <div class="panel-tile cursor-pointer p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${u.allowed_panels?.includes(p.id) ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20" : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700"}"
-                   onclick="this.dataset.selected = this.dataset.selected === 'true' ? 'false' : 'true'; this.classList.toggle('border-indigo-500'); this.classList.toggle('bg-indigo-50/50'); this.classList.toggle('dark:bg-indigo-900/20')"
-                   data-id="${p.id}" data-selected="${u.allowed_panels?.includes(p.id)}">
-                <div class="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm group-hover:scale-110 transition-transform">
-                  <svg class="w-4 h-4 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${p.icon}"></path></svg>
-                </div>
-                <span class="text-[9px] font-bold uppercase tracking-tight text-slate-600 dark:text-slate-400 text-center">${p.label}</span>
-              </div>
-            `,
-      ).join("")}
-          </div>
-        </div>
-        `
-    }
-      </div>
-    </div>
-  `;
-}
-function toggleUserPanelPicker(role) {
-  const container = document.getElementById("uf-panels-container");
-  if (container) {
-    container.style.display = role === "admin" ? "none" : "block";
-  }
-}
-
-// ─── Shop Management Helpers ──────────────────────────────────────────
-function allPanels() {
-  return [
-    { id: "dashboard", name: "Main Dashboard", icon: "📊", panels: ["dashboard"] },
-    { id: "pos", name: "POS Terminal", icon: "🛒", panels: ["pos"] },
-    { id: "sales-history", name: "Sales History", icon: "📜", panels: ["sales-history"] },
-    { id: "products", name: "Products & Menu", icon: "📦", panels: ["products", "brands", "product-categories"] },
-    { id: "customers", name: "Customer CRM", icon: "👥", panels: ["customers"] },
-    { id: "analytics", name: "Analytics & Reports", icon: "📈", panels: ["analytics"] },
-    { id: "raw-stock", name: "Raw Stock (Inv)", icon: "🥦", panels: ["raw-stock"] },
-    { id: "recipes", name: "Recipes & Formulas", icon: "🧪", panels: ["recipes"] },
-    { id: "expenses", name: "Expense Tracker", icon: "💸", panels: ["expenses", "expense-categories"] },
-    { id: "tables", name: "Table Management", icon: "🪑", panels: ["tables"] },
-    { id: "kds", name: "Kitchen Display", icon: "👨‍🍳", panels: ["kds"] },
-    { id: "delivery", name: "Delivery Ops", icon: "🚚", panels: ["delivery"] },
-    { id: "composite_products", name: "Combo Kits", icon: "🍱", panels: ["composite_products"] },
-    { id: "subscriptions", name: "Subscriptions", icon: "💳", panels: ["subscriptions"] },
-  ];
-}
-
-function togglePanel(el) {
-  const isSelected = el.dataset.selected === "true";
-  const next = !isSelected;
-  el.dataset.selected = next;
-
-  if (next) {
-    el.classList.add(
-      "bg-indigo-600",
-      "border-indigo-600",
-      "text-white",
-      "shadow-lg",
-      "shadow-indigo-600/20",
-    );
-    el.classList.remove(
-      "bg-white",
-      "dark:bg-slate-800",
-      "border-slate-200",
-      "dark:border-slate-700",
-      "text-slate-600",
-      "dark:text-slate-400",
-    );
-  } else {
-    el.classList.remove(
-      "bg-indigo-600",
-      "border-indigo-600",
-      "text-white",
-      "shadow-lg",
-      "shadow-indigo-600/20",
-    );
-    el.classList.add(
-      "bg-white",
-      "dark:bg-slate-800",
-      "border-slate-200",
-      "dark:border-slate-700",
-      "text-slate-600",
-      "dark:text-slate-400",
-    );
-  }
-}
-
-function openCreateUser(shopId = null) {
-  openModal(
-    "Create User",
-    userFormHtml({ shop_id: shopId }) +
-    `<button onclick="saveUser()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Create User</button>`,
-    "max-w-2xl",
-  );
-}
-
-function openEditUser(
-  id,
-  name,
-  username,
-  email,
-  phone,
-  role,
-  allowed_panels,
-  shop_id,
-  status,
-) {
-  openModal(
-    "Edit User",
-    userFormHtml({
-      id,
-      name,
-      username,
-      email,
-      phone,
-      role,
-      allowed_panels,
-      shop_id,
-      status,
-    }) +
-    `<button onclick="saveUser(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update User</button>`,
-    "max-w-2xl",
-  );
-}
-
-async function saveUser(id) {
-  const payload = {
-    name: $c("uf-name").value.trim(),
-    username: $c("uf-username").value.trim(),
-    password: $c("uf-password").value,
-    phone: $c("uf-phone").value.trim(),
-    email: $c("uf-email").value.trim(),
-    role: $c("uf-role").value,
-    status: $c("uf-status").value,
-    shop_id: $c("uf-shop").value,
-    allowed_panels:
-      $c("uf-role").value === "admin"
-        ? []
-        : Array.from(
-          document.querySelectorAll('.panel-tile[data-selected="true"]'),
-        ).map((el) => el.dataset.id),
-  };
-  if (!payload.name) return toast("Name required", "error");
-  if (!id && !payload.password)
-    return toast("Password required for new user", "error");
-  const r = id
-    ? await api(`/api/users/${id}`, "PUT", payload)
-    : await api("/api/users", "POST", payload);
-  if (r.error) return toast(r.error, "error");
-  closeModal();
-  toast("User saved!");
-  renderUsers();
-}
-
-async function deleteUser(id) {
-  if (!confirm("Delete this user? All their data will be removed.")) return;
-  const r = await api(`/api/users/${id}`, "DELETE");
-  if (r.error) return toast(r.error, "error");
-  toast("User deleted");
-  renderUsers();
-}
-
-async function openEditBrandPayments(brandId, month) {
-  const payments = await api(`/api/brands/expense-payments?month=${month}`);
-  const brandPayments = payments.filter((p) => p.brand_id === brandId);
-
-  if (brandPayments.length === 0) {
-    return toast("No payments found for this brand in " + month, "info");
-  }
-
-  openModal(
-    "Edit Payments",
-    `
-    <div class="space-y-4">
-      <p class="text-xs text-gray-500 lowercase italic">Editing payments for brand in ${month}.</p>
-      <div class="divide-y divide-gray-100 dark:divide-gray-800">
-        ${brandPayments
-      .map(
-        (p) => `
-          <div class="py-3 flex items-center justify-between group">
-            <div class="flex-1">
-              <div class="flex items-center gap-2 mb-1">
-                <span class="text-[10px] text-gray-400 font-mono">${new Date(p.created_at).toLocaleDateString()}</span>
-                <span class="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-500 font-bold uppercase tracking-tighter">By ${p.admin_name || 'System'}</span>
-              </div>
-              <input id="edit-bep-amt-${p.id}" type="number" value="${p.amount}" class="w-32 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm font-bold focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all" />
-            </div>
-            <button onclick="doUpdateBrandPayment(${p.id})" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95">Update</button>
-          </div>
-        `,
-      )
-      .join("")}
-      </div>
-    </div>
-  `,
-  );
-}
-
-async function doUpdateBrandPayment(paymentId) {
-  const input = document.getElementById("edit-bep-amt-" + paymentId);
-  if (!input) return;
-  const amount = parseFloat(input.value) || 0;
-  if (amount <= 0) return toast("Amount must be > 0", "error");
-
-  const r = await api(`/api/brands/expense-payments/${paymentId}`, "PUT", {
-    amount,
-  });
-  if (r.error) return toast(r.error, "error");
-
-  toast("Payment updated!");
-  closeModal();
-  renderExpenses();
-}
-
-async function openExpensesHistory() {
-  const allExpenses = await api("/api/expenses");
-
-  // Group by month
-  const monthsMap = {};
-  allExpenses.forEach((e) => {
-    const m = e.date.slice(0, 7);
-    if (!monthsMap[m]) monthsMap[m] = 0;
-    monthsMap[m] += Number(e.amount);
-  });
-
-  const sortedMonths = Object.keys(monthsMap).sort((a, b) =>
-    b.localeCompare(a),
-  );
-
-  openModal(
-    "Expenses History",
-    `
-    <div class="space-y-4">
-      <p class="text-sm text-slate-500 mb-2">View or download PDF reports for previous months.</p>
-      <div class="grid grid-cols-1 gap-3 max-h-[60vh] overflow-y-auto pr-1">
-        ${sortedMonths
-      .map(
-        (m) => `
-          <div class="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between hover:shadow-md transition-all group">
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-                <span class="font-bold text-slate-800 dark:text-slate-100 text-base">${new Date(m + "-01").toLocaleDateString("default", { month: "long", year: "numeric" })}</span>
-              </div>
-              <p class="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-semibold ml-4">Total Monthly Expenses: Rs. ${monthsMap[m].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            </div>
-            <div class="flex items-center gap-2">
-              <button onclick="window.open('/api/brands/pdf/monthly-report?month=${m}', '_blank')" class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30 transition-all border border-transparent hover:border-emerald-200 dark:hover:border-emerald-900" title="View PDF">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-              </button>
-              <button onclick="window.location.href='/api/brands/pdf/monthly-report?month=${m}&download=true'" class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30 transition-all border border-transparent hover:border-amber-200 dark:hover:border-amber-900" title="Download PDF">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-              </button>
-              <div class="w-px h-6 bg-slate-100 dark:bg-slate-800 mx-1"></div>
-              <button onclick="_expenseMonth='${m}'; _expensePage=1; closeModal(); renderExpenses();" class="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all active:scale-95 shadow-sm">
-                Open Month
-              </button>
-            </div>
-          </div>
-        `,
-      )
-      .join("")}
-      </div>
-    </div>
-  `,
-    "max-w-3xl",
-  );
-}
-
-async function openViewExpenses(month) {
-  const allExpenses = await api("/api/expenses");
-  const filtered = allExpenses.filter((e) => e.date.startsWith(month));
-
-  openModal(
-    "Monthly Report: " + month,
-    `
-    <div class="space-y-6">
-      <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <h4 class="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3 uppercase tracking-widest text-[#1e1e1e] dark:text-[#f3f4f6]">1. Operating Expenses</h4>
-        ${filtered.length === 0
-      ? '<p class="text-xs text-gray-500 italic">No expenses found for this month.</p>'
-      : `
-        <div class="max-h-[60vh] overflow-y-auto">
-          <table class="w-full text-xs text-left">
-            <thead>
-              <tr class="text-gray-400 border-b border-gray-200 dark:border-gray-700 bg-gray-100/50 dark:bg-gray-800/80 sticky top-0 z-10">
-                <th class="py-2 px-3 font-semibold">Title</th>
-                <th class="py-2 px-3 font-semibold">Date</th>
-                <th class="py-2 px-3 text-right font-semibold">Amount</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-              ${filtered
-        .map(
-          (e) => `
-                <tr class="hover:bg-white dark:hover:bg-gray-800 transition-colors">
-                  <td class="py-2 px-3 text-gray-700 dark:text-gray-300">${e.title}</td>
-                  <td class="py-2 px-3 text-gray-500">${e.date}</td>
-                  <td class="py-2 px-3 text-right font-bold text-gray-800 dark:text-gray-200">Rs. ${e.amount.toLocaleString()}</td>
-                </tr>
-              `,
-        )
-        .join("")}
-            </tbody>
-            <tfoot>
-              <tr class="bg-indigo-50 dark:bg-indigo-900/20 font-bold text-indigo-700 dark:text-indigo-400">
-                <td colspan="2" class="py-2 px-3 text-right">Total Expenses:</td>
-                <td class="py-2 px-3 text-right">Rs. ${filtered.reduce((sum, e) => sum + e.amount, 0).toLocaleString()}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>`
-    }
-      </div>
-    </div>
-  `,
-    "max-w-4xl",
-  );
-}
-
-async function openBulkEditExpenses(month) {
-  const allExpenses = await api("/api/expenses");
-  const filtered = allExpenses.filter((e) => e.date.startsWith(month));
-
-  if (filtered.length === 0)
-    return toast("No expenses found for " + month, "info");
-
-  openModal(
-    "Bulk Edit: " + month,
-    `
-    <div class="space-y-4">
-      <p class="text-xs text-gray-500 italic lowercase">Editing all operating expenses for ${month}.</p>
-      <div class="max-h-[60vh] overflow-y-auto">
-        <table class="w-full text-sm border-collapse">
-          <thead>
-            <tr class="text-left text-[10px] uppercase text-gray-400 border-b border-gray-100 dark:border-gray-800 sticky top-0 bg-white dark:bg-gray-900 z-10">
-              <th class="px-2 py-2">Title</th>
-              <th class="px-2 py-2">Cat</th>
-              <th class="px-2 py-2 text-right">Amount</th>
-              <th class="px-2 py-2">Date</th>
-            </tr>
-          </thead>
-          <tbody id="bulk-exp-tbody">
-            ${filtered
-      .map(
-        (e) => `
-              <tr class="border-b border-gray-50 dark:border-gray-900/50" data-id="${e.id}">
-                <td class="py-2 px-1"><input class="title w-full bg-transparent border-none focus:ring-2 focus:ring-indigo-500/20 rounded p-1 text-gray-800 dark:text-gray-200" value="${e.title}" /></td>
-                <td class="py-2 px-1">
-                  <select class="category bg-transparent border-none focus:ring-2 focus:ring-indigo-500/20 rounded p-1 text-xs">
-                    ${_expenseCategories.map((cat) => `<option value="${cat.name}" ${e.category === cat.name ? "selected" : ""}>${cat.emoji} ${cat.name}</option>`).join("")}
-                  </select>
-                </td>
-                <td class="py-2 px-1"><input class="amount w-24 bg-transparent border-none focus:ring-2 focus:ring-indigo-500/20 rounded p-1 font-bold text-right" type="number" value="${e.amount}" /></td>
-                <td class="py-2 px-1"><input class="date w-28 bg-transparent border-none focus:ring-2 focus:ring-indigo-500/20 rounded p-1 text-[10px]" type="date" value="${e.date}" /></td>
-                <input type="hidden" class="note" value="${e.note || ""}" />
-              </tr>
-            `,
-      )
-      .join("")}
-          </tbody>
-        </table>
-      </div>
-      <button onclick="doBulkUpdateExpenses()" class="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg transition-all active:scale-[0.98]">Save All Changes</button>
-    </div>
-  `,
-    "max-w-4xl",
-  );
-}
-
-async function doBulkUpdateExpenses() {
-  const rows = document.querySelectorAll("#bulk-exp-tbody tr");
-  const expenses = [];
-  rows.forEach((row) => {
-    expenses.push({
-      id: parseInt(row.dataset.id),
-      title: row.querySelector(".title").value.trim(),
-      category: row.querySelector(".category").value,
-      amount: parseFloat(row.querySelector(".amount").value),
-      date: row.querySelector(".date").value,
-      note: row.querySelector(".note").value,
-    });
-  });
-
-  const r = await api("/api/expenses/bulk", "PUT", { expenses });
-  if (r.error) return toast(r.error, "error");
-
-  toast("Success! Month updated.");
-  closeModal();
-  renderExpenses();
-}
-
-// ─── Shop Management ─────────────────────────────────────────────
-async function renderShops() {
-  const res = await fetch("/api/shops");
-  shops = await res.json();
-
-  $c("page-content").innerHTML = `
-    <div class="space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h3 class="text-xl font-bold text-slate-800 dark:text-white">Shop Management</h3>
-          <p class="text-sm text-slate-500 dark:text-slate-400">Manage system-wide stores and shops</p>
-        </div>
-        <button onclick="openCreateShop()" class="flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all shadow-lg active:scale-95">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-          Add New Shop
-        </button>
-      </div>
-
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr class="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">ID</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop Name</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Allotted Panels</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
-              ${shops
-      .map(
-        (s) => `
-              <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
-                <td class="px-5 py-4 text-sm text-slate-600 dark:text-slate-300">#${s.id}</td>
-                <td class="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-white">${s.name}</td>
-                <td class="px-5 py-4">
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${s.status === "active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"}">
-                    ${s.status}
-                  </span>
-                </td>
-                <td class="px-5 py-4 transition-all">
-                  <div class="flex flex-wrap gap-1">
-                    ${s.allowed_panels.map((p) => `<span class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase tabular-nums">${p}</span>`).join("")}
-                    ${s.allowed_panels.length === 0 ? '<span class="text-[9px] italic text-slate-400">No panels allotted</span>' : ""}
-                  </div>
-                </td>
-                <td class="px-5 py-4 text-right space-x-2">
-                  ${s.allowed_panels.includes("brands") ? `<button onclick="renderBrands(${s.id})" class="px-3 py-1 text-xs rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 transition-all font-medium">Manage Brands</button>` : ""}
-                  <button onclick="openEditShop(${s.id})" class="px-3 py-1 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 transition-all font-medium">Edit</button>
-                  <button onclick="deleteShop(${s.id})" class="px-3 py-1 text-xs rounded-lg bg-red-100 dark:bg-red-900/30 text-rose-700 dark:text-rose-400 hover:bg-red-200 transition-all font-medium">Delete</button>
-                </td>
-              </tr>`,
-      )
-      .join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-}
-
-// ─── Subscriptions ──────────────────────────────────────────────
-async function renderSubscriptions() {
-  const subs = await api("/api/subscriptions");
-  $c("page-content").innerHTML = `
-    <div class="space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h3 class="text-xl font-bold text-slate-800 dark:text-white">Subscription Management</h3>
-          <p class="text-sm text-slate-500 dark:text-slate-400">Track monthly payments and shop access</p>
-        </div>
-        <button onclick="openRecordPayment()" class="flex items-center justify-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium transition-all shadow-lg active:scale-95">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Record Payment
-        </button>
-      </div>
-
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr class="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Type</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Month</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Validity</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Amount</th>
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 text-right">Paid At</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
-              ${subs
-      .map((s) => {
-        const typeLabel = {
-          "1_month": "1 Month",
-          "3_months": "3 Months",
-          "6_months": "6 Months",
-          "1_year": "1 Year",
-          "2_years": "2 Years",
-          lifetime: "Lifetime",
-        };
-        return `
-              <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
-                <td class="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-white">${s.shop_name}</td>
-                <td class="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">${typeLabel[s.type] || s.type}</td>
-                <td class="px-5 py-4 text-sm text-slate-500 dark:text-slate-400 tabular-nums">${s.month}</td>
-                <td class="px-5 py-4 text-xs text-slate-500 dark:text-slate-400 tabular-nums">${s.start_date} to ${s.end_date}</td>
-                <td class="px-5 py-4 text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">Rs. ${s.amount.toLocaleString()}</td>
-                <td class="px-5 py-4 text-right text-xs text-slate-400 tabular-nums">${new Date(s.paid_at).toLocaleString()}</td>
-              </tr>`;
-      })
-      .join("")}
-              ${subs.length === 0 ? '<tr><td colspan="6" class="px-5 py-8 text-center text-slate-400 italic font-medium">No payment records found</td></tr>' : ""}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-}
-
-async function openRecordPayment() {
-  const shops = await api("/api/shops");
-  openModal(
-    "Record Subscription Payment",
-    `
-    <div class="space-y-4">
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Select Shop</label>
-        <select id="pay-shop-id" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-          ${shops.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Subscription Type</label>
-        <select id="pay-type" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-          <option value="1_month">1 Month</option>
-          <option value="3_months">3 Months</option>
-          <option value="6_months">6 Months</option>
-          <option value="1_year">1 Year</option>
-          <option value="2_years">2 Years</option>
-          <option value="lifetime">Lifetime</option>
-        </select>
-      </div>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Starting Month</label>
-          <input type="month" id="pay-month" value="${new Date().toISOString().slice(0, 7)}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Amount (Rs.)</label>
-          <input type="number" id="pay-amount" value="5000" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Exact Start Date</label>
-        <input type="date" id="pay-start-date" value="${new Date().toISOString().split("T")[0]}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-      </div>
-      <button onclick="saveSubscriptionPayment()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black uppercase tracking-widest shadow-xl shadow-emerald-600/20 active:scale-[0.98] transition-all">Record Cash Payment & Activate Shop</button>
-    </div>
-  `,
-  );
-}
-
-async function saveSubscriptionPayment() {
-  const payload = {
-    shop_id: $c("pay-shop-id").value,
-    amount: parseFloat($c("pay-amount").value),
-    month: $c("pay-month").value,
-    type: $c("pay-type").value,
-    start_date: $c("pay-start-date").value,
-  };
-
-  if (!payload.amount || !payload.month || !payload.start_date)
-    return toast("Fill all fields", "error");
-
-  const r = await api("/api/subscriptions", "POST", payload);
-  if (r.error) return toast(r.error, "error");
-
-  toast("Payment recorded");
-  closeModal();
-  renderSubscriptions();
-}
-
-// ─── Hierarchy View ──────────────────────────────────────────────
-// Global State for Hierarchy UI
-let hierarchyData = { systemUsers: [], shops: [], users: [], brands: [] };
-let hierarchySearchQuery = "";
-
-async function renderHierarchy() {
-  const result = await api("/api/admin/hierarchy-data");
-  if (result.error) return toast(result.error, "error");
-
-  hierarchyData = result;
-  renderHierarchyUI();
-}
-
-function renderHierarchyUI() {
-  const q = hierarchySearchQuery.toLowerCase();
-
-  // Filter logic
-  const filteredShops = hierarchyData.shops.filter(
-    (s) =>
-      s.store_name.toLowerCase().includes(q) ||
-      hierarchyData.users.some(
-        (u) =>
-          u.shop_id === s.id &&
-          (u.name.toLowerCase().includes(q) ||
-            u.role.toLowerCase().includes(q)),
-      ) ||
-      hierarchyData.brands.some(
-        (b) => b.shop_id === s.id && b.name.toLowerCase().includes(q),
-      ),
-  );
-
-  let html = `
-    <div class="space-y-8 animate-[fadeIn_0.3s_ease-out]">
-      <!-- Header Area -->
-      <div class="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
-        <div>
-          <h3 class="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Master Platform Hierarchy</h3>
-          <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Multi-tenant view of all shops, assigned admins, staff, and parters.</p>
-        </div>
-        <div class="flex flex-col sm:flex-row gap-3">
-          <div class="relative">
-            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-            <input type="text" id="hierarchySearch" value="${hierarchySearchQuery}" placeholder="Search tenants, users, roles..." class="pl-9 pr-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 w-full sm:w-64 transition-all shadow-sm">
-          </div>
-          <button onclick="openCreateShop()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-md flex items-center gap-2 justify-center">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-            New Tenant
-          </button>
-        </div>
-      </div>
-  `;
-
-  // System Core Node (Master Owner)
-  html += renderHierarchyBlock(
-    "Platform Engine (Master Core)",
-    hierarchyData.systemUsers,
-    [],
-    "indigo",
-    null,
-    true,
-  );
-
-  if (filteredShops.length === 0) {
-    html += `<div class="p-10 text-center glass rounded-2xl"><p class="text-slate-500 dark:text-slate-400 italic">No tenants matched your search query "${hierarchySearchQuery}".</p></div>`;
-  } else {
-    // Render Shops as Parent Nodes
-    filteredShops.forEach((s) => {
-      const shopUsers = hierarchyData.users.filter((u) => u.shop_id === s.id);
-      const shopBrands = hierarchyData.brands.filter((b) => b.shop_id === s.id);
-      html += renderHierarchyBlock(
-        s.store_name,
-        shopUsers,
-        shopBrands,
-        "blue",
-        s,
-      );
-    });
-  }
-
-  html += "</div>";
-  $c("page-content").innerHTML = html;
-
-  // Re-bind search event listener after DOM replace
-  const searchInput = document.getElementById("hierarchySearch");
-  if (searchInput) {
-    // Focus preserving trick
-    const val = searchInput.value;
-    searchInput.value = "";
-    searchInput.value = val;
-    searchInput.focus();
-
-    searchInput.addEventListener("input", (e) => {
-      hierarchySearchQuery = e.target.value;
-      // Debounce slightly to prevent jarring UI jumps
-      clearTimeout(window.hierarchySearchTimeout);
-      window.hierarchySearchTimeout = setTimeout(renderHierarchyUI, 200);
-    });
-  }
-}
-
-function renderHierarchyBlock(
-  name,
-  users,
-  brands = [],
-  color,
-  shop = null,
-  isGlobal = false,
-) {
-  const colorMap = {
-    indigo: {
-      text: "text-indigo-600 dark:text-indigo-400",
-      border: "border-indigo-500",
-      bg: "bg-indigo-50 dark:bg-indigo-900/20",
-      iconBg: "bg-indigo-100 dark:bg-indigo-900/40",
-    },
-    blue: {
-      text: "text-blue-600 dark:text-blue-400",
-      border: "border-blue-500",
-      bg: "bg-blue-50 dark:bg-blue-900/20",
-      iconBg: "bg-blue-100 dark:bg-blue-900/40",
-    },
-  };
-  const c = colorMap[color] || colorMap.blue;
-
-  // KPIs
-  const userCount = users.length;
-  const brandCount = brands.length;
-  const productCount = shop ? shop.product_count : 0;
-  const plan =
-    shop && shop.subscription_plan
-      ? shop.subscription_plan.replace("_", " ")
-      : isGlobal
-        ? "SYSTEM"
-        : "NONE";
-
-  // Collapse state identifier
-  const collapseId = `collapse - node - ${shop ? shop.id : "global"} `;
-
-  // Role rendering helper
-  const renderUserCard = (u) => {
-    let roleColor =
-      "text-slate-500 bg-slate-100 dark:text-slate-400 dark:bg-slate-800";
-    let roleIcon = "👤";
-    if (u.role === "superadmin") {
-      roleColor =
-        "text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800";
-      roleIcon = "🌟";
-    }
-    if (u.role === "admin") {
-      roleColor =
-        "text-emerald-600 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800";
-      roleIcon = "🧑‍💼";
-    }
-    if (u.role === "user") {
-      roleColor =
-        "text-slate-600 bg-slate-100 dark:text-slate-400 dark:bg-slate-800 border border-slate-200 dark:border-slate-700";
-      roleIcon = "👷";
-    }
-
-    return `
-      <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800/60 hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-all group bg-white dark:bg-slate-900/50 relative overflow-hidden">
-        <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${u.role === "admin" ? "from-emerald-400 to-emerald-300" : u.role === "superadmin" ? "from-blue-500 to-indigo-500" : "from-slate-200 to-slate-100 dark:from-slate-700 dark:to-slate-800"} opacity-0 group-hover:opacity-100 transition-opacity"></div>
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold shadow-sm ${roleColor}">
-            ${roleIcon}
-          </div>
-          <div class="min-w-0">
-            <div class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">${u.name}</div>
-            <div class="flex items-center gap-2 mt-0.5">
-              <span class="text-[9px] uppercase font-black tracking-widest ${roleColor} px-1.5 py-0.5 rounded-md leading-none">${u.role.replace("_", " ")}</span>
-              ${u.email ? `<span class="text-[10px] text-slate-400 font-medium truncate">${u.username}</span>` : ""}
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 ml-2 opacity-10 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-          <!-- Edit button -->
-          <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}', '${u.username}', '${u.email || ""}', '${u.phone || ""}', '${u.role}', ${JSON.stringify(u.allowed_panels || []).replace(/"/g, "&quot;")}, ${u.shop_id || "null"}, '${u.status || "active"}')"
-            class="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 flex items-center justify-center transition-transform hover:scale-110 shadow-sm" title="Edit Profile">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-          </button>
-          ${u.role === "superadmin"
-        ? ""
-        : `
-          <!-- Suspend button -->
-          <button onclick="toggleUserStatus(${u.id}, '${u.status || "active"}')" class="w-7 h-7 rounded-lg flex items-center justify-center border ${u.status === "active" || !u.status ? "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600" : "bg-rose-50 border-rose-200 text-rose-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600"} transition-all hover:scale-110 shadow-sm" title="${u.status === "active" || !u.status ? "Suspend User" : "Reactivate User"}">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${u.status === "active" || !u.status ? "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" : "M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"}"/></svg>
-          </button>
-          `
-      }
-        </div>
-      </div>
-      `;
-  };
-
-  const renderPartnerCard = (b) => {
-    return `
-      <div class="flex items-center justify-between p-3 rounded-xl border border-purple-100 dark:border-purple-900/30 hover:border-purple-300 dark:hover:border-purple-500/50 transition-all group bg-purple-50/30 dark:bg-purple-900/10">
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold shadow-sm bg-purple-100 border border-purple-200 text-purple-600 dark:bg-purple-900/40 dark:border-purple-800 dark:text-purple-400">
-            🤝
-          </div>
-          <div class="min-w-0">
-            <div class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">${b.name}</div>
-            <div class="text-[9px] uppercase font-black tracking-widest text-purple-600 dark:text-purple-400 mt-0.5 border border-purple-200 dark:border-purple-800/50 px-1 inline-block rounded">Partner Brand</div>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 ml-2 opacity-10 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-          <!-- View button -->
-          <button onclick="managedShopId=${b.shop_id}; renderBrands(${b.shop_id})" class="w-7 h-7 rounded-lg bg-purple-50 border border-purple-200 text-purple-600 dark:bg-purple-900/30 dark:border-purple-800 dark:text-purple-400 flex items-center justify-center transition-transform hover:scale-110 shadow-sm" title="View Partner Details">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-          </button>
-        </div>
-      </div>
-      `;
-  };
-
-  return `
-      <details class="group glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all mb-4" ${isGlobal || hierarchySearchQuery !== "" ? "open" : ""}>
-      <summary class="px-6 py-5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/80 cursor-pointer list-none flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
-
-        <!-- Parent Node Identity -->
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 rounded-2xl shadow-inner flex items-center justify-center font-bold text-lg border ${c.border} ${c.iconBg} ${c.text}">
-            ${isGlobal ? "⚙️" : (name || "S").substring(0, 2).toUpperCase()}
-          </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <h4 class="font-black text-lg text-slate-900 dark:text-white tracking-tight">${name}</h4>
-              ${isGlobal ? "" : `<span class="w-2 h-2 rounded-full ${shop.status === "active" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]"}"></span>`}
-            </div>
-
-            <!-- Quick KPI Pills -->
-            <div class="flex flex-wrap items-center gap-2 mt-2">
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                ${userCount} Personnel
-              </span>
-              ${!isGlobal
-      ? `
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                ${brandCount} Partners
-              </span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                ${productCount} Products
-              </span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${shop.shop_type === 'restaurant' ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20'} px-2 py-0.5 rounded-md">
-                ${shop.shop_type === 'restaurant' ? '🍽️ Restaurant' : '🛍️ Retail'}
-              </span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${c.text} ${c.bg} px-2 py-0.5 rounded-md">
-                Tier: ${plan}
-              </span>
-              `
-      : ""
-    }
-            </div>
-          </div>
-        </div>
-
-        <!-- Inline Actions -->
-        <div class="flex items-center gap-2">
-          ${isGlobal
-      ? ""
-      : shop && shop.allowed_panels
-        ? `
-            ${shop.allowed_panels.includes("brands")
-          ? `
-              <button onclick="event.preventDefault(); event.stopPropagation(); managedShopId=${shop.id}; openAddBrand()" class="p-2 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded-xl transition-all border border-transparent hover:border-purple-200 dark:hover:border-purple-800 flex items-center justify-center group/btn" title="Add Partner">
-                <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-              </button>
-            `
-          : ""
-        }
-            <button onclick="event.preventDefault(); event.stopPropagation(); openCreateUser(${shop.id})" class="p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-xl transition-all border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800 flex items-center justify-center group/btn" title="Add User">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
-            </button>
-            <div class="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-            <button onclick="event.preventDefault(); event.stopPropagation(); openEditShop(${shop.id})" class="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 rounded-xl transition-all flex items-center justify-center group/btn" title="Edit Store Settings">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            </button>
-            <button onclick="event.preventDefault(); event.stopPropagation(); toggleShopStatus(${shop.id}, '${shop.status}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn ${shop.status === "active" ? "text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 hover:border-rose-200 dark:hover:border-rose-800" : "text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:border-emerald-200 dark:hover:border-emerald-800"}" title="${shop.status === "active" ? "Suspend Store" : "Reactivate Store"}">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${shop.status === "active" ? "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" : "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"}"></path></svg>
-            </button>
-            <div class="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-            <button onclick="event.preventDefault(); event.stopPropagation(); deleteShop(${shop.id}, '${(name || "").replace(/'/g, "\\'")}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/50 hover:border-rose-300 dark:hover:border-rose-800" title="Delete Shop Permanently">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            </button>
-          `
-        : ""
-    }
-          <div class="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 group-open:rotate-180 transition-transform bg-white dark:bg-slate-800 ml-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-          </div>
-        </div>
-      </summary>
-
-      <!--Expanded Body(Children Nodes)-- >
-      <div class="p-6 bg-slate-50/50 dark:bg-slate-900/20 border-t border-slate-100 dark:border-slate-800">
-
-        ${users.length === 0 && brands.length === 0
-      ? `
-          <div class="py-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-            <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No personnel or partners attached to this node.</p>
-          </div>
-        `
-      : ""
-    }
-
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-
-          <!-- Users Section -->
-          ${users.length
-      ? `
-          <div class="${users.length > 3 ? "md:col-span-2 xl:col-span-2" : ""}">
-            <h5 class="text-xs font-bold text-slate-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-              Assigned Personnel
-            </h5>
-            <div class="grid grid-cols-1 ${users.length > 1 ? "sm:grid-cols-2" : ""} gap-3">
-              ${users.map((u) => renderUserCard(u)).join("")}
-            </div>
-          </div>
-          `
-      : ""
-    }
-
-          <!-- Brands (Partners) Section -->
-          ${brands.length
-      ? `
-          <div>
-            <h5 class="text-xs font-bold text-purple-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-              Partner Networks
-            </h5>
-            <div class="grid grid-cols-1 gap-3">
-              ${brands.map((b) => renderPartnerCard(b)).join("")}
-            </div>
-          </div>
-          `
-      : ""
-    }
-
-        </div>
-      </div>
-    </details>
-      `;
-}
-
-async function deleteShop(id, name) {
-  if (!confirm(`CAUTION: You are about to PERMANENTLY DELETE "${name}".\n\nThis will remove all associated data, users, products, and sales permanently. This action cannot be undone.\n\nAre you sure you want to proceed?`)) return;
-  
-  const r = await api(`/api/shops/${id}`, "DELETE");
-  if (r.error) return toast(r.error, "error");
-  toast("Shop Deleted Successfully");
-  renderHierarchy();
-}
-
-async function toggleShopStatus(id, current) {
-  const next = current === "active" ? "blocked" : "active";
-  const r = await api(`/api/admin/store/${id}/status`, "PATCH", { status: next });
-  if (r.error) return toast(r.error, "error");
-  toast(`Shop ${next === "active" ? "Activated" : "Blocked"} `);
-  renderHierarchy();
-}
-
-async function toggleUserStatus(id, current) {
-  const next = current === "active" ? "blocked" : "active";
-  const user = (await api("/api/users")).find((u) => u.id === id);
-  if (!user) return toast("User not found", "error");
-
-  const payload = { ...user, status: next };
-  delete payload.id;
-
-  const r = await api(`/api/users/${id}`, "PUT", payload);
-  if (r.error) return toast(r.error, "error");
-  toast(`User ${next === "active" ? "Activated" : "Blocked"} `);
-  renderHierarchy();
-}
-
-let _wizardStep = 1;
-let _wizardData = {};
-
-function openCreateShop() { openShopWizard(); }
-
-function openShopWizard() {
-  _wizardStep = 1;
-  _wizardData = {
-    type: null,
-    name: "",
-    adminUsername: "",
-    adminPassword: "",
-    services: { dine_in: true, takeaway: true, delivery: true },
-    panels: [],
-    employees: []
-  };
-  renderWizard();
-}
-
-function setWizardType(t) {
-  _wizardData.type = t;
-  wizardNext();
-}
-
-function wizardNext() {
-  if (_wizardStep === 2) {
-    if (!_wizardData.name) return toast("Please enter a shop name", "warning");
-    // Capture services if restaurant
-    if (_wizardData.type === "restaurant") {
-      const checks = document.querySelectorAll(".service-check");
-      checks.forEach(c => {
-        _wizardData.services[c.dataset.service] = c.checked;
-      });
-    }
-  }
-  if (_wizardStep === 3) {
-    const selectedTiles = Array.from(document.querySelectorAll('.wiz-panel-tile[data-selected="true"]'));
-    if (!selectedTiles.length) return toast("Select at least one module", "warning");
-    const panels = [];
-    selectedTiles.forEach(el => {
-      const p = JSON.parse(el.dataset.panels || "[]");
-      panels.push(...p);
-    });
-    _wizardData.panels = [...new Set(panels)];
-  }
-  if (_wizardStep === 4) {
-    if (!_wizardData.adminUsername || !_wizardData.adminPassword) return toast("Admin credentials required", "warning");
-  }
-
-  _wizardStep++;
-  renderWizard();
-}
-
-function wizardPrev() {
-  _wizardStep--;
-  renderWizard();
-}
-
-async function submitWizard(btn) {
-  const payload = {
-    name: _wizardData.name,
-    shop_type: _wizardData.type,
-    allowed_panels: _wizardData.panels,
-    adminUsername: _wizardData.adminUsername,
-    adminPassword: _wizardData.adminPassword,
-    employees: _wizardData.employees
-  };
-
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Launching...";
-  }
-
-  try {
-    const r = await api("/api/shops", "POST", payload);
-    if (r.error) {
-      toast(r.error, "error");
-      btn.disabled = false;
-      btn.textContent = "Launch Shop";
-      return;
-    }
-    toast("Shop created successfully!");
-    closeModal();
-    renderHierarchy();
-  } catch (e) {
-    toast("Failed to launch shop", "error");
-    btn.disabled = false;
-  }
-}
-
-function renderWizard() {
-  const titles = [
-    "Choose Your Business Type",
-    "Configure Your Shop",
-    "Select Access Modules",
-    "Admin Credentials",
-    "Staff Management",
-    "Summary & Launch"
-  ];
-
-  let content = "";
-
-  if (_wizardStep === 1) {
-    content = `
-      <div class="grid grid-cols-2 gap-6 py-6">
-        <div onclick="setWizardType('retail')" class="cursor-pointer group p-8 rounded-3xl border-2 border-slate-100 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-all flex flex-col items-center gap-6 text-center">
-          <div class="w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-5xl group-hover:scale-110 transition-all shadow-sm">🛍️</div>
-          <div>
-            <h4 class="font-black text-slate-900 dark:text-white uppercase tracking-tight text-lg">Retail Shop</h4>
-            <p class="text-xs text-slate-500 mt-2 font-medium">Electronics, Pharmacy, Garments, or General Store.</p>
-          </div>
-        </div>
-        <div onclick="setWizardType('restaurant')" class="cursor-pointer group p-8 rounded-3xl border-2 border-slate-100 dark:border-slate-800 hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-all flex flex-col items-center gap-6 text-center">
-           <div class="w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-5xl group-hover:scale-110 transition-all shadow-sm">🍽️</div>
-           <div>
-            <h4 class="font-black text-slate-900 dark:text-white uppercase tracking-tight text-lg">Restaurant</h4>
-            <p class="text-xs text-slate-500 mt-2 font-medium">Boutique Dining, Cafes, or Cloud Kitchens.</p>
-          </div>
-        </div>
-      </div>
-      <p class="text-center text-slate-400 text-[10px] uppercase font-black tracking-widest mt-4">Step 1: Core Business Identification</p>
-    `;
-  } else if (_wizardStep === 2) {
-    if (_wizardData.type === "restaurant") {
-      content = `
-        <div class="space-y-6 py-4">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-2">Establishment Name</label>
-            <input type="text" oninput="_wizardData.name=this.value" value="${_wizardData.name}" placeholder="e.g. Blue Lagoon Diner" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none font-bold text-lg transition-all">
-          </div>
-          <div class="space-y-3">
-             <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-2">Service Modules</label>
-             <div class="grid grid-cols-1 gap-3">
-                <label class="flex items-center justify-between p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl cursor-pointer hover:border-indigo-400 transition-all group">
-                   <div class="flex items-center gap-4">
-                      <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xl group-hover:scale-110 transition-all">🪑</div>
-                      <div>
-                        <div class="font-bold text-sm text-slate-800 dark:text-slate-200">Dine-in</div>
-                        <div class="text-[10px] text-slate-400 font-medium">Tables, Waiters, and Seating Management</div>
-                      </div>
-                   </div>
-                   <input type="checkbox" checked class="service-check w-6 h-6 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500" data-service="dine_in">
-                </label>
-                <label class="flex items-center justify-between p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl cursor-pointer hover:border-indigo-400 transition-all group">
-                   <div class="flex items-center gap-4">
-                      <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xl group-hover:scale-110 transition-all">🛍️</div>
-                      <div>
-                        <div class="font-bold text-sm text-slate-800 dark:text-slate-200">Takeaway</div>
-                        <div class="text-[10px] text-slate-400 font-medium">Point of sale for walk-in collections</div>
-                      </div>
-                   </div>
-                   <input type="checkbox" checked class="service-check w-6 h-6 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500" data-service="takeaway">
-                </label>
-                <label class="flex items-center justify-between p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl cursor-pointer hover:border-indigo-400 transition-all group">
-                   <div class="flex items-center gap-4">
-                      <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xl group-hover:scale-110 transition-all">🚚</div>
-                      <div>
-                        <div class="font-bold text-sm text-slate-800 dark:text-slate-200">Delivery</div>
-                        <div class="text-[10px] text-slate-400 font-medium">Customer addresses and Rider assignment</div>
-                      </div>
-                   </div>
-                   <input type="checkbox" checked class="service-check w-6 h-6 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500" data-service="delivery">
-                </label>
-             </div>
-          </div>
-        </div>
-      `;
-    } else {
-      content = `
-        <div class="space-y-6 py-4">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-2">Retail Shop Name</label>
-            <input type="text" oninput="_wizardData.name=this.value" value="${_wizardData.name}" placeholder="e.g. Mega Mart" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none font-bold text-lg transition-all">
-          </div>
-          <div class="p-5 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl flex gap-4 items-start">
-             <div class="text-2xl mt-1">🧩</div>
-             <div>
-                <h5 class="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-widest mb-1">Standard retail pack</h5>
-                <p class="text-xs text-indigo-600/70 dark:text-indigo-400/70 leading-relaxed font-medium">
-                   We'll pre-load your store with Inventory management, Multi-batch tracking, Customer CRM, and Expenses tracking as part of your retail kit.
-                </p>
-             </div>
-          </div>
-        </div>
-      `;
-    }
-  } else if (_wizardStep === 3) {
-    content = `
-      <div class="space-y-6 py-4">
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-3">Enabled Control Panels</label>
-          <div class="grid grid-cols-2 gap-3">
-            ${allPanels().map(p => {
-      const isSelected = p.panels.every(pid => _wizardData.panels.includes(pid));
-      return `
-                <div data-panels='${JSON.stringify(p.panels)}' data-selected="${isSelected}" onclick="toggleWizPanel(this)" class="wiz-panel-tile cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${isSelected ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-300 shadow-md' : 'border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:border-indigo-300'}">
-                   <span class="text-3xl">${p.icon}</span>
-                   <span class="text-[10px] font-black uppercase tracking-widest text-center">${p.name}</span>
-                </div>
-              `;
-    }).join("")}
-          </div>
-        </div>
-        <p class="text-xs text-slate-500 font-medium italic text-center px-4">Selected modules will be available in the tenant's dashboard immediately after activation.</p>
-      </div>
-    `;
-  } else if (_wizardStep === 4) {
-    content = `
-      <div class="space-y-6 py-4">
-        <div class="flex items-center gap-4 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
-          <div class="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-indigo-600/20">🛡️</div>
-          <div>
-             <h4 class="font-bold text-slate-900 dark:text-white uppercase tracking-tight text-sm">Security & Ownership</h4>
-             <p class="text-xs text-slate-500 font-medium italic">Create the master account for this tenant.</p>
-          </div>
-        </div>
-        <div class="grid grid-cols-1 gap-4">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-1">Master Username</label>
-            <input type="text" oninput="_wizardData.adminUsername=this.value" value="${_wizardData.adminUsername}" placeholder="e.g. admin_beach" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 outline-none font-mono text-sm">
-          </div>
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-1">Secure Password</label>
-            <input type="password" oninput="_wizardData.adminPassword=this.value" value="${_wizardData.adminPassword}" placeholder="••••••••" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 outline-none text-sm">
-          </div>
-        </div>
-      </div>
-    `;
-  } else if (_wizardStep === 5) {
-    content = `
-      <div class="space-y-6 py-4">
-        <div class="flex items-center justify-between">
-           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Initial Staff Members</label>
-           <button onclick="showWizAddEmployee()" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-500 transition-colors">+ Add Employee</button>
-        </div>
-        <div class="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-           ${_wizardData.employees.length === 0 ? `
-             <div class="p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800">
-                <p class="text-xs text-slate-400 font-medium italic">No additional staff added. You can add them later from the Staff panel.</p>
-             </div>
-           ` : _wizardData.employees.map((emp, idx) => `
-             <div class="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-center justify-between group">
-                <div class="flex items-center gap-3">
-                   <div class="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-black text-xs uppercase">${emp.role.substring(0, 2)}</div>
-                   <div>
-                      <div class="font-bold text-sm text-slate-900 dark:text-white">${emp.name} <span class="text-[10px] text-slate-400 ml-1">(@${emp.username})</span></div>
-                      <div class="text-[10px] text-slate-500 font-medium uppercase tracking-widest">${emp.role} • ${emp.allowed_panels.length} Panels • ${emp.password ? '🔐 Has Login' : '🚫 No Login'}</div>
-                   </div>
-                </div>
-                <button onclick="removeWizardEmployee(${idx})" class="p-2 text-rose-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg">
-                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-             </div>
-           `).join('')}
-        </div>
-      </div>
-    `;
-  } else if (_wizardStep === 6) {
-    content = `
-      <div class="py-6 text-center space-y-6 animate-[scaleIn_0.4s_ease-out]">
-        <div class="relative w-32 h-32 mx-auto">
-           <div class="absolute inset-0 bg-indigo-600/20 rounded-full animate-ping"></div>
-           <div class="relative w-32 h-32 bg-gradient-to-br from-indigo-600 to-violet-700 text-white rounded-full flex items-center justify-center text-5xl shadow-2xl shadow-indigo-600/40 border-4 border-white dark:border-slate-800">🚀</div>
-        </div>
-        <div>
-          <h4 class="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tight">Configuration Complete</h4>
-          <p class="text-slate-500 text-sm mt-1 max-w-sm mx-auto font-medium">Ready to deploy a high-performance <strong class="text-indigo-600">${_wizardData.type}</strong> instance for <strong class="text-indigo-600">"${_wizardData.name}"</strong></p>
-        </div>
-        <div class="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 max-w-xs mx-auto space-y-2">
-           <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <span>Admin:</span>
-              <span class="text-slate-700 dark:text-slate-200">@${_wizardData.adminUsername}</span>
-           </div>
-           <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <span>Staff:</span>
-              <span class="text-indigo-600">${_wizardData.employees.length + 1} Total</span>
-           </div>
-           <div class="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <span>Modules:</span>
-              <span class="text-emerald-600">${_wizardData.panels.length} Enabled</span>
-           </div>
-        </div>
-      </div>
-    `;
-  }
-
-  const footer = `
-    <div class="flex justify-between items-center pt-8 border-t border-slate-100 dark:border-slate-800 mt-4">
-      <button onclick="wizardPrev()" class="px-6 py-2.5 rounded-xl text-slate-400 hover:text-slate-900 dark:hover:text-white font-bold transition-all ${_wizardStep === 1 ? "opacity-0 pointer-events-none" : ""}">Back</button>
-      <div class="hidden sm:flex gap-1.5">
-        ${[1, 2, 3, 4, 5, 6].map(i => `<div class="w-3 h-1.5 rounded-full transition-all duration-300 ${i === _wizardStep ? "bg-indigo-600 w-8" : (i < _wizardStep ? "bg-indigo-300" : "bg-slate-200 dark:bg-slate-800")}"></div>`).join("")}
-      </div>
-      ${_wizardStep === 6
-      ? `<button onclick="submitWizard(this)" class="px-10 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest text-xs transition-all shadow-xl shadow-indigo-600/30 hover:scale-105 active:scale-95">Complete Launch</button>`
-      : `<button onclick="wizardNext()" class="px-10 py-3 rounded-xl bg-slate-950 dark:bg-indigo-600 hover:scale-105 active:scale-95 text-white font-black uppercase tracking-widest text-xs transition-all shadow-lg ${_wizardStep === 1 ? 'hidden' : ''}">Proceed Next</button>`
-    }
-    </div>
-  `;
-
-  openModal(titles[_wizardStep - 1], `
-    <div class="flex flex-col min-h-[420px]">
-      <div class="flex-1">${content}</div>
-      ${footer}
-    </div>
-  `, "max-w-2xl");
-}
-
-function showWizAddEmployee() {
-  const modal = document.createElement("div");
-  modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-      <h3 class="text-2xl font-black text-slate-950 dark:text-white mb-6">Add Staff Member</h3>
-      <div class="space-y-4">
-        <div class="grid grid-cols-2 gap-4">
-           <div>
-              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Full Name</label>
-              <input id="wiz-emp-name" placeholder="John Doe" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 outline-none text-sm font-bold transition-all" />
-           </div>
-           <div>
-              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Role</label>
-              <select id="wiz-emp-role" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 outline-none text-sm font-bold appearance-none transition-all">
-                 <option value="user">General Staff</option>
-                 <option value="rider">Rider / Delivery</option>
-                 <option value="waiter">Waiter / Server</option>
-                 <option value="manager">Manager</option>
-                 <option value="receptionist">Receptionist</option>
-              </select>
-           </div>
-        </div>
-        <div>
-           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Username (For Login Reference)</label>
-           <input id="wiz-emp-user" placeholder="john_d" class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 outline-none text-sm font-bold transition-all" />
-        </div>
-        
-        <div class="p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl">
-           <label class="flex items-center gap-3 cursor-pointer">
-              <input type="checkbox" id="wiz-emp-has-login" onchange="document.getElementById('wiz-emp-pass-box').classList.toggle('hidden', !this.checked)" class="w-5 h-5 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500">
-              <span class="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-widest">Enable System Login</span>
-           </label>
-           <div id="wiz-emp-pass-box" class="mt-4 hidden">
-              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Login Password</label>
-              <input id="wiz-emp-pass" type="password" placeholder="••••••••" class="w-full px-5 py-3 rounded-xl bg-white dark:bg-slate-900 border-transparent focus:border-indigo-500 outline-none text-sm font-bold transition-all" />
-           </div>
-        </div>
-
-        <div>
-           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Assigned Modules</label>
-           <div class="grid grid-cols-3 gap-2">
-              ${allPanels().filter(p => _wizardData.panels.includes(p.panels[0])).map(p => `
-                <div onclick="toggleWizEmpPanel(this)" data-panels='${JSON.stringify(p.panels)}' data-selected="false" class="wiz-emp-panel-tile cursor-pointer p-2 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center gap-1 transition-all hover:border-indigo-300">
-                   <span class="text-xl">${p.icon}</span>
-                   <span class="text-[8px] font-black uppercase text-slate-500 dark:text-slate-400 text-center">${p.name}</span>
-                </div>
-              `).join('')}
-           </div>
-        </div>
-      </div>
-      <div class="flex gap-3 mt-8">
-        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
-        <button onclick="addWizEmployee(this)" class="flex-1 py-3 rounded-xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">Add Staff</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-}
-
-function toggleWizEmpPanel(el) {
-  const isSelected = el.dataset.selected === "true";
-  const next = !isSelected;
-  el.dataset.selected = next;
-  if (next) {
-    el.classList.add('border-indigo-600', 'bg-indigo-50', 'dark:bg-indigo-900/20');
-    el.classList.remove('border-slate-100', 'dark:border-slate-800');
-  } else {
-    el.classList.remove('border-indigo-600', 'bg-indigo-50', 'dark:bg-indigo-900/20');
-    el.classList.add('border-slate-100', 'dark:border-slate-800');
-  }
-}
-
-function addWizEmployee(btn) {
-  const name = document.getElementById("wiz-emp-name").value.trim();
-  const username = document.getElementById("wiz-emp-user").value.trim();
-  const role = document.getElementById("wiz-emp-role").value;
-  const hasLogin = document.getElementById("wiz-emp-has-login").checked;
-  const password = document.getElementById("wiz-emp-pass").value;
-
-  if (!name || !username) return toast("Name and Username required", "error");
-  if (hasLogin && !password) return toast("Password required for login", "error");
-
-  const selectedPanels = [];
-  document.querySelectorAll(".wiz-emp-panel-tile[data-selected='true']").forEach(el => {
-    selectedPanels.push(...JSON.parse(el.dataset.panels));
-  });
-
-  _wizardData.employees.push({
-    name, username, role,
-    password: hasLogin ? password : null,
-    allowed_panels: [...new Set(selectedPanels)]
-  });
-
-  btn.closest(".fixed").remove();
-  renderWizard();
-}
-
-function removeWizardEmployee(idx) {
-  _wizardData.employees.splice(idx, 1);
-  renderWizard();
-}
-
-function toggleWizPanel(el) {
-  const isSelected = el.dataset.selected === "true";
-  const next = !isSelected;
-  el.dataset.selected = next;
-  const activeClasses = ['border-indigo-600', 'bg-indigo-50', 'dark:bg-indigo-900/20', 'text-indigo-600', 'dark:text-indigo-300', 'shadow-md'];
-  const inactiveClasses = ['border-slate-100', 'dark:border-slate-800', 'bg-white', 'dark:bg-slate-900', 'text-slate-500', 'dark:text-slate-400', 'hover:border-indigo-300'];
-
-  if (next) {
-    el.classList.add(...activeClasses);
-    el.classList.remove(...inactiveClasses);
-  } else {
-    el.classList.remove(...activeClasses);
-    el.classList.add(...inactiveClasses);
-  }
-}
-
-function openCreateShop() {
-  openShopWizard();
-}
-
-function openEditShop(id) {
-  // We need to fetch shops again or use a global if available
-  api("/api/shops").then((shops) => {
-    const shop = shops.find((s) => s.id === id);
-    if (!shop) return;
-    openModal(
-      "Edit Shop",
-      shopFormHtml(shop) +
-      `<button onclick="saveShop(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update Shop</button>`,
-    );
-  });
-}
-
-function shopFormHtml(shop = null) {
-  const shopPanels =
-    shop && shop.allowed_panels
-      ? Array.isArray(shop.allowed_panels)
-        ? shop.allowed_panels
-        : JSON.parse(shop.allowed_panels)
-      : [];
-
-  return `
-      <div class="space-y-4">
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Shop Name</label>
-        <input id="shop-name" type="text" value="${shop ? shop.name : ""}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-indigo-500 transition-all">
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Launch Panels (Master Control)</label>
-        <div class="grid grid-cols-2 gap-2">
-          ${allPanels()
-      .map((p) => {
-        const isSelected = p.panels.every((panelId) =>
-          shopPanels.includes(panelId),
-        );
-        return `
-            <div data-panels='${JSON.stringify(p.panels)}' data-selected="${isSelected}" onclick="togglePanel(this)" class="panel-tile cursor-pointer p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${isSelected ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-indigo-300"}">
-              <span class="text-[20px]">${p.icon}</span>
-              <span class="text-[10px] font-bold uppercase tracking-tighter text-center">${p.name}</span>
-            </div>
-            `;
-      })
-      .join("")}
-        </div>
-      </div>
-      ${!shop
-      ? `
-      <div class="pt-2 border-t border-slate-100 dark:border-slate-800">
-        <label class="block text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">Initial Shop Owner Account</label>
-        <div class="grid grid-cols-2 gap-3">
-          <input id="shop-admin-username" type="text" placeholder="Admin Username" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-          <input id="shop-admin-password" type="password" placeholder="Admin Password" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-        </div>
-      </div>`
-      : ""
-    }
-    </div>
-      `;
-}
-
-async function saveShop(id) {
-  const selectedTiles = Array.from(
-    document.querySelectorAll('.panel-tile[data-selected="true"]'),
-  );
-  const allowed_panels = [];
-  selectedTiles.forEach((el) => {
-    const panels = JSON.parse(el.dataset.panels || "[]");
-    allowed_panels.push(...panels);
-  });
-
-  const payload = {
-    name: $c("shop-name").value.trim(),
-    allowed_panels: [...new Set(allowed_panels)],
-  };
-  if (!payload.name) return toast("Name required", "error");
-
-  if (!id) {
-    const adminUsername = $c("shop-admin-username").value.trim();
-    const adminPassword = $c("shop-admin-password").value.trim();
-    if (!adminUsername || !adminPassword)
-      return toast("Admin credentials required", "error");
-    payload.adminUsername = adminUsername;
-    payload.adminPassword = adminPassword;
-  }
-
-  const method = id ? "PATCH" : "POST";
-  const url = id ? `/api/shops/${id}` : "/api/shops";
-
-  const r = await api(url, method, payload);
-  if (r.error) return toast(r.error, "error");
-
-  toast(id ? "Shop updated" : "Shop created & admin added");
-  closeModal();
-  renderHierarchy();
-}
-
-async function deleteShop(id) {
-  if (id === 1) return toast("Cannot delete main shop", "warning");
-  if (!confirm("Delete shop and all its data? This cannot be undone.")) return;
-  await api(`/api/shops/${id}`, "DELETE");
-  toast("Shop deleted");
-  renderHierarchy();
 }
 
 // ─── Customers ───────────────────────────────────────────────────────────────
@@ -7728,48 +5375,8 @@ function renderLobby() {
 
     <div class="lobby-grid">
         ${(() => {
-          // Prepare the "Add Category" module (Hidden for superadmins)
-          const addBtn = currentUser.role === 'superadmin' ? '' : `
-            <div class="lobby-item relative group" onclick="toggleLobbyCategoryMenu(event)" style="animation-delay: 300ms">
-                <div class="lobby-icon-wrap bg-indigo-50 dark:bg-indigo-900/20 border-2 border-dashed border-indigo-200 dark:border-indigo-800 group-hover:border-indigo-500 transition-all">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
-                    </svg>
-                </div>
-                <div class="lobby-label font-bold text-indigo-600 dark:text-indigo-400">Add Category</div>
-                
-                <!-- Lobby Specific Category Menu -->
-                <div id="lobby-category-menu" class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-64 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-[100] overflow-hidden backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200 origin-bottom">
-                   <div class="px-5 py-4 border-b border-slate-50 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-800/30">
-                      <p class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Quick Actions</p>
-                   </div>
-                   <button onclick="openAddCategoryPopup('product')" class="w-full text-left px-6 py-4 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-b border-slate-50 dark:border-slate-800 flex items-center gap-4 transition-all group/item">
-                      <div class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center group-hover/item:scale-110 transition-transform">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7 v10l8 4"/></svg>
-                      </div>
-                      <div>
-                        <div class="font-black text-slate-900 dark:text-white text-xs">Product Category</div>
-                        <div class="text-[9px] text-slate-400 font-normal">Catalog organization</div>
-                      </div>
-                   </button>
-                   <button onclick="openAddCategoryPopup('expense')" class="w-full text-left px-6 py-4 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40 flex items-center gap-4 transition-all group/item">
-                      <div class="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover/item:scale-110 transition-transform">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-                      </div>
-                      <div>
-                        <div class="font-black text-slate-900 dark:text-white text-xs">Expense Category</div>
-                        <div class="text-[9px] text-slate-400 font-normal">Financial ledger nodes</div>
-                      </div>
-                   </button>
-                </div>
-            </div>`;
-
-          // Find where to insert it (next to contacts)
-          const contactsIndex = allowed.findIndex(p => p.id === 'customers');
-          const pendingDuesPanel = AVAILABLE_PANELS.find(p => p.id === 'pending-dues');
-          
-          return allowed.map((p, i) => {
-            const item = `
+      return allowed.map((p, i) => {
+        return `
               <div class="lobby-item" onclick="navigate('${p.id}')" style="animation-delay: ${i * 50}ms">
                   <div class="lobby-icon-wrap">
                       <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
@@ -7779,23 +5386,8 @@ function renderLobby() {
                   <div class="lobby-label">${p.label}</div>
               </div>
             `;
-            // If this is the contacts item, append the pending dues button AND add button right after it
-            if (i === contactsIndex) {
-              const pendingDuesBtn = `
-                <div class="lobby-item" onclick="navigate('pending-dues')" style="animation-delay: ${(i + 1) * 50}ms">
-                    <div class="lobby-icon-wrap bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
-                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
-                            ${pendingDuesPanel.icon}
-                        </svg>
-                    </div>
-                    <div class="lobby-label font-bold text-rose-600 dark:text-rose-400">Pending Dues</div>
-                </div>
-              `;
-              return item + pendingDuesBtn + addBtn;
-            }
-            return item;
-          }).join("");
-        })()}
+      }).join("");
+    })()}
     </div>
   `;
 }
@@ -8015,723 +5607,6 @@ async function setTableStatus(id, status) {
   } catch (e) {
     toast(e.message, 'error');
   }
-}
-
-// ─── KITCHEN DISPLAY SYSTEM ───────────────────────────────────────────────────
-let _kdsInterval = null;
-
-async function renderKDS() {
-  // Clear any previous polling
-  if (_kdsInterval) { clearInterval(_kdsInterval); _kdsInterval = null; }
-
-  $c('page-content').innerHTML = `
-    <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div class="flex items-center justify-between bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center text-xl">👨‍🍳</div>
-          <div>
-            <h3 class="font-black text-slate-900 dark:text-white text-sm">Kitchen Display System</h3>
-            <p class="text-xs text-slate-500">Auto-refreshes every 10 seconds</p>
-          </div>
-        </div>
-        <button onclick="loadKDSOrders()" class="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-sm transition-all flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          Refresh
-        </button>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <div class="flex items-center gap-2 mb-3 px-1">
-            <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-            <h4 class="font-black text-amber-600 dark:text-amber-400 text-xs uppercase tracking-widest">Pending</h4>
-          </div>
-          <div id="kds-pending" class="space-y-3 min-h-32"></div>
-        </div>
-        <div>
-          <div class="flex items-center gap-2 mb-3 px-1">
-            <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-            <h4 class="font-black text-blue-600 dark:text-blue-400 text-xs uppercase tracking-widest">Preparing</h4>
-          </div>
-          <div id="kds-preparing" class="space-y-3 min-h-32"></div>
-        </div>
-        <div>
-          <div class="flex items-center gap-2 mb-3 px-1">
-            <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <h4 class="font-black text-emerald-600 dark:text-emerald-400 text-xs uppercase tracking-widest">Ready</h4>
-          </div>
-          <div id="kds-ready" class="space-y-3 min-h-32"></div>
-        </div>
-      </div>
-    </div>
-  `;
-  await loadKDSOrders();
-  _kdsInterval = setInterval(loadKDSOrders, 10000);
-}
-
-async function loadKDSOrders() {
-  try {
-    const isReadOnly = currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'manager';
-    const orders = await api('/api/kds');
-    const pending = orders.filter(o => o.order_status === 'pending');
-    const preparing = orders.filter(o => o.order_status === 'preparing');
-    const ready = orders.filter(o => o.order_status === 'ready');
-
-    const renderOrder = (order, nextStatus, nextLabel, cardColor) => `
-      <div class="rounded-2xl border-2 p-4 ${cardColor} transition-all hover:shadow-lg">
-        <div class="flex items-center justify-between mb-2">
-          <div class="font-black text-slate-900 dark:text-white text-sm">
-            Order #${order.id}
-            ${order.order_type === 'dine_in' && order.table_number ? `<span class="ml-2 text-xs bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full">Table: ${order.table_number}</span>` : ''}
-            ${order.order_type === 'takeaway' && order.token_number ? `<span class="ml-2 text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full">Token: ${order.token_number}</span>` : ''}
-            ${order.order_type === 'delivery' ? `<span class="ml-2 text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">🚚 Delivery</span>` : ''}
-          </div>
-          <div class="text-[10px] text-slate-400">${new Date(order.created_at).toLocaleTimeString()}</div>
-        </div>
-        ${order.waiter_name ? `<p class="text-[10px] text-slate-500 mb-2">Waiter: <span class="font-bold">${order.waiter_name}</span></p>` : ''}
-        <div class="space-y-1 mb-3">
-          ${(order.items || []).map(item => `
-            <div class="flex justify-between text-sm">
-              <span class="font-medium text-slate-700 dark:text-slate-300">${item.product_name || item.custom_name || 'Item'}</span>
-              <span class="font-black text-slate-900 dark:text-white">×${item.quantity}</span>
-            </div>
-            ${item.special_instructions ? `<div class="text-[10px] text-rose-500 italic ml-2">📝 ${item.special_instructions}</div>` : ''}
-          `).join('')}
-        </div>
-        </div>
-        ${!isReadOnly ? (nextStatus ? `
-          <button onclick="updateKDSStatus(${order.id},'${nextStatus}')" class="w-full py-2 rounded-xl text-white font-bold text-xs transition-all ${nextStatus === 'preparing' ? 'bg-blue-600 hover:bg-blue-500' : nextStatus === 'ready' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-600 hover:bg-slate-500'}">
-            → ${nextLabel}
-          </button>
-        ` : `
-          <button onclick="updateKDSStatus(${order.id},'completed')" class="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all">
-            ✅ Mark Completed
-          </button>
-        `) : ''}
-      </div>
-    `;
-
-    const renderEmpty = label => `<div class="flex items-center justify-center h-24 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 text-slate-400 text-sm">No ${label} orders</div>`;
-
-    const pendingEl = $c('kds-pending');
-    const preparingEl = $c('kds-preparing');
-    const readyEl = $c('kds-ready');
-    if (pendingEl) pendingEl.innerHTML = pending.length ? pending.map(o => renderOrder(o, 'preparing', 'Start Preparing 🔥', 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800')).join('') : renderEmpty('pending');
-    if (preparingEl) preparingEl.innerHTML = preparing.length ? preparing.map(o => renderOrder(o, 'ready', 'Mark Ready ✅', 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800')).join('') : renderEmpty('preparing');
-    if (readyEl) readyEl.innerHTML = ready.length ? ready.map(o => renderOrder(o, null, 'Completed', 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800')).join('') : renderEmpty('ready');
-  } catch (e) {
-    console.error('KDS load error', e);
-  }
-}
-
-async function updateKDSStatus(id, status) {
-  try {
-    await api(`/api/kds/${id}/status`, 'PATCH', { status });
-    toast(`Order #${id} → ${status}`);
-    await loadKDSOrders();
-    // Free up the table if completed
-    if (status === 'completed') {
-      // table will need to be manually set available from the tables view
-    }
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-}
-
-// ─── DELIVERY ORDERS ──────────────────────────────────────────────────────────
-async function renderDeliveryOrders() {
-  let orders = [];
-  try {
-    const all = await api('/api/sales');
-    orders = all.filter(o => o.order_type === 'delivery');
-  } catch (e) { }
-
-  const statusBadge = {
-    pending: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
-    preparing: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
-    ready: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
-    completed: 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-  };
-  const statusIcon = { pending: '⏳', preparing: '👨‍🍳', ready: '🚚', completed: '✅' };
-
-  $c('page-content').innerHTML = `
-    <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div class="flex items-center justify-between bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-xl">🚚</div>
-          <div>
-            <h3 class="font-black text-slate-900 dark:text-white text-sm">Delivery Orders</h3>
-            <p class="text-xs text-slate-500">${orders.filter(o => o.order_status !== 'completed').length} active deliveries</p>
-          </div>
-        </div>
-        <button onclick="navigate('pos')" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm transition-all flex items-center gap-2">
-          + New Delivery Order
-        </button>
-      </div>
-
-      ${orders.length === 0 ? `
-        <div class="flex flex-col items-center justify-center py-24 bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
-          <div class="text-5xl mb-3">🚚</div>
-          <p class="text-slate-500 text-sm font-medium">No delivery orders yet</p>
-          <button onclick="navigate('pos')" class="mt-4 px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-500 transition-all">Place First Delivery Order</button>
-        </div>
-      ` : `
-        <div class="space-y-3">
-          ${orders.map(o => `
-            <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 flex items-center gap-5 hover:border-blue-400 transition-all shadow-sm group">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-3 flex-wrap">
-                  <span class="font-black text-slate-900 dark:text-white">Order #${o.id}</span>
-                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${statusBadge[o.order_status] || statusBadge.pending}">
-                    ${statusIcon[o.order_status] || '⏳'} ${o.order_status || 'pending'}
-                  </span>
-                </div>
-                <p class="text-sm font-medium text-slate-700 dark:text-slate-300 mt-1">
-                  👤 ${o.customer_name || 'Walk-in'} ${o.customer_phone ? `• 📞 ${o.customer_phone}` : ''}
-                </p>
-                ${o.delivery_address ? `<p class="text-xs text-slate-500 mt-0.5">📍 ${o.delivery_address}</p>` : ''}
-                ${o.rider_name ? `<p class="text-xs text-slate-500 mt-0.5">🏍️ Rider: <span class="font-bold">${o.rider_name}</span></p>` : ''}
-                <p class="text-xs text-slate-400 mt-1">${new Date(o.created_at).toLocaleString()}</p>
-              </div>
-              <div class="text-right flex-shrink-0">
-                <div class="font-black text-indigo-600 dark:text-indigo-400 text-lg">Rs. ${Number(o.total).toFixed(2)}</div>
-                <div class="flex flex-col gap-1.5 mt-2">
-                  ${o.order_status !== 'completed' ? `
-                    <select onchange="updateDeliveryStatus(${o.id}, this.value)" class="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold focus:outline-none focus:border-blue-500">
-                      <option value="" disabled selected>Change status…</option>
-                      <option value="pending">⏳ Pending</option>
-                      <option value="preparing">👨‍🍳 Preparing</option>
-                      <option value="ready">🚚 Out for Delivery</option>
-                      <option value="completed">✅ Delivered</option>
-                    </select>
-                  ` : '<div class="text-emerald-600 dark:text-emerald-400 text-xs font-black">✅ Delivered</div>'}
-                  <button onclick="printBill(${o.id})" class="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition-all">🖨 Print</button>
-                </div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      `}
-    </div>
-  `;
-}
-
-async function renderRawStock() {
-  const content = document.getElementById("page-content");
-  content.innerHTML = '<div class="flex items-center justify-center h-40 text-slate-600">Loading Ingredients…</div>';
-
-  try {
-    const rawStocks = await api("/api/raw-stock");
-
-    let html = `
-      <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div>
-            <h3 class="text-3xl font-black text-slate-950 dark:text-white tracking-tight">Raw Ingredients</h3>
-            <p class="text-slate-500 text-sm mt-1">Manage base stock, track batches and record waste.</p>
-          </div>
-          <div class="flex gap-3">
-            <button onclick="showAddRawStockModal()" class="px-6 py-3.5 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 active:scale-95 transition-all flex items-center gap-2">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-              Add New Ingredient
-            </button>
-            <button onclick="showWasteLogModal()" class="px-6 py-3.5 rounded-2xl bg-rose-600/10 text-rose-600 text-sm font-bold hover:bg-rose-600/20 active:scale-95 transition-all flex items-center gap-2">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-              Record Waste
-            </button>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          ${rawStocks.map(rs => `
-            <div class="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 hover:border-indigo-500 transition-all shadow-sm group">
-              <div class="flex justify-between items-start mb-4">
-                <div class="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-                </div>
-                <div class="text-right">
-                  <span class="text-xs font-black uppercase tracking-widest text-slate-400">Current Stock</span>
-                  <div class="text-2xl font-black text-slate-950 dark:text-white">${rs.current_stock} <span class="text-sm font-bold text-slate-400">${rs.unit}</span></div>
-                  ${rs.usage_unit ? `<div class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">= ${ (rs.current_stock * rs.conversion_factor).toFixed(1) } ${rs.usage_unit}</div>` : ''}
-                </div>
-              </div>
-              <h4 class="text-lg font-black text-slate-900 dark:text-white mb-2">${rs.name}</h4>
-              <p class="text-xs text-slate-500 italic mb-2">Min. stock alert level: ${rs.min_stock_level} ${rs.unit}</p>
-              ${rs.usage_unit ? `<p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-4">1 ${rs.unit} = ${rs.conversion_factor} ${rs.usage_unit}</p>` : '<div class="mb-4"></div>'}
-              
-              <div class="flex gap-2">
-                <button onclick="showUpdateRawStockModal(${rs.id}, '${rs.name}')" class="flex-1 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-indigo-50 hover:text-indigo-600 transition-all">Restock</button>
-                <button onclick="viewRawStockHistory(${rs.id})" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-indigo-600 transition-all">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                </button>
-              </div>
-            </div>
-          `).join('')}
-          ${rawStocks.length === 0 ? '<div class="col-span-full py-20 text-center text-slate-500 italic">No ingredients found. Start by adding one!</div>' : ''}
-        </div>
-      </div>
-    `;
-    content.innerHTML = html;
-  } catch (e) {
-    content.innerHTML = `<div class="p-10 text-center text-rose-500">${e.message}</div>`;
-  }
-}
-
-function showAddRawStockModal() {
-  const modal = document.createElement("div");
-  modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-      <h3 class="text-2xl font-black text-slate-950 dark:text-white mb-6">Add New Ingredient</h3>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Ingredient Name</label>
-          <input id="rs-name" placeholder="e.g. Potatoes, Milk" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none text-sm font-bold" />
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Purchase Unit (Large)</label>
-            <select id="rs-unit" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold appearance-none">
-              <option value="kg">kg (Kilogram)</option>
-              <option value="liter">liter (Liter)</option>
-              <option value="piece">piece (Pcs)</option>
-              <option value="packet">packet (Pkt)</option>
-              <option value="box">box</option>
-              <option value="dozen">dozen</option>
-              <option value="bag">bag</option>
-              <option value="crate">crate</option>
-              <option value="lb">lb (Pound)</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Min Level (Large Unit)</label>
-            <input id="rs-min" type="number" value="0" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Usage Unit (Small)</label>
-            <select id="rs-usage-unit" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold appearance-none">
-              <option value="g">g (Gram)</option>
-              <option value="ml">ml (Milliliter)</option>
-              <option value="piece">piece (Pcs)</option>
-              <option value="mg">mg</option>
-              <option value="oz">oz</option>
-              <option value="lb">lb</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Conv. Factor (1 Large = ? Small)</label>
-            <input id="rs-factor" type="number" value="1000" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Initial Stock (Large Unit)</label>
-            <input id="rs-initial" type="number" value="0" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-          </div>
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Cost Price (Large Unit)</label>
-            <input id="rs-cost" type="number" value="0" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-          </div>
-        </div>
-      </div>
-      <div class="flex gap-3 mt-8">
-        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
-        <button id="save-rs" class="flex-1 py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">Save Ingredient</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  const unitSelect = document.getElementById("rs-unit");
-  const usageSelect = document.getElementById("rs-usage-unit");
-  const factorInput = document.getElementById("rs-factor");
-
-  unitSelect.onchange = () => {
-    const val = unitSelect.value;
-    if (val === "kg") {
-      usageSelect.value = "g";
-      factorInput.value = 1000;
-    } else if (val === "liter") {
-      usageSelect.value = "ml";
-      factorInput.value = 1000;
-    } else if (val === "dozen") {
-      usageSelect.value = "piece";
-      factorInput.value = 12;
-    } else if (val === "lb") {
-      usageSelect.value = "oz";
-      factorInput.value = 16;
-    } else {
-      usageSelect.value = "piece";
-      factorInput.value = 1;
-    }
-  };
-
-  document.getElementById("save-rs").onclick = async () => {
-    const payload = {
-      name: $c("rs-name").value.trim(),
-      unit: $c("rs-unit").value.trim(),
-      usage_unit: $c("rs-usage-unit").value.trim(),
-      conversion_factor: parseFloat($c("rs-factor").value) || 1,
-      min_stock_level: parseFloat($c("rs-min").value),
-      initial_stock: parseFloat($c("rs-initial").value),
-      buying_price: parseFloat($c("rs-cost").value)
-    };
-    if (!payload.name || !payload.unit) return toast("Name and unit required", "error");
-    try {
-      await api("/api/raw-stock", "POST", payload);
-      toast("Ingredient added!");
-      modal.remove();
-      renderRawStock();
-    } catch (e) { toast(e.message, "error"); }
-  };
-}
-
-function showUpdateRawStockModal(id, name) {
-  const modal = document.createElement("div");
-  modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-      <h3 class="text-xl font-black text-slate-950 dark:text-white mb-2">Restock Ingredient</h3>
-      <p class="text-xs text-slate-500 mb-6 font-bold uppercase tracking-widest">${name}</p>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Quantity to Add</label>
-          <input id="rs-delta" type="number" placeholder="0.00" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-        </div>
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Buying Price</label>
-          <input id="rs-price" type="number" placeholder="Current Cost" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-        </div>
-      </div>
-      <div class="flex gap-3 mt-8">
-        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
-        <button id="update-rs" class="flex-1 py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">Update Stock</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  document.getElementById("update-rs").onclick = async () => {
-    const delta = parseFloat($c("rs-delta").value);
-    const buying_price = parseFloat($c("rs-price").value);
-    if (!delta || delta <= 0) return toast("Quantity required", "error");
-    try {
-      await api(`/api/raw-stock/${id}/stock`, "PATCH", { delta, buying_price });
-      toast("Stock updated!");
-      modal.remove();
-      renderRawStock();
-    } catch (e) { toast(e.message, "error"); }
-  };
-}
-
-function showWasteLogModal() {
-  const modal = document.createElement("div");
-  modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-      <h3 class="text-2xl font-black text-slate-950 dark:text-white mb-6">Record Ingredient Waste</h3>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Select Ingredient</label>
-          <select id="rs-waste-id" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold"></select>
-        </div>
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Quantity Wasted</label>
-          <div class="relative">
-            <input id="rs-waste-qty" type="number" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-            <span id="rs-waste-unit" class="absolute right-6 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">unit</span>
-          </div>
-        </div>
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Reason</label>
-          <input id="rs-waste-reason" placeholder="Spoilage, Overcooking, etc." class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-        </div>
-      </div>
-      <div class="flex gap-3 mt-8">
-        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
-        <button id="save-waste" class="flex-1 py-4 rounded-2xl bg-rose-600 text-white text-sm font-bold shadow-xl shadow-rose-600/20 hover:bg-rose-500 transition-all">Record Waste</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  api("/api/raw-stock").then(stocks => {
-    const sel = document.getElementById("rs-waste-id");
-    sel.innerHTML = '<option value="">Choose...</option>' + stocks.map(s => `<option value="${s.id}" data-unit="${s.unit}">${s.name}</option>`).join('');
-    sel.onchange = () => {
-      const opt = sel.options[sel.selectedIndex];
-      document.getElementById("rs-waste-unit").textContent = opt.dataset.unit || "unit";
-    };
-  });
-
-  document.getElementById("save-waste").onclick = async () => {
-    const id = $c("rs-waste-id").value;
-    const qty = parseFloat($c("rs-waste-qty").value);
-    if (!id || !qty) return toast("Select ingredient and quantity", "error");
-    try {
-      await api("/api/raw-stock/waste", "POST", { raw_stock_id: id, quantity: qty, reason: $c("rs-waste-reason").value });
-      toast("Waste recorded!");
-      modal.remove();
-      renderRawStock();
-    } catch (e) { toast(e.message, "error"); }
-  };
-}
-
-async function renderRecipes() {
-  const content = document.getElementById("page-content");
-  content.innerHTML = '<div class="flex items-center justify-center h-40 text-slate-600">Loading Recipes…</div>';
-
-  try {
-    const recipes = await api("/api/recipes");
-    const html = `
-      <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div>
-            <h3 class="text-3xl font-black text-slate-950 dark:text-white tracking-tight">Recipes</h3>
-            <p class="text-slate-500 text-sm mt-1">Define ingredient mixtures and map them to selling products.</p>
-          </div>
-          <button onclick="showRecipeModal()" class="px-6 py-3.5 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 active:scale-95 transition-all flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-            Create New Recipe
-          </button>
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          ${recipes.map(r => `
-            <div class="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 hover:border-indigo-500 transition-all shadow-sm group">
-              <div class="flex justify-between items-start mb-6">
-                <div>
-                  <h4 class="text-xl font-black text-slate-900 dark:text-white">${r.name}</h4>
-                  <p class="text-xs text-slate-500 mt-1">${r.description || 'No description'}</p>
-                </div>
-                <div class="flex gap-2">
-                  <button onclick="showRecipeModal(${JSON.stringify(r).replace(/"/g, '&quot;')})" class="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-indigo-600 transition-all">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                  </button>
-                  <button onclick="deleteRecipe(${r.id})" class="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-rose-600 transition-all">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                  </button>
-                </div>
-              </div>
-              
-              <div class="bg-slate-50 dark:bg-slate-950/50 rounded-3xl p-5 border border-slate-100 dark:border-slate-800 mb-6">
-                <h5 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Ingredients</h5>
-                <div class="space-y-2">
-                  ${r.ingredients.map(ing => `
-                    <div class="flex justify-between items-center text-sm">
-                      <span class="font-bold text-slate-700 dark:text-slate-300">${ing.ingredient_name}</span>
-                      <span class="font-black text-indigo-600 dark:text-indigo-400">${ing.quantity} ${ing.unit}</span>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-
-              <div class="flex gap-3">
-                <button onclick="showRecipeMappingModal(${r.id}, '${r.name}')" class="flex-1 py-3.5 rounded-2xl bg-indigo-600/10 text-indigo-600 text-xs font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all">
-                  Map to Products
-                </button>
-              </div>
-            </div>
-          `).join('')}
-          ${recipes.length === 0 ? '<div class="col-span-full py-20 text-center text-slate-500 italic">No recipes yet. Build your first menu recipe!</div>' : ''}
-        </div>
-      </div>
-    `;
-    content.innerHTML = html;
-  } catch (e) {
-    content.innerHTML = `<div class="p-10 text-center text-rose-500">${e.message}</div>`;
-  }
-}
-
-async function showRecipeModal(existing = null) {
-  const ingredients = await api("/api/raw-stock");
-  let selectedIngs = existing ? existing.ingredients.map(i => {
-    const raw = ingredients.find(ri => ri.id === i.raw_stock_id);
-    return { 
-      raw_stock_id: i.raw_stock_id, 
-      name: i.ingredient_name, 
-      unit: i.unit, 
-      usage_unit: raw ? raw.usage_unit : i.unit,
-      quantity: i.quantity 
-    };
-  }) : [];
-
-  const modal = document.createElement("div");
-  modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
-
-  const updateList = () => {
-    const list = document.getElementById("recipe-ing-list");
-    list.innerHTML = selectedIngs.map((si, idx) => `
-      <div class="flex items-center gap-3 bg-slate-50 dark:bg-slate-800 p-3 rounded-2xl border border-slate-100 dark:border-slate-700 animate-in slide-in-from-left-2 duration-300">
-        <span class="flex-1 text-sm font-bold">${si.name}</span>
-        <div class="flex items-center gap-2">
-          <input type="number" value="${si.quantity}" onchange="updateRecipeQty(${idx}, this.value)" class="w-16 px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-center font-black" />
-          <span class="text-[10px] font-black text-slate-400 w-12">${si.usage_unit || si.unit}</span>
-        </div>
-        <button onclick="removeRecipeIng(${idx})" class="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-all">✕</button>
-      </div>
-    `).join('');
-  };
-
-  window.removeRecipeIng = (idx) => {
-    selectedIngs.splice(idx, 1);
-    updateList();
-  };
-  window.updateRecipeQty = (idx, val) => {
-    selectedIngs[idx].quantity = parseFloat(val) || 0;
-  };
-
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
-      <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-6">${existing ? 'Edit' : 'Create'} Recipe</h3>
-      
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 flex-1 overflow-hidden">
-        <div class="space-y-6 flex flex-col h-full">
-          <div>
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Recipe Details</label>
-            <input id="rec-name" value="${existing ? existing.name : ''}" placeholder="Recipe Name (e.g. Signature Beef Patty)" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold mb-3" />
-            <textarea id="rec-desc" placeholder="Brief description or instructions..." class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-xs font-medium h-24 resize-none">${existing ? existing.description : ''}</textarea>
-          </div>
-          
-          <div class="flex-1 overflow-hidden flex flex-col">
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Active Ingredients</label>
-            <div id="recipe-ing-list" class="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-              <!-- List injects here -->
-            </div>
-          </div>
-        </div>
-
-        <div class="flex flex-col h-full">
-            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Add Ingredients</label>
-            <input type="text" id="ing-search" placeholder="Search stock..." class="w-full px-5 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-bold mb-4 outline-none border border-transparent focus:border-indigo-500" />
-            <div id="ing-pick-list" class="flex-1 overflow-y-auto space-y-1.5 pr-2 custom-scrollbar">
-              ${ingredients.map(ing => `
-                <button onclick="addIngToRecipe(${JSON.stringify(ing).replace(/"/g, '&quot;')})" 
-                  class="w-full flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/50 dark:hover:bg-indigo-900/20 text-left transition-all group">
-                  <div class="flex flex-col">
-                    <span class="text-xs font-bold text-slate-700 dark:text-slate-300">${ing.name}</span>
-                    <span class="text-[9px] text-slate-400 font-medium">Use in: ${ing.usage_unit || ing.unit}</span>
-                  </div>
-                  <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-indigo-600">+ Add</span>
-                </button>
-              `).join('')}
-            </div>
-        </div>
-      </div>
-
-      <div class="flex gap-4 mt-10 pt-6 border-t border-slate-100 dark:border-slate-800">
-        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
-        <button id="save-recipe" class="flex-1 py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">Save Recipe</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  updateList();
-
-  window.addIngToRecipe = (ing) => {
-    if (selectedIngs.find(si => si.raw_stock_id === ing.id)) return toast("Ingredient already added", "error");
-    selectedIngs.push({ raw_stock_id: ing.id, name: ing.name, unit: ing.unit, usage_unit: ing.usage_unit || ing.unit, quantity: 1 });
-    updateList();
-  };
-
-  document.getElementById("ing-search").oninput = (e) => {
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll("#ing-pick-list button").forEach(btn => {
-      btn.style.display = btn.textContent.toLowerCase().includes(q) ? 'flex' : 'none';
-    });
-  };
-
-  document.getElementById("save-recipe").onclick = async () => {
-    const name = $c("rec-name").value.trim();
-    if (!name) return toast("Recipe name required", "error");
-    if (selectedIngs.length === 0) return toast("Add at least one ingredient", "error");
-    const payload = { name, description: $c("rec-desc").value, ingredients: selectedIngs };
-    try {
-      if (existing) await api(`/api/recipes/${existing.id}`, "PUT", payload);
-      else await api("/api/recipes", "POST", payload);
-      toast("Recipe saved!");
-      modal.remove();
-      renderRecipes();
-    } catch (e) { toast(e.message, "error"); }
-  };
-}
-
-async function showRecipeMappingModal(recipeId, recipeName) {
-  const products = await api("/api/products");
-  const modal = document.createElement("div");
-  modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
-
-  modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] p-10 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-      <h3 class="text-2xl font-black text-slate-950 dark:text-white mb-2">Map Recipe to Products</h3>
-      <p class="text-sm text-slate-500 mb-8">Link <span class="text-indigo-600 font-bold">${recipeName}</span> to specific selling products or variants.</p>
-      
-      <div class="space-y-6">
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Select Product</label>
-          <select id="map-prod-id" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold">
-            <option value="">Choose a product...</option>
-            ${products.map(p => `<option value="${p.id}">${p.name} (SKU: ${p.sku})</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Variant Name (Optional)</label>
-          <input id="map-variant" placeholder="e.g. Large, Beef Patty, Extra Cheese" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-          <p class="text-[10px] text-slate-400 mt-2 px-1">If blank, this recipe applies to all units of the product.</p>
-        </div>
-      </div>
-
-      <div class="flex gap-4 mt-10">
-        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold hover:bg-slate-200 transition-all">Cancel</button>
-        <button id="save-mapping" class="flex-1 py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">Link Recipe</button>
-      </div>
-
-      <div class="mt-10 pt-8 border-t border-slate-100 dark:border-slate-800">
-         <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 px-1">Active Mappings</h4>
-         <div id="recipe-links-list" class="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-            <!-- Mappings inject here -->
-         </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  const fetchLinks = async () => {
-    const list = document.getElementById("recipe-links-list");
-    list.innerHTML = '<div class="text-xs text-slate-400 italic p-4 text-center">Loading mappings…</div>';
-    try {
-      // Since our API currently only gets links BY PRODUCT, I'll fetch ALL recipes and filter or rely on a new endpoint if I made one.
-      // Wait, I didn't make a "get links by recipe" endpoint. I'll just skip showing them for now or fix the API.
-      // Let's assume for now we don't show the list in the mapping modal to save time, or I can add the endpoint.
-      list.innerHTML = '<div class="text-[10px] text-slate-400 uppercase tracking-widest p-4 text-center">Mappings saved successfully to product records</div>';
-    } catch (e) { }
-  };
-  fetchLinks();
-
-  document.getElementById("save-mapping").onclick = async () => {
-    const prodId = $c("map-prod-id").value;
-    if (!prodId) return toast("Select a product", "error");
-    try {
-      await api("/api/recipes/link-product", "POST", { product_id: prodId, recipe_id: recipeId, variant_name: $c("map-variant").value.trim() });
-      toast("Recipe mapped!");
-      modal.remove();
-    } catch (e) { toast(e.message, "error"); }
-  };
-}
-
-async function deleteRecipe(id) {
-  if (!confirm("Delete this recipe permanently? This will not affect past sales records.")) return;
-  try {
-    await api(`/api/recipes/${id}`, 'DELETE');
-    toast("Recipe removed");
-    renderRecipes();
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-async function viewRawStockHistory(id) {
-  // Simple history alert for now
-  toast("Stock history feature coming soon in audit logs", "success");
 }
 
 // ─── Quotation System (Client Side) ───────────────────────────────────

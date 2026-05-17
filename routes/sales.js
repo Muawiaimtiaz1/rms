@@ -211,6 +211,7 @@ router.post("/", requireAuth, (req, res) => {
     guest_count = 1,
     token_number = null,
     delivery_address = "",
+    kitchen_id = null,
   } = req.body;
 
   if (!items || items.length === 0) {
@@ -307,9 +308,9 @@ router.post("/", requireAuth, (req, res) => {
       .prepare(
         `
         INSERT INTO sales
-          (shop_id, user_id, customer_id, customer_name, customer_phone, delivery_address, total, discount, tax_percentage, payment_method, amount_received, order_type, table_id, waiter_id, rider_id, guest_count, token_number)
+          (shop_id, user_id, customer_id, customer_name, customer_phone, delivery_address, total, discount, tax_percentage, payment_method, amount_received, order_type, table_id, waiter_id, rider_id, kitchen_id, guest_count, token_number)
         VALUES
-          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -328,6 +329,7 @@ router.post("/", requireAuth, (req, res) => {
         table_id,
         waiter_id,
         rider_id,
+        kitchen_id,
         guest_count,
         token_number
       );
@@ -512,12 +514,14 @@ router.get("/", requireAuth, (req, res) => {
         u.username as served_by_username,
         w.name as waiter_name,
         r.name as rider_name,
+        k.name as kitchen_name,
         t.table_number,
         (SELECT SUM(quantity) FROM return_items WHERE return_id IN (SELECT id FROM returns WHERE sale_id = s.id)) as items_returned
       FROM sales s
       LEFT JOIN users u ON s.user_id = u.id
       LEFT JOIN users w ON s.waiter_id = w.id
       LEFT JOIN users r ON s.rider_id = r.id
+      LEFT JOIN users k ON s.kitchen_id = k.id
       LEFT JOIN tables t ON s.table_id = t.id
       WHERE s.shop_id = ?
       ORDER BY s.created_at DESC
@@ -613,10 +617,11 @@ router.get("/:id/bill", requireAuth, (req, res) => {
   const saleId = parseInt(req.params.id, 10);
   const sale = db
     .prepare(`
-      SELECT s.*, w.name as waiter_name, r.name as rider_name, t.table_number 
+      SELECT s.*, w.name as waiter_name, r.name as rider_name, k.name as kitchen_name, t.table_number 
       FROM sales s 
       LEFT JOIN users w ON s.waiter_id = w.id
       LEFT JOIN users r ON s.rider_id = r.id
+      LEFT JOIN users k ON s.kitchen_id = k.id
       LEFT JOIN tables t ON s.table_id = t.id
       WHERE s.id = ? AND s.shop_id = ?
     `)

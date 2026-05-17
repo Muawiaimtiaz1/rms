@@ -50,7 +50,8 @@ router.get('/', requireAuth, (req, res) => {
           'name', COALESCE(cp.name, pc.custom_name),
           'quantity', pc.quantity,
           'price', pc.price,
-          'sku', cp.sku
+          'sku', cp.sku,
+          'stock', cp.stock
         )
       )
       FROM product_compositions pc
@@ -189,21 +190,22 @@ router.post('/', requireAuth, (req, res, next) => {
                 // Auto-link or Auto-create if name matches a product and no ID was provided
                 if (!linkedId && comp.name) {
                     const uniquePartName = `${name} - ${comp.name}`;
+                    // Try exact match first
                     const match = findProduct.get(uniquePartName, uniquePartName, req.session.user.shop_id);
                     if (match) {
                         linkedId = match.id;
                     } else {
                         // Auto-create missing component product with UNIQUE NAME
-                        const partSku = `PART-${comp.name.toUpperCase().replace(/\s+/g, '-')}-${Math.floor(Math.random() * 1000)}`;
+                        const partSku = `PART-${comp.name.toUpperCase().replace(/\s+/g, '-')}-${Math.floor(Math.random() * 10000)}`;
                         const newPart = createProduct.run(partSku, uniquePartName, category, brand_id, req.session.user.id, req.session.user.shop_id, comp.cost || 0, comp.price || 0);
                         linkedId = newPart.lastInsertRowid;
                     }
                 }
                 
+                if (!linkedId) continue; // Skip if no name and no ID
+
                 // Sync prices to the linked component product
-                if (linkedId) {
-                    updateProductPrice.run(comp.cost || 0, comp.price || 0, linkedId);
-                }
+                updateProductPrice.run(comp.cost || 0, comp.price || 0, linkedId);
 
                 insertComp.run(productId, linkedId, comp.name || '', comp.quantity || 1, comp.price || 0, comp.cost || 0);
             }
@@ -303,16 +305,16 @@ router.put('/:id', requireAuth, upload.single('image'), (req, res) => {
                         linkedId = match.id;
                     } else {
                         // Auto-create missing component product with UNIQUE NAME
-                        const partSku = `PART-${comp.name.toUpperCase().replace(/\s+/g, '-')}-${Math.floor(Math.random() * 1000)}`;
+                        const partSku = `PART-${comp.name.toUpperCase().replace(/\s+/g, '-')}-${Math.floor(Math.random() * 10000)}`;
                         const newPart = createProduct.run(partSku, uniquePartName, category || product.category, brand_id || product.brand_id, req.session.user.id, req.session.user.shop_id, comp.cost || 0, comp.price || 0);
                         linkedId = newPart.lastInsertRowid;
                     }
                 }
 
+                if (!linkedId) continue;
+
                 // Sync prices to the linked component product
-                if (linkedId) {
-                    updateProductPrice.run(comp.cost || 0, comp.price || 0, linkedId);
-                }
+                updateProductPrice.run(comp.cost || 0, comp.price || 0, linkedId);
 
                 insertComp.run(productId, linkedId, comp.name || '', comp.quantity || 1, comp.price || 0, comp.cost || 0);
             }
@@ -385,16 +387,35 @@ router.post('/:id/harvest', requireAuth, (req, res) => {
         if (!product) throw new Error('Product not found');
         if (product.stock < count) throw new Error(`Not enough stock of "${product.name}" to break down ${count} units`);
 
-        // Get components
-        const components = db.prepare('SELECT component_product_id, quantity FROM product_compositions WHERE parent_product_id = ?').all(productId);
+        // 1. Deduct from Parent (FIFO Batches)
+        let toRemove = count;
+        const parentBatches = db.prepare('SELECT * FROM product_batches WHERE product_id = ? AND shop_id = ? AND quantity > 0 ORDER BY created_at ASC').all(productId, shopId);
         
-        // Deduct from parent
+        let totalBuyingCostUsed = 0;
+        for (const b of parentBatches) {
+            if (toRemove <= 0) break;
+            const take = Math.min(b.quantity, toRemove);
+            db.prepare('UPDATE product_batches SET quantity = quantity - ? WHERE id = ?').run(take, b.id);
+            totalBuyingCostUsed += (take * b.buying_price);
+            toRemove -= take;
+        }
         db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(count, productId);
 
-        // Increase components
+        // 2. Increase components & Create Batches
+        const avgParentCost = count > 0 ? (totalBuyingCostUsed / count) : product.buying_price;
+        const components = db.prepare('SELECT component_product_id, quantity, cost FROM product_compositions WHERE parent_product_id = ?').all(productId);
+        
         for (const comp of components) {
             if (comp.component_product_id) {
-                db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(count * comp.quantity, comp.component_product_id);
+                const addedQty = count * comp.quantity;
+                const childCost = comp.cost || (avgParentCost / (comp.quantity || 1));
+                
+                // Add to main stock
+                db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(addedQty, comp.component_product_id);
+                
+                // Create a batch for the harvested items
+                db.prepare('INSERT INTO product_batches (product_id, shop_id, buying_price, quantity) VALUES (?, ?, ?, ?)')
+                  .run(comp.component_product_id, shopId, childCost, addedQty);
             }
         }
         

@@ -47,9 +47,19 @@ router.post('/', requireSuperAdmin, async (req, res) => {
                 });
             }
 
-            // 4. Log the creation in Activity Logs
+            // 4. Create Kitchens (if provided)
+            if (Array.isArray(req.body.kitchens)) {
+                const insertKitchen = db.prepare('INSERT INTO users (name, username, password_hash, role, shop_id, allowed_panels) VALUES (?, ?, ?, ?, ?, ?)');
+                req.body.kitchens.forEach(kit => {
+                    const kitHash = kit.password ? bcrypt.hashSync(kit.password, 10) : null;
+                    const kitPanels = JSON.stringify(kit.allowed_panels || []);
+                    insertKitchen.run(kit.name, kit.username, kitHash, 'kitchen', shopId, kitPanels);
+                });
+            }
+
+            // 5. Log the creation in Activity Logs
             db.prepare('INSERT INTO activity_logs (shop_id, action, details) VALUES (?, ?, ?)')
-                .run(shopId, 'Store Created', `Store ${name} created with initial staff members`);
+                .run(shopId, 'Store Created', `Store ${name} created with initial staff and kitchen terminals`);
 
             return shopId;
         });
@@ -61,7 +71,7 @@ router.post('/', requireSuperAdmin, async (req, res) => {
         if (e.message.includes('UNIQUE constraint failed: users.username')) {
             return res.status(400).json({ error: 'Username already taken' });
         }
-        res.status(500).json({ error: 'Failed to create shop and admin' });
+        res.status(500).json({ error: 'Failed to create shop and staff' });
     }
 });
 
