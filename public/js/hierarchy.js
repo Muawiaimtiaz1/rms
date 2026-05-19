@@ -2,9 +2,10 @@
 // Global State for Hierarchy UI
 let hierarchyData = { systemUsers: [], shops: [], users: [], brands: [] };
 let hierarchySearchQuery = "";
+let _managedShopId = null;
 
 async function renderHierarchy() {
-  const result = await api("/api/admin/hierarchy-data");
+  const result = await api(`/api/admin/hierarchy-data?t=${Date.now()}`);
   if (result.error) return toast(result.error, "error");
 
   hierarchyData = result;
@@ -12,6 +13,7 @@ async function renderHierarchy() {
 }
 
 function renderHierarchyUI() {
+  _managedShopId = null;
   const q = hierarchySearchQuery.toLowerCase();
 
   // Filter logic
@@ -50,20 +52,13 @@ function renderHierarchyUI() {
       </div>
   `;
 
-  // System Core Node (Master Owner)
-  html += renderHierarchyBlock(
-    "Platform Engine (Master Core)",
-    hierarchyData.systemUsers,
-    [],
-    "indigo",
-    null,
-    true,
-  );
+
 
   if (filteredShops.length === 0) {
     html += `<div class="p-10 text-center glass rounded-2xl"><p class="text-slate-500 dark:text-slate-400 italic">No tenants matched your search query "${hierarchySearchQuery}".</p></div>`;
   } else {
-    // Render Shops as Parent Nodes
+    // Render Shops as Parent Nodes in a gorgeous 3-column Grid
+    html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
     filteredShops.forEach((s) => {
       const shopUsers = hierarchyData.users.filter((u) => u.shop_id === s.id);
       const shopBrands = hierarchyData.brands.filter((b) => b.shop_id === s.id);
@@ -75,6 +70,7 @@ function renderHierarchyUI() {
         s,
       );
     });
+    html += `</div>`;
   }
 
   html += "</div>";
@@ -122,6 +118,8 @@ function renderHierarchyBlock(
   };
   const c = colorMap[color] || colorMap.blue;
 
+  console.log("Hierarchy Card for:", name, "shop_type:", shop ? shop.shop_type : null);
+
   // KPIs
   const userCount = users.length;
   const brandCount = brands.length;
@@ -133,215 +131,60 @@ function renderHierarchyBlock(
         ? "SYSTEM"
         : "NONE";
 
-  // Collapse state identifier
-  const collapseId = `collapse - node - ${shop ? shop.id : "global"} `;
-
-  // Role rendering helper
-  const renderUserCard = (u) => {
-    let roleColor =
-      "text-slate-500 bg-slate-100 dark:text-slate-400 dark:bg-slate-800";
-    let roleIcon = "👤";
-    if (u.role === "superadmin") {
-      roleColor =
-        "text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800";
-      roleIcon = "🌟";
-    }
-    if (u.role === "admin") {
-      roleColor =
-        "text-emerald-600 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800";
-      roleIcon = "🧑‍💼";
-    }
-    if (u.role === "user") {
-      roleColor =
-        "text-slate-600 bg-slate-100 dark:text-slate-400 dark:bg-slate-800 border border-slate-200 dark:border-slate-700";
-      roleIcon = "👷";
-    }
-
-    return `
-      <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800/60 hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-all group bg-white dark:bg-slate-900/50 relative overflow-hidden">
-        <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${u.role === "admin" ? "from-emerald-400 to-emerald-300" : u.role === "superadmin" ? "from-blue-500 to-indigo-500" : "from-slate-200 to-slate-100 dark:from-slate-700 dark:to-slate-800"} opacity-0 group-hover:opacity-100 transition-opacity"></div>
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold shadow-sm ${roleColor}">
-            ${roleIcon}
-          </div>
-          <div class="min-w-0">
-            <div class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">${u.name}</div>
-            <div class="flex items-center gap-2 mt-0.5">
-              <span class="text-[9px] uppercase font-black tracking-widest ${roleColor} px-1.5 py-0.5 rounded-md leading-none">${u.role.replace("_", " ")}</span>
-              ${u.email ? `<span class="text-[10px] text-slate-400 font-medium truncate">${u.username}</span>` : ""}
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 ml-2 opacity-10 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-          <!-- Edit button -->
-          <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}', '${u.username}', '${u.email || ""}', '${u.phone || ""}', '${u.role}', ${JSON.stringify(u.allowed_panels || []).replace(/"/g, "&quot;")}, ${u.shop_id || "null"}, '${u.status || "active"}')"
-            class="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 flex items-center justify-center transition-transform hover:scale-110 shadow-sm" title="Edit Profile">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-          </button>
-          ${u.role === "superadmin"
-        ? ""
-        : `
-          <!-- Suspend button -->
-          <button onclick="toggleUserStatus(${u.id}, '${u.status || "active"}')" class="w-7 h-7 rounded-lg flex items-center justify-center border ${u.status === "active" || !u.status ? "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600" : "bg-rose-50 border-rose-200 text-rose-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600"} transition-all hover:scale-110 shadow-sm" title="${u.status === "active" || !u.status ? "Suspend User" : "Reactivate User"}">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${u.status === "active" || !u.status ? "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" : "M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"}"/></svg>
-          </button>
-          `
-      }
-        </div>
-      </div>
-      `;
-  };
-
-  const renderPartnerCard = (b) => {
-    return `
-      <div class="flex items-center justify-between p-3 rounded-xl border border-purple-100 dark:border-purple-900/30 hover:border-purple-300 dark:hover:border-purple-500/50 transition-all group bg-purple-50/30 dark:bg-purple-900/10">
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold shadow-sm bg-purple-100 border border-purple-200 text-purple-600 dark:bg-purple-900/40 dark:border-purple-800 dark:text-purple-400">
-            🤝
-          </div>
-          <div class="min-w-0">
-            <div class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">${b.name}</div>
-            <div class="text-[9px] uppercase font-black tracking-widest text-purple-600 dark:text-purple-400 mt-0.5 border border-purple-200 dark:border-purple-800/50 px-1 inline-block rounded">Partner Brand</div>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 ml-2 opacity-10 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-          <!-- View button -->
-          <button onclick="managedShopId=${b.shop_id}; renderBrands(${b.shop_id})" class="w-7 h-7 rounded-lg bg-purple-50 border border-purple-200 text-purple-600 dark:bg-purple-900/30 dark:border-purple-800 dark:text-purple-400 flex items-center justify-center transition-transform hover:scale-110 shadow-sm" title="View Partner Details">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-          </button>
-        </div>
-      </div>
-      `;
-  };
-
   return `
-      <details class="group glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all mb-4" ${isGlobal || hierarchySearchQuery !== "" ? "open" : ""}>
-      <summary class="px-6 py-5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/80 cursor-pointer list-none flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
+    <div class="glass rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800/80 hover:border-indigo-500 dark:hover:border-indigo-400 hover:shadow-lg transition-all duration-300 flex flex-col justify-between h-full bg-white dark:bg-slate-900 group">
+      
+      <!-- Card Body -->
+      <div class="p-6 flex flex-col gap-4">
+         <!-- Identity & Title -->
+         <div class="flex items-center gap-4">
+           <div class="w-12 h-12 rounded-2xl shadow-inner flex items-center justify-center font-bold text-lg border ${c.border} ${c.iconBg} ${c.text}">
+             ${isGlobal ? "⚙️" : (name || "S").substring(0, 2).toUpperCase()}
+           </div>
+           <div>
+             <div class="flex items-center gap-2">
+               <h4 class="font-black text-lg text-slate-900 dark:text-white tracking-tight">${name}</h4>
+               ${isGlobal ? "" : `<span class="w-2 h-2 rounded-full ${shop.status === "active" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]"}"></span>`}
+             </div>
+             <span class="text-[9px] uppercase font-black tracking-widest text-slate-400 mt-0.5 inline-block">Tenant Store</span>
+           </div>
+         </div>
 
-        <!-- Parent Node Identity -->
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 rounded-2xl shadow-inner flex items-center justify-center font-bold text-lg border ${c.border} ${c.iconBg} ${c.text}">
-            ${isGlobal ? "⚙️" : (name || "S").substring(0, 2).toUpperCase()}
-          </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <h4 class="font-black text-lg text-slate-900 dark:text-white tracking-tight">${name}</h4>
-              ${isGlobal ? "" : `<span class="w-2 h-2 rounded-full ${shop.status === "active" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]"}"></span>`}
-            </div>
-
-            <!-- Quick KPI Pills -->
-            <div class="flex flex-wrap items-center gap-2 mt-2">
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                ${userCount} Personnel
-              </span>
-              ${!isGlobal
-      ? `
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                ${brandCount} Partners
-              </span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                ${productCount} Products
-              </span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${shop.shop_type === 'restaurant' ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20'} px-2 py-0.5 rounded-md">
-                ${shop.shop_type === 'restaurant' ? '🍽️ Restaurant' : '🛍️ Retail'}
-              </span>
-              <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${c.text} ${c.bg} px-2 py-0.5 rounded-md">
-                Tier: ${plan}
-              </span>
-              `
-      : ""
-    }
-            </div>
-          </div>
-        </div>
-
-        <!-- Inline Actions -->
-        <div class="flex items-center gap-2">
-          ${isGlobal
-      ? ""
-      : shop && shop.allowed_panels
-        ? `
-            ${shop.allowed_panels.includes("brands")
-          ? `
-              <button onclick="event.preventDefault(); event.stopPropagation(); managedShopId=${shop.id}; openAddBrand()" class="p-2 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded-xl transition-all border border-transparent hover:border-purple-200 dark:hover:border-purple-800 flex items-center justify-center group/btn" title="Add Partner">
-                <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-              </button>
-            `
-          : ""
-        }
-            <button onclick="event.preventDefault(); event.stopPropagation(); openCreateUser(${shop.id})" class="p-2 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-xl transition-all border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800 flex items-center justify-center group/btn" title="Add User">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
-            </button>
-            <div class="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-            <button onclick="event.preventDefault(); event.stopPropagation(); openEditShop(${shop.id})" class="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-slate-800 rounded-xl transition-all flex items-center justify-center group/btn" title="Edit Store Settings">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            </button>
-            <button onclick="event.preventDefault(); event.stopPropagation(); toggleShopStatus(${shop.id}, '${shop.status}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn ${shop.status === "active" ? "text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 hover:border-rose-200 dark:hover:border-rose-800" : "text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:border-emerald-200 dark:hover:border-emerald-800"}" title="${shop.status === "active" ? "Suspend Store" : "Reactivate Store"}">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${shop.status === "active" ? "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" : "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"}"></path></svg>
-            </button>
-            <div class="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-            <button onclick="event.preventDefault(); event.stopPropagation(); deleteShop(${shop.id}, '${(name || "").replace(/'/g, "\\'")}')" class="p-2 rounded-xl transition-all border border-transparent flex items-center justify-center group/btn text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/50 hover:border-rose-300 dark:hover:border-rose-800" title="Delete Shop Permanently">
-              <svg class="w-5 h-5 group-hover/btn:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            </button>
-          `
-        : ""
-    }
-          <div class="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 group-open:rotate-180 transition-transform bg-white dark:bg-slate-800 ml-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-          </div>
-        </div>
-      </summary>
-
-      <!--Expanded Body(Children Nodes)-- >
-      <div class="p-6 bg-slate-50/50 dark:bg-slate-900/20 border-t border-slate-100 dark:border-slate-800">
-
-        ${users.length === 0 && brands.length === 0
-      ? `
-          <div class="py-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-            <p class="text-sm font-medium text-slate-500 dark:text-slate-400">No personnel or partners attached to this node.</p>
-          </div>
-        `
-      : ""
-    }
-
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-
-          <!-- Users Section -->
-          ${users.length
-      ? `
-          <div class="${users.length > 3 ? "md:col-span-2 xl:col-span-2" : ""}">
-            <h5 class="text-xs font-bold text-slate-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-              Assigned Personnel
-            </h5>
-            <div class="grid grid-cols-1 ${users.length > 1 ? "sm:grid-cols-2" : ""} gap-3">
-              ${users.map((u) => renderUserCard(u)).join("")}
-            </div>
-          </div>
-          `
-      : ""
-    }
-
-          <!-- Brands (Partners) Section -->
-          ${brands.length
-      ? `
-          <div>
-            <h5 class="text-xs font-bold text-purple-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-              Partner Networks
-            </h5>
-            <div class="grid grid-cols-1 gap-3">
-              ${brands.map((b) => renderPartnerCard(b)).join("")}
-            </div>
-          </div>
-          `
-      : ""
-    }
-
-        </div>
+         <!-- KPI Badges Grid -->
+         <div class="grid grid-cols-2 gap-2 mt-2">
+           <div class="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col">
+             <span class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Staff</span>
+             <span class="text-sm font-black text-slate-800 dark:text-slate-200 mt-0.5">${userCount} Users</span>
+           </div>
+           <div class="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col">
+             <span class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Partners</span>
+             <span class="text-sm font-black text-slate-800 dark:text-slate-200 mt-0.5">${brandCount} Brands</span>
+           </div>
+           <div class="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col">
+             <span class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Products</span>
+             <span class="text-sm font-black text-slate-800 dark:text-slate-200 mt-0.5">${productCount} Items</span>
+           </div>
+           <div class="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col">
+             <span class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Plan Tier</span>
+             <span class="text-sm font-black text-slate-800 dark:text-slate-200 mt-0.5 truncate">${plan}</span>
+           </div>
+         </div>
       </div>
-    </details>
-      `;
+
+      <!-- Card Footer Action -->
+      <div class="px-6 py-4 bg-slate-50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800/60 mt-auto flex items-center justify-between">
+        <span class="px-2 py-0.5 rounded text-[9px] uppercase font-black tracking-widest ${shop.shop_type === 'restaurant' ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20'}">
+          ${shop.shop_type === 'restaurant' ? '🍽️ Restaurant' : '🛍️ Retail'}
+        </span>
+        
+        <button onclick="event.preventDefault(); event.stopPropagation(); openEditShop(${shop.id})" class="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-white dark:hover:text-white bg-white dark:bg-slate-800 hover:bg-indigo-600 dark:hover:bg-indigo-600 border border-slate-200 dark:border-slate-700 hover:border-indigo-600 dark:hover:border-indigo-600 rounded-xl transition-all shadow-sm flex items-center gap-1.5" title="Manage Shop">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+          Manage Shop
+        </button>
+      </div>
+
+    </div>
+  `;
 }
 
 async function deleteShop(id, name) {
@@ -350,6 +193,7 @@ async function deleteShop(id, name) {
   const r = await api(`/api/shops/${id}`, "DELETE");
   if (r.error) return toast(r.error, "error");
   toast("Shop Deleted Successfully");
+  _managedShopId = null;
   renderHierarchy();
 }
 
@@ -358,7 +202,11 @@ async function toggleShopStatus(id, current) {
   const r = await api(`/api/admin/store/${id}/status`, "PATCH", { status: next });
   if (r.error) return toast(r.error, "error");
   toast(`Shop ${next === "active" ? "Activated" : "Blocked"} `);
-  renderHierarchy();
+  if (typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderHierarchy();
+  }
 }
 
 async function toggleUserStatus(id, current) {
@@ -372,7 +220,11 @@ async function toggleUserStatus(id, current) {
   const r = await api(`/api/users/${id}`, "PUT", payload);
   if (r.error) return toast(r.error, "error");
   toast(`User ${next === "active" ? "Activated" : "Blocked"} `);
-  renderHierarchy();
+  if (typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderHierarchy();
+  }
 }
 
 let _wizardStep = 1;
@@ -936,16 +788,7 @@ function openCreateShop() {
 }
 
 function openEditShop(id) {
-  // We need to fetch shops again or use a global if available
-  api("/api/shops").then((shops) => {
-    const shop = shops.find((s) => s.id === id);
-    if (!shop) return;
-    openModal(
-      "Edit Shop",
-      shopFormHtml(shop) +
-      `<button onclick="saveShop(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update Shop</button>`,
-    );
-  });
+  renderShopManagement(id);
 }
 
 function shopFormHtml(shop = null) {
@@ -1028,7 +871,11 @@ async function saveShop(id) {
 
   toast(id ? "Shop updated" : "Shop created & admin added");
   closeModal();
-  renderHierarchy();
+  if (typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderHierarchy();
+  }
 }
 
 async function deleteShop(id) {
@@ -1036,5 +883,203 @@ async function deleteShop(id) {
   if (!confirm("Delete shop and all its data? This cannot be undone.")) return;
   await api(`/api/shops/${id}`, "DELETE");
   toast("Shop deleted");
+  _managedShopId = null;
   renderHierarchy();
+}
+
+async function renderShopManagement(shopId) {
+  _managedShopId = shopId;
+
+  // Refresh data just in case
+  const result = await api(`/api/admin/hierarchy-data?t=${Date.now()}`);
+  if (result.error) return toast(result.error, "error");
+  hierarchyData = result;
+
+  const shop = hierarchyData.shops.find(s => s.id === shopId);
+  if (!shop) {
+    toast("Shop not found", "error");
+    return renderHierarchyUI();
+  }
+
+  const shopUsers = hierarchyData.users.filter(u => u.shop_id === shopId);
+  const shopAdmins = shopUsers.filter(u => u.role === "admin");
+  const shopEmployees = shopUsers.filter(u => ["user", "manager", "rider", "pos_user", "waiter", "receptionist"].includes(u.role));
+  const shopKitchens = shopUsers.filter(u => u.role === "kitchen");
+  const shopBrands = hierarchyData.brands.filter(b => b.shop_id === shopId);
+
+  let html = `
+    <div class="space-y-8 animate-[fadeIn_0.3s_ease-out]">
+      <!-- Header Area -->
+      <div class="flex flex-col lg:flex-row justify-between lg:items-center gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
+        <div class="flex items-center gap-4">
+          <button onclick="renderHierarchyUI()" class="p-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors" title="Back to Hierarchy">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+          </button>
+          <div>
+            <h3 class="text-2xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-3">
+              ${shop.store_name}
+              <span class="px-2 py-0.5 rounded-md text-[10px] uppercase font-black tracking-widest ${shop.shop_type === 'restaurant' ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'text-blue-600 bg-blue-50 dark:bg-blue-900/20'}">${shop.shop_type}</span>
+            </h3>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Full management suite for this tenant.</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="grid grid-cols-1 xl:grid-cols-4 gap-8">
+        
+        <!-- Sidebar Navigation (Tabs) -->
+        <div class="xl:col-span-1 space-y-2">
+           <button onclick="switchShopTab('admin')" id="tab-btn-admin" class="w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 shadow-sm border border-indigo-100 dark:border-indigo-800 animate-all duration-300">
+             <span class="text-xl">👑</span> Admin Management
+           </button>
+           <button onclick="switchShopTab('employees')" id="tab-btn-employees" class="w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 border border-transparent animate-all duration-300">
+             <span class="text-xl">🧑‍💼</span> Staff & Employees
+           </button>
+           ${shop.shop_type === 'restaurant' ? `
+           <button onclick="switchShopTab('kitchen')" id="tab-btn-kitchen" class="w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 border border-transparent animate-all duration-300">
+             <span class="text-xl">👨‍🍳</span> Kitchen Terminals
+           </button>
+           ` : ''}
+           <button onclick="switchShopTab('brands')" id="tab-btn-brands" class="w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-880/50 text-slate-600 dark:text-slate-400 border border-transparent animate-all duration-300">
+             <span class="text-xl">🤝</span> Partner Brands
+           </button>
+        </div>
+        
+        <!-- Main Content Area -->
+        <div class="xl:col-span-3 min-h-[500px]">
+        
+          <!-- Admin Tab -->
+          <div id="shop-tab-admin" class="space-y-6">
+             <div class="flex items-center justify-between">
+                <h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Shop Administrators</h4>
+                <button onclick="openCreateUser(${shop.id}, 'admin')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md">+ Add Admin</button>
+             </div>
+             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${shopAdmins.map(u => renderShopUserCard(u)).join('')}
+                ${shopAdmins.length === 0 ? `<p class="text-slate-500 text-sm">No administrators found.</p>` : ''}
+             </div>
+             
+             <!-- Shop Permissions Form -->
+             <div class="mt-8 pt-8 border-t border-slate-200 dark:border-slate-800">
+               <h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight mb-4">Master Allowed Panels</h4>
+               <p class="text-xs text-slate-500 mb-4">Select which modules this shop has access to. (Affects all admins and employees of this shop)</p>
+               <div id="shop-modules-container">
+                 ${shopFormHtml(shop)}
+                 <button onclick="saveShop(${shop.id})" class="mt-6 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all shadow-md">Update Shop Allowed Panels</button>
+               </div>
+             </div>
+          </div>
+          
+          <!-- Employees Tab -->
+          <div id="shop-tab-employees" class="space-y-6 hidden">
+             <div class="flex items-center justify-between">
+                <h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Staff & Employees</h4>
+                <button onclick="openCreateUser(${shop.id}, 'user')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md">+ Add Employee</button>
+             </div>
+             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                ${shopEmployees.map(u => renderShopUserCard(u)).join('')}
+                ${shopEmployees.length === 0 ? `<div class="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800"><p class="text-slate-500 text-sm font-medium italic">No staff members found.</p></div>` : ''}
+             </div>
+          </div>
+          
+          <!-- Kitchen Tab -->
+          <div id="shop-tab-kitchen" class="space-y-6 hidden">
+             <div class="flex items-center justify-between">
+                <h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Kitchen Terminals</h4>
+                <button onclick="openCreateUser(${shop.id}, 'kitchen')" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-md">+ Add Kitchen Terminal</button>
+             </div>
+             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                ${shopKitchens.map(u => renderShopUserCard(u)).join('')}
+                ${shopKitchens.length === 0 ? `<div class="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800"><p class="text-slate-500 text-sm font-medium italic">No kitchen terminals found.</p></div>` : ''}
+             </div>
+          </div>
+          
+          <!-- Brands Tab -->
+          <div id="shop-tab-brands" class="space-y-6 hidden">
+             <div class="flex items-center justify-between">
+                <h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Partner Brands</h4>
+                <button onclick="managedShopId=${shop.id}; openAddBrand()" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md">+ Add Brand</button>
+             </div>
+             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                ${shopBrands.map(b => `
+                  <div class="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col gap-4 relative group hover:border-purple-300 dark:hover:border-purple-500 transition-colors">
+                    <div class="flex items-center gap-3">
+                       <div class="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-xl shadow-inner border border-purple-100 dark:border-purple-800">
+                          ${b.image_url ? `<img src="${b.image_url}" class="w-full h-full object-cover rounded-xl">` : '🤝'}
+                       </div>
+                       <div>
+                         <h5 class="font-bold text-slate-900 dark:text-white">${b.name}</h5>
+                         <span class="text-[9px] uppercase font-black tracking-widest text-purple-600 border border-purple-200 dark:border-purple-800/50 px-1 rounded inline-block mt-1">Brand</span>
+                       </div>
+                    </div>
+                    <div class="flex items-center gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60">
+                       <button onclick="managedShopId=${b.shop_id}; openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}')" class="flex-1 py-2 text-xs font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">Edit</button>
+                       <button onclick="deleteBrand(${b.id})" class="flex-1 py-2 text-xs font-bold rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors">Delete</button>
+                    </div>
+                  </div>
+                `).join('')}
+                ${shopBrands.length === 0 ? `<div class="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800"><p class="text-slate-500 text-sm font-medium italic">No brands found.</p></div>` : ''}
+             </div>
+          </div>
+          
+        </div>
+      </div>
+    </div>
+  `;
+
+  $c("page-content").innerHTML = html;
+}
+
+function switchShopTab(tabId) {
+  // Hide all tabs
+  ['admin', 'employees', 'kitchen', 'brands'].forEach(t => {
+    const el = document.getElementById(`shop-tab-${t}`);
+    const btn = document.getElementById(`tab-btn-${t}`);
+    if (el) el.classList.add('hidden');
+    if (btn) {
+      btn.className = "w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 border border-transparent animate-all duration-300";
+    }
+  });
+
+  // Show active tab
+  const activeEl = document.getElementById(`shop-tab-${tabId}`);
+  if (activeEl) activeEl.classList.remove('hidden');
+  const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+  if (activeBtn) activeBtn.className = "w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 shadow-sm border border-indigo-100 dark:border-indigo-800 animate-all duration-300";
+}
+
+function renderShopUserCard(u) {
+  return `
+    <div class="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col gap-4 relative group hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors">
+      <div class="flex items-start justify-between">
+         <div class="flex items-center gap-3">
+           <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg ${u.role === 'admin' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400' : u.role === 'kitchen' ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}">
+             ${u.role === 'admin' ? '👑' : u.role === 'kitchen' ? '👨‍🍳' : '🧑‍💼'}
+           </div>
+           <div>
+             <h5 class="font-bold text-slate-900 dark:text-white truncate max-w-[120px]">${u.name}</h5>
+             <div class="text-[10px] text-slate-500 font-medium">@${u.username}</div>
+           </div>
+         </div>
+         <span class="px-2 py-0.5 rounded text-[9px] uppercase font-black tracking-widest ${u.status === 'active' || !u.status ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30' : 'bg-rose-50 text-rose-600 dark:bg-rose-900/30'}">${u.status || 'active'}</span>
+      </div>
+      
+      <div class="text-[10px] text-slate-500 font-medium flex gap-2 items-center">
+        <span class="uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">${u.role.replace('_', ' ')}</span>
+        ${u.allowed_panels && u.allowed_panels.length ? `<span>• ${u.allowed_panels.length} Modules</span>` : ''}
+      </div>
+      
+      <div class="flex items-center gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60">
+         <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}', '${u.username}', '${u.email || ""}', '${u.phone || ""}', '${u.role}', ${JSON.stringify(u.allowed_panels || []).replace(/"/g, "&quot;")}, ${u.shop_id || "null"}, '${u.status || "active"}')" class="flex-1 py-2 text-xs font-bold rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors text-center">Edit Profile</button>
+         ${u.role !== 'superadmin' ? `
+         <button onclick="toggleUserStatus(${u.id}, '${u.status || "active"}')" class="p-2 rounded-lg transition-colors flex items-center justify-center ${u.status === 'active' || !u.status ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20' : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'}" title="${u.status === 'active' || !u.status ? 'Suspend Account' : 'Reactivate'}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${u.status === 'active' || !u.status ? 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' : 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z'}"/></svg>
+         </button>
+         ` : ''}
+         <button onclick="deleteUser(${u.id})" class="p-2 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors" title="Delete User">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+         </button>
+      </div>
+    </div>
+  `;
 }

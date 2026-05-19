@@ -7,7 +7,10 @@
     "scripts": {
         "start": "node server.js",
         "dev": "node server.js",
-        "seed": "node db/seed.js"
+        "seed": "node db/seed.js",
+        "postgres:check": "node scripts/check-postgres.js",
+        "postgres:schema": "node scripts/apply-postgres-schema.js",
+        "postgres:migrate": "node scripts/migrate-sqlite-to-postgres.js"
     },
     "engines": {
         "node": "22.x"
@@ -15,11 +18,13 @@
     "dependencies": {
         "bcryptjs": "^2.4.3",
         "better-sqlite3": "^11.3.0",
+        "dotenv": "^17.4.2",
         "express": "^4.22.1",
         "express-rate-limit": "^8.3.1",
         "express-session": "^1.17.3",
         "multer": "^2.1.1",
         "pdfkit": "^0.15.0",
+        "pg": "^8.21.0",
         "serverless-http": "^4.0.0"
     }
 }

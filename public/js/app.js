@@ -1099,7 +1099,11 @@ async function saveBrand(id) {
   }
   closeModal();
   toast("Brand saved!");
-  renderBrands(managedShopId);
+  if (typeof _currentPage !== 'undefined' && _currentPage === 'hierarchy' && typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderBrands(managedShopId);
+  }
 }
 
 async function deleteBrand(id) {
@@ -1113,7 +1117,11 @@ async function deleteBrand(id) {
   const r = await api(url, "DELETE");
   if (r.error) return toast(r.error, "error");
   toast("Brand deleted");
-  renderBrands(managedShopId);
+  if (typeof _currentPage !== 'undefined' && _currentPage === 'hierarchy' && typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderBrands(managedShopId);
+  }
 }
 
 function payBrandExpense(brandId, month, dueAmount) {

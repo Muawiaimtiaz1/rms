@@ -1131,7 +1131,11 @@ async function saveUser(id) {
   if (r.error) return toast(r.error, "error");
   closeModal();
   toast("User saved!");
-  renderUsers();
+  if (typeof _currentPage !== 'undefined' && _currentPage === 'hierarchy' && typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderUsers();
+  }
 }
 
 async function deleteUser(id) {
@@ -1139,7 +1143,11 @@ async function deleteUser(id) {
   const r = await api(`/api/users/${id}`, "DELETE");
   if (r.error) return toast(r.error, "error");
   toast("User deleted");
-  renderUsers();
+  if (typeof _currentPage !== 'undefined' && _currentPage === 'hierarchy' && typeof _managedShopId !== 'undefined' && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderUsers();
+  }
 }
 
 async function openEditBrandPayments(brandId, month) {

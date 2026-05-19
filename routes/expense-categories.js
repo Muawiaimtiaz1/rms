@@ -1,42 +1,75 @@
 const express = require('express');
-const db = require('../db/db');
+const { getSqlite, getPostgres, usePostgres } = require('../db/runtime');
 const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/expense-categories
-router.get('/', requireAuth, (req, res) => {
-    const categories = db.prepare('SELECT * FROM expense_categories WHERE shop_id = ?').all(req.session.user.shop_id);
-    res.json(categories);
+router.get('/', requireAuth, async (req, res) => {
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    try {
+        const query = isPostgres ? 'SELECT * FROM expense_categories WHERE shop_id = $1 ORDER BY id ASC' : 'SELECT * FROM expense_categories WHERE shop_id = ? ORDER BY id ASC';
+        let categories;
+        if (isPostgres) categories = (await getPostgres().query(query, [shopId])).rows;
+        else categories = getSqlite().prepare(query).all(shopId);
+        res.json(categories);
+    } catch (err) {
+        console.error("Fetch expense categories error:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // POST /api/expense-categories
-router.post('/', requireAuth, (req, res) => {
-    const { name, emoji, color_class } = req.body;
+router.post('/', requireAuth, async (req, res) => {
+    const { name } = req.body;
+    const shopId = req.session.user.shop_id;
     if (!name) return res.status(400).json({ error: 'name is required' });
 
-    const result = db.prepare(
-        'INSERT INTO expense_categories (shop_id, name, emoji, color_class) VALUES (?, ?, ?, ?)'
-    ).run(req.session.user.shop_id, name, emoji || '📦', color_class || 'bg-slate-700 text-slate-300');
-
-    res.json({ ok: true, id: result.lastInsertRowid });
+    try {
+        const isPostgres = usePostgres();
+        const query = isPostgres ? 'INSERT INTO expense_categories (shop_id, name) VALUES ($1, $2) RETURNING id' : 'INSERT INTO expense_categories (shop_id, name) VALUES (?, ?)';
+        if (isPostgres) {
+            const { rows } = await getPostgres().query(query, [shopId, name]);
+            res.json({ ok: true, id: rows[0].id });
+        } else {
+            const result = getSqlite().prepare(query).run(shopId, name);
+            res.json({ ok: true, id: result.lastInsertRowid });
+        }
+    } catch (err) {
+        console.error("Create expense category error:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // DELETE /api/expense-categories/:id
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
     const catId = parseInt(req.params.id);
-    const cat = db.prepare('SELECT id FROM expense_categories WHERE id = ? AND shop_id = ?').get(catId, req.session.user.shop_id);
-    if (!cat) return res.status(404).json({ error: 'Category not found' });
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    try {
+        let cat;
+        if (isPostgres) cat = (await getPostgres().query('SELECT id, name FROM expense_categories WHERE id = $1 AND shop_id = $2', [catId, shopId])).rows[0];
+        else cat = getSqlite().prepare('SELECT id, name FROM expense_categories WHERE id = ? AND shop_id = ?').get(catId, shopId);
+        
+        if (!cat) return res.status(404).json({ error: 'Category not found' });
 
-    // Check if category is in use
-    const categoryName = db.prepare('SELECT name FROM expense_categories WHERE id = ?').get(catId).name;
-    const count = db.prepare('SELECT COUNT(*) as count FROM expenses WHERE category = ? AND shop_id = ?').get(categoryName, req.session.user.shop_id).count;
+        const countQ = isPostgres 
+            ? 'SELECT COUNT(*)::int as count FROM expenses WHERE category = $1 AND shop_id = $2'
+            : 'SELECT COUNT(*) as count FROM expenses WHERE category = ? AND shop_id = ?';
+        let count;
+        if (isPostgres) count = (await getPostgres().query(countQ, [cat.name, shopId])).rows[0].count;
+        else count = getSqlite().prepare(countQ).get(cat.name, shopId).count;
 
-    if (count > 0) {
-        return res.status(400).json({ error: 'Category is in use by expenses and cannot be deleted.' });
+        if (count > 0) return res.status(400).json({ error: 'Category is in use by expenses and cannot be deleted.' });
+
+        const delQ = isPostgres ? 'DELETE FROM expense_categories WHERE id = $1 AND shop_id = $2' : 'DELETE FROM expense_categories WHERE id = ? AND shop_id = ?';
+        if (isPostgres) await getPostgres().query(delQ, [catId, shopId]);
+        else getSqlite().prepare(delQ).run(catId, shopId);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error("Delete expense category error:", err);
+        res.status(500).json({ error: err.message });
     }
-
-    db.prepare('DELETE FROM expense_categories WHERE id = ? AND shop_id = ?').run(catId, req.session.user.shop_id);
-    res.json({ ok: true });
 });
 
 module.exports = router;
