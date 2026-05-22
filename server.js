@@ -56,6 +56,8 @@ app.get("/admin/store-monitoring", (req, res) => {
 // Static assets (js, css, etc.) served after named routes
 app.use(express.static(path.join(__dirname, "public")));
 
+const { initPostgres } = require("./db/db-init");
+
 const PORT = process.env.PORT || 4000;
 
 function startServer(port = PORT) {
@@ -81,7 +83,11 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
-  startServer();
+  (async () => {
+    // Initialize Database for PostgreSQL if needed
+    await initPostgres();
+    startServer();
+  })();
 }
 
 module.exports = { app, startServer };
