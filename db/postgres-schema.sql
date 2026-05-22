@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT DEFAULT 'active',
   allowed_panels TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   panel_permissions TEXT
 );
 
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS products (
   recovered_damage_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
   manual_damage_loss DOUBLE PRECISION NOT NULL DEFAULT 0,
   recovered_damage_quantity INTEGER NOT NULL DEFAULT 0,
-  image_path TEXT
+  image_path TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS product_batches (

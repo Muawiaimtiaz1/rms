@@ -40,6 +40,32 @@ async function initPostgres() {
       
       console.log("✅ Initial superadmin ('owner' / 'admin123') created.");
     }
+
+    // 3. Robust Schema Updates (Add missing columns to existing tables)
+    console.log("🛠 Checking for required schema updates...");
+    
+    // Check for updated_at in products
+    const productUpdateCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'products' AND column_name = 'updated_at'
+    `);
+    if (productUpdateCheck.rows.length === 0) {
+      console.log("🔧 Migrating products table: Adding updated_at column...");
+      await query("ALTER TABLE products ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()");
+      console.log("✅ products.updated_at added.");
+    }
+
+    // Check for updated_at in users
+    const userUpdateCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'users' AND column_name = 'updated_at'
+    `);
+    if (userUpdateCheck.rows.length === 0) {
+      console.log("🔧 Migrating users table: Adding updated_at column...");
+      await query("ALTER TABLE users ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()");
+      console.log("✅ users.updated_at added.");
+    }
+
   } catch (err) {
     console.error("❌ PostgreSQL Initialization Error:", err.message);
     // Don't crash the server, but log the error
