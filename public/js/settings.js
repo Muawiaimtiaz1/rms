@@ -791,26 +791,22 @@ async function renderUsers() {
   if (!isMaster) {
     const ROLE_COLORS = {
       admin: {
-        bg: "bg-indigo-500",
-        badge:
-          "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
+        bg: "bg-gradient-to-br from-indigo-600 to-violet-700",
+        badge: "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
       },
       pos_user: {
-        bg: "bg-emerald-500",
-        badge:
-          "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+        bg: "bg-gradient-to-br from-emerald-500 to-teal-600",
+        badge: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
       },
       manager: {
-        bg: "bg-amber-500",
-        badge:
-          "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+        bg: "bg-gradient-to-br from-amber-500 to-orange-600",
+        badge: "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400",
       },
     };
     const getColor = (role) =>
       ROLE_COLORS[role] || {
-        bg: "bg-slate-400",
-        badge:
-          "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400",
+        bg: "bg-gradient-to-br from-slate-400 to-slate-600",
+        badge: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400",
       };
 
     const cardsHtml = users
@@ -822,45 +818,67 @@ async function renderUsers() {
           .slice(0, 2)
           .toUpperCase();
         const { bg, badge } = getColor(u.role);
-        const statusOk = !u.status || u.status === "active";
+        const isActive = !u.status || u.status === "active";
         return `
-        <div class="glass rounded-2xl p-6 border border-gray-200 dark:border-gray-800 hover:shadow-xl hover:-translate-y-1 transition-all bg-white dark:bg-gray-900 flex flex-col gap-4">
-          <div class="flex flex-col items-center text-center gap-3">
-            <div class="w-16 h-16 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold mb-5 shadow-lg relative">
-              ${initials}
-              <span class="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-900 ${statusOk ? "bg-emerald-400" : "bg-red-400"}"></span>
-            </div>
-            <div>
-              <div class="font-bold text-gray-900 dark:text-white text-base">${u.name}</div>
-              <div class="text-xs text-gray-400 dark:text-gray-500">@${u.username}</div>
-            </div>
-            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${badge}">${u.role.replace("_", " ")}</span>
+        <div onclick='openUserAccess(${JSON.stringify(u).replace(/'/g, "&apos;")})' class="group relative bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 p-8 flex flex-col items-center text-center gap-6 hover:shadow-[0_40px_80px_-30px_rgba(0,0,0,0.12)] hover:-translate-y-2 transition-all duration-700 cursor-pointer overflow-hidden">
+          
+          <!-- Background Decor -->
+          <div class="absolute -top-24 -right-24 w-48 h-48 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-full blur-3xl group-hover:bg-indigo-500/10 transition-colors duration-700"></div>
+          
+          <div class="relative">
+             <div class="w-24 h-24 rounded-[2.5rem] ${bg} p-0.5 shadow-2xl relative overflow-hidden">
+                <div class="w-full h-full rounded-[2.4rem] flex items-center justify-center text-white text-4xl font-black bg-white/10 backdrop-blur-sm border border-white/20">
+                  ${initials}
+                </div>
+             </div>
+             <div class="absolute -bottom-1 -right-1 w-8 h-8 rounded-xl ${isActive ? 'bg-emerald-500' : 'bg-rose-500'} border-4 border-white dark:border-slate-900 flex items-center justify-center shadow-lg">
+                <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isActive ? 'M5 13l4 4L19 7' : 'M6 18L18 6M6 6l12 12'}"/></svg>
+             </div>
           </div>
-          <div class="mt-auto pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center">
-            <div class="text-xs text-gray-400">${u.email || "—"}</div>
-            <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}','${u.username}','${u.email || ""}','${u.phone || ""}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, "&quot;")}, ${u.shop_id}, '${u.status || "active"}')"
-              class="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all" title="Edit User">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            </button>
+
+          <div class="relative z-10">
+            <h4 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight line-clamp-1">${u.name}</h4>
+            <p class="text-xs font-bold text-slate-400 tracking-[0.2em] uppercase mt-1">@${u.username}</p>
           </div>
+
+          <div class="px-5 py-2 rounded-2xl ${badge} text-[9px] font-black uppercase tracking-[0.25em] shadow-sm relative z-10 transition-transform group-hover:scale-110">
+            ${u.role.replace("_", " ")}
+          </div>
+          
+          <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/0 via-white/5 to-indigo-500/0 opacity-0 group-hover:opacity-100 pointer-events-none transform -translate-x-full group-hover:translate-x-full transition-all duration-1000"></div>
         </div>`;
       })
       .join("");
 
     $c("page-content").innerHTML = `
-      <div class="flex items-end justify-between gap-4 mb-8">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
         <div>
-          <h3 class="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">Your Team</h3>
-          <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">${users.length} staff member${users.length !== 1 ? "s" : ""} in your shop</p>
+          <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-widest mb-3">
+             <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+             Team Management
+          </span>
+          <h3 class="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">Staff Directory</h3>
+          <p class="text-slate-500 dark:text-slate-400 text-sm font-medium mt-1">Manage ${users.length} verified operators in your shop</p>
         </div>
+        ${isMaster ? `
+        <button onclick="openCreateUser()" class="h-14 px-8 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-black shadow-2xl hover:shadow-indigo-500/20 hover:-translate-y-1 active:scale-95 transition-all flex items-center gap-3">
+          <div class="w-6 h-6 rounded-lg bg-white/20 dark:bg-slate-900/10 flex items-center justify-center">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+          </div>
+          Add New Member
+        </button>
+        ` : ''}
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 pb-32">
         ${cardsHtml || `<div class="col-span-full py-24 text-center text-gray-400 italic">No staff members found.</div>`}
       </div>`;
     return;
   }
 
   // ── Superadmin: full table view ──
+  const shopsRes = await api("/api/shops");
+  shops = Array.isArray(shopsRes) ? shopsRes : [];
+
   $c("page-content").innerHTML = `
     <div class="flex justify-between items-center mb-6">
       <p class="text-slate-400 text-sm">${users.length} user(s)</p>
@@ -873,6 +891,7 @@ async function renderUsers() {
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Username</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Role</th>
+          <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Access</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Status</th>
           <th class="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 text-right">Actions</th>
         </tr></thead>
@@ -888,6 +907,11 @@ async function renderUsers() {
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-center justify-center min-w-[60px] ${u.role === "superadmin" ? "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30" : u.role === "admin" ? "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}">
                   ${u.role.toUpperCase().replace("_", " ")}
                 </span>
+              </td>
+              <td class="px-5 py-4">
+                <div class="flex flex-wrap gap-1 max-w-[200px]">
+                  ${(u.allowed_panels || []).map(pid => `<span class="bg-slate-100 dark:bg-slate-800 text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-500">${pid}</span>`).join('') || '<span class="text-[8px] text-slate-400">Default</span>'}
+                </div>
               </td>
               <td class="px-5 py-4">
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-center justify-center min-w-[60px] ${u.status === "active" || !u.status ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}">
@@ -912,31 +936,33 @@ async function renderUsers() {
 }
 
 function userFormHtml(u = {}) {
+  const isMaster = currentUser.role === "superadmin";
+
   return `
     <div class="space-y-4">
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="sm:col-span-2 lg:col-span-1">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Full Name *</label>
-          <input id="uf-name" value="${u.name || ""}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Full name" />
+          <input id="uf-name" value="${u.name || ""}" ${!isMaster ? "readonly" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm ${!isMaster ? "opacity-70 bg-slate-50 cursor-not-allowed" : ""}" placeholder="Full name" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Username *</label>
-          <input id="uf-username" value="${u.username || ""}" ${u.id ? "readonly" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all ${u.id ? "opacity-50" : ""} shadow-sm" placeholder="username" />
+          <input id="uf-username" value="${u.username || ""}" readonly class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all opacity-50 shadow-sm cursor-not-allowed" placeholder="username" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Password ${u.id ? "(Optional)" : "*"}</label>
-          <input id="uf-password" type="password" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="••••••••" />
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">New Password ${u.id ? "(Optional)" : "*"}</label>
+          <input id="uf-password" type="password" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/50 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm font-bold" placeholder="••••••••" />
         </div>
-        <div>
+        <div class="${!isMaster ? "hidden" : ""}">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Phone</label>
-          <input id="uf-phone" value="${u.phone || ""}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="03xx-xxxxxxx" />
+          <input id="uf-phone" value="${u.phone || ""}" ${!isMaster ? "readonly" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="03xx-xxxxxxx" />
         </div>
-        <div>
+        <div class="${!isMaster ? "hidden" : ""}">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Email</label>
-          <input id="uf-email" value="${u.email || ""}" type="email" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="user@example.com" />
+          <input id="uf-email" value="${u.email || ""}" ${!isMaster ? "readonly" : ""} type="email" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="user@example.com" />
         </div>
-        ${u.role === "superadmin"
-      ? ""
+        ${u.role === "superadmin" || !isMaster
+      ? `<input type="hidden" id="uf-role" value="${u.role || "pos_user"}" />`
       : `
         <div>
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Role</label>
@@ -948,33 +974,25 @@ function userFormHtml(u = {}) {
         </div>
         `
     }
-        <div class="${u.role === "superadmin" ? "sm:col-span-2 lg:col-span-1" : ""}">
+        <div class="${u.role === "superadmin" || !isMaster ? "hidden" : ""}">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Status</label>
           <select id="uf-status" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
             <option value="active" ${u.status === "active" || !u.status ? "selected" : ""}>Active</option>
             <option value="blocked" ${u.status === "blocked" ? "selected" : ""}>Blocked</option>
           </select>
         </div>
-        ${u.role === "superadmin"
-      ? `<input type="hidden" id="uf-role" value="superadmin" /><input type="hidden" id="uf-shop" value="" />`
+        ${u.role === "superadmin" || !isMaster
+      ? `<input type="hidden" id="uf-shop" value="${u.shop_id || ""}" /><input type="hidden" id="uf-status" value="${u.status || "active"}" />`
       : `
         <div class="sm:col-span-2">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Assign Shop</label>
-          <select id="uf-shop" ${currentUser.role !== "superadmin" ? "disabled" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
-            ${currentUser.role === "superadmin"
-        ? shops
-          .map(
-            (s) =>
-              `<option value="${s.id}" ${u.shop_id === s.id ? "selected" : ""}>${s.name}</option>`,
-          )
-          .join("")
-        : `<option value="${currentUser.shop_id}" selected>${currentUser.shop_name || "My Shop"}</option>`
-      }
+          <select id="uf-shop" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
+            ${shops.map((s) => `<option value="${s.id}" ${u.shop_id === s.id ? "selected" : ""}>${s.name}</option>`).join("")}
           </select>
         </div>
         `
     }
-        ${u.role === "superadmin"
+        ${u.role === "superadmin" || !isMaster
       ? ""
       : `
         <div class="sm:col-span-2 lg:col-span-3" id="uf-panels-container" style="display: ${u.role === "admin" ? "none" : "block"}">
@@ -1564,5 +1582,88 @@ async function saveSubscriptionPayment() {
   closeModal();
   renderSubscriptions();
 }
+
+function toggleUserAccessMenu() {
+  const sidebar = document.getElementById("user-access-sidebar");
+  const backdrop = document.getElementById("user-access-backdrop");
+  if (!sidebar || !backdrop) return;
+
+  const isOpen = !sidebar.classList.contains("-translate-x-full");
+
+  if (isOpen) {
+    sidebar.classList.add("-translate-x-full");
+    backdrop.classList.add("opacity-0");
+    setTimeout(() => backdrop.classList.add("hidden"), 300);
+  } else {
+    backdrop.classList.remove("hidden");
+    requestAnimationFrame(() => {
+      sidebar.classList.remove("-translate-x-full");
+      backdrop.classList.remove("opacity-0");
+    });
+  }
+}
+
+function openUserAccess(user) {
+  const nameEl = document.getElementById("ua-name");
+  const usernameEl = document.getElementById("ua-username");
+  const avatarEl = document.getElementById("ua-avatar");
+  const listEl = document.getElementById("ua-panels-list");
+  const editBtn = document.getElementById("ua-edit-btn");
+
+  if (nameEl) nameEl.textContent = user.name;
+  if (usernameEl) usernameEl.textContent = `@${user.username}`;
+  if (avatarEl) {
+    const initials = (user.name || user.username).split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+    avatarEl.textContent = initials;
+    // Set color based on role
+    const colors = {
+      admin: "bg-indigo-600",
+      pos_user: "bg-emerald-500",
+      manager: "bg-amber-500"
+    };
+    avatarEl.className = `w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-xl ${colors[user.role] || "bg-slate-500"}`;
+  }
+
+  if (listEl) {
+    const panels = user.allowed_panels || [];
+    if (panels.length === 0) {
+      listEl.innerHTML = `<div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 text-xs text-slate-400 italic">No specific modules assigned. User has default baseline access.</div>`;
+    } else {
+      listEl.innerHTML = panels.map(pid => {
+        const panel = AVAILABLE_PANELS.find(p => p.id === pid);
+        if (!panel) return '';
+        return `
+          <div class="flex items-center gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-sm">
+            <div class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-indigo-500">
+               <svg width="20" height="20" viewBox="0 0 24 24" fill="none">${panel.icon}</svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-slate-700 dark:text-slate-200">${panel.label}</div>
+              <div class="text-[10px] text-slate-400 font-medium">${panel.desc}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  if (editBtn) {
+    const isMaster = currentUser.role === "superadmin";
+    editBtn.innerHTML = isMaster ? `
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+      Manage Permissions
+    ` : `
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      Change Password
+    `;
+    editBtn.onclick = () => {
+      toggleUserAccessMenu();
+      openEditUser(user.id, user.name, user.username, user.email, user.phone, user.role, (user.allowed_panels || []), user.shop_id, user.status);
+    };
+  }
+
+  toggleUserAccessMenu();
+}
+
 
 

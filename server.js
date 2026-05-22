@@ -1,4 +1,5 @@
 require("dotenv").config();
+require("express-async-errors");
 const express = require("express");
 const session = require("express-session");
 const path = require("path");
@@ -28,6 +29,7 @@ app.use("/api/expenses", require("./routes/expenses"));
 app.use("/api/expense-categories", require("./routes/expense-categories"));
 app.use("/api/product-categories", require("./routes/product-categories"));
 app.use("/api/analytics", require("./routes/analytics"));
+app.use("/api/ai", require("./routes/ai"));
 app.use("/api/customers", require("./routes/customers"));
 app.use("/api/shops", require("./routes/shops"));
 app.use("/api/subscriptions", require("./routes/subscriptions"));

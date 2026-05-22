@@ -9,7 +9,14 @@
     <script>
         tailwind.config = {
             darkMode: 'class',
-            theme: { extend: {} }
+            theme: {
+                extend: {
+                    colors: {
+                        white: '#f8fafc',
+                        black: '#0f172a'
+                    }
+                }
+            }
         }
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
@@ -33,7 +40,7 @@
 
         /* ─── Cards (standard solid, no glassmorphism) ──── */
         .glass {
-            background: #ffffff;
+            background: #f8fafc;
             border: 1px solid #e2e8f0;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
         }
@@ -74,7 +81,7 @@
 
         .dark .nav-link.active {
             background: rgba(99, 102, 241, 0.2);
-            color: #ffffff;
+            color: #f8fafc;
         }
 
         .nav-link:not(.active):hover {
@@ -84,7 +91,7 @@
 
         .dark .nav-link:not(.active):hover {
             background: rgba(255, 255, 255, 0.07);
-            color: #ffffff;
+            color: #f8fafc;
         }
 
         /* DARK MODE */
@@ -97,7 +104,7 @@
         /* This rule is now redundant due to the more specific .dark .nav-link:not(.active):hover */
         /* .dark .nav-link:hover,
         .dark .nav-link.active {
-            color: white;
+            color: #f8fafc;
         } */
 
         /* ─── Scrollbar ─────────────────────────────────── */
@@ -107,7 +114,7 @@
 
         html:not(.dark) ::-webkit-scrollbar-track {
             background: #f1f5f9;
-            color: white;
+            color: #f8fafc;
         }
 
         html:not(.dark) ::-webkit-scrollbar-thumb {
@@ -159,8 +166,6 @@
         }
 
         .product-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.1);
             border-color: #6366f1;
         }
 
@@ -170,7 +175,6 @@
 
         .dark .product-card:hover {
             border-color: #374151;
-            box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.5);
         }
 
         @font-face {
@@ -194,7 +198,7 @@
             #bill-content * {
                 visibility: visible;
                 font-family: 'bit array-a2' !important;
-                color: #000000 !important;
+                color: #111827 !important;
                 font-weight: 700 !important;
             }
 
@@ -271,10 +275,19 @@
 
         .lobby-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-            gap: 2.5rem 1rem;
-            padding: 2rem 0;
+            grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+            gap: 2rem 1rem;
+            padding: 0;
             width: 100%;
+        }
+
+        .lobby-module-group {
+            padding: 1.25rem 0 1.5rem;
+            border-bottom: 1px solid rgba(99, 102, 241, 0.16);
+        }
+
+        .lobby-module-group:last-child {
+            border-bottom: 0;
         }
 
         .lobby-item {
@@ -295,7 +308,7 @@
         .lobby-icon-wrap {
             width: 82px;
             height: 82px;
-            background: #ffffff;
+            background: #f8fafc;
             border-radius: 18px;
             display: flex;
             align-items: center;
@@ -327,7 +340,7 @@
         /* Top Bar Enhancements */
         .header-status-badge {
             background: #ef4444;
-            color: white;
+            color: #f8fafc;
             padding: 4px 12px;
             border-radius: 99px;
             font-size: 11px;
@@ -378,20 +391,30 @@
     <header id="top-nav"
         class="fixed top-0 left-0 w-full h-16 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 z-50 flex items-center justify-between px-6 transition-colors duration-300 shadow-sm">
 
-        <!-- Branding (Left) -->
-        <div class="flex items-center gap-3 min-w-fit" id="header-branding">
-            <div
-                class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-900/20">
-                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+        <!-- Quick Actions / Sidebar Trigger (Left) -->
+        <div class="flex items-center gap-4">
+            <button onclick="toggleQuickMenu()" id="quick-menu-btn"
+                class="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-800">
+                <svg class="w-5 h-5 transform transition-transform rotate-180" id="quick-menu-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
                 </svg>
-            </div>
-            <div class="hidden sm:block">
-                <div class="font-bold text-gray-900 dark:text-white text-sm tracking-tight leading-none"
-                    id="header-shop-name">POS System</div>
-                <div class="text-[9px] text-gray-500 dark:text-slate-500 uppercase tracking-widest font-bold mt-0.5"
-                    id="header-shop-mgmt">Management</div>
+            </button>
+
+            <!-- Branding (Left) -->
+            <div class="flex items-center gap-3 min-w-fit" id="header-branding">
+                <div
+                    class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-900/20">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                </div>
+                <div class="hidden sm:block">
+                    <div class="font-bold text-gray-900 dark:text-white text-sm tracking-tight leading-none"
+                        id="header-shop-name">POS System</div>
+                    <div class="text-[9px] text-gray-500 dark:text-slate-500 uppercase tracking-widest font-bold mt-0.5"
+                        id="header-shop-mgmt">Management</div>
+                </div>
             </div>
         </div>
         <!-- Lobby Controls (Always shown) -->
@@ -423,100 +446,35 @@
                 <div class="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
             </div>
 
-            <!-- Switch Module Button (Hidden in lobby via CSS) -->
-            <div id="switch-module-btn" class="flex items-center">
-                 <button onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" 
-                         class="flex items-center gap-2 px-3 py-2 sm:px-4 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition-all border border-indigo-100/50 dark:border-indigo-800/50">
-                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                     </svg>
-                     <span class="hidden sm:block">Switch Module</span>
-                 </button>
-            </div>
-        </div>
-
         <!-- User Controls (Right) -->
-        <div class="relative min-w-fit">
-            <button onclick="toggleUserDropdown(event)" id="profile-trigger"
-                class="flex items-center gap-3 p-1.5 pr-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-all group">
-                <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-indigo-600/20 group-hover:scale-105 transition-transform"
-                    id="user-avatar">A</div>
-                <div class="hidden lg:flex flex-col items-start">
-                    <div class="text-[11px] font-bold text-gray-900 dark:text-white leading-none truncate max-w-[100px]"
-                        id="user-name-sidebar">Admin</div>
-                    <div class="text-[9px] text-gray-500 uppercase font-black tracking-widest mt-0.5"
-                        id="user-role-sidebar">admin</div>
-                </div>
-                <svg class="w-4 h-4 text-slate-400 group-hover:text-indigo-500 transition-colors ml-1" fill="none"
-                    stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        <div class="flex items-center gap-3">
+            <div class="hidden lg:flex flex-col items-end mr-3">
+                <div class="text-[11px] font-bold text-gray-900 dark:text-white leading-none truncate max-w-[120px]" id="user-name-sidebar">Admin</div>
+                <div class="text-[9px] text-gray-500 uppercase font-black tracking-widest mt-0.5" id="user-role-sidebar">admin</div>
+            </div>
+
+            <!-- Switch Module (Icon Only) -->
+            <button onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" 
+                class="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-800" title="Switch Module">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                 </svg>
             </button>
 
-            <!-- Dropdown Menu -->
-            <div id="profile-dropdown"
-                class="absolute right-0 mt-3 w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-800 overflow-hidden z-[60]">
-                <div
-                    class="px-5 py-4 border-b border-gray-50 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">
-                        Account Options</p>
-                </div>
-
-                <div class="p-1.5">
-                    <div onclick="navigate('settings'); toggleUserDropdown()" class="dropdown-item rounded-xl">
-                        <div
-                            class="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                        </div>
-                        Account Settings
-                    </div>
-
-                    <div onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" class="dropdown-item rounded-xl">
-                        <div
-                            class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                            </svg>
-                        </div>
-                        Switch Module
-                    </div>
- 
-                    <div onclick="toggleTheme()" class="dropdown-item rounded-xl">
-                        <div
-                            class="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                            <svg id="drop-sun-icon" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                            </svg>
-                            <svg id="drop-moon-icon" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                            </svg>
-                        </div>
-                        Convert Mode
-                    </div>
-                </div>
-
-                <div class="p-1.5 border-t border-gray-50 dark:border-slate-800">
-                    <div onclick="logout()"
-                        class="dropdown-item rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30">
-                        <div class="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/30 flex items-center justify-center">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                            </svg>
-                        </div>
-                        Sign Out
-                    </div>
-                </div>
+            <!-- Theme Toggle (Convert Mode) -->
+            <button onclick="toggleTheme()" 
+                class="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-800" title="Convert Mode (Theme)">
+                <svg id="sun-icon-header" class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                <svg id="moon-icon-header" class="w-5 h-5 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+            </button>
+            
+            <button onclick="logout()" 
+                class="flex items-center justify-center w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-all border border-rose-100 dark:border-rose-800/50 group" title="Sign Out">
+                <svg class="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+            </button>
+        </div>
             </div>
         </div>
     </header>
@@ -555,6 +513,62 @@
 
     <!-- Bill Print Area -->
     <div id="bill-print-area" class="hidden"></div>
+
+    <!-- Quick Navigation Sidebar (Left) -->
+    <div id="quick-sidebar-backdrop" onclick="toggleQuickMenu()" class="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[70] hidden opacity-0 transition-opacity duration-300"></div>
+    <aside id="quick-sidebar" class="fixed top-0 left-0 h-full w-[380px] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-[80] shadow-[0_0_100px_-20px_rgba(0,0,0,0.3)] -translate-x-full transition-transform duration-500 ease-out flex flex-col p-8">
+        <div class="flex items-center justify-between mb-10">
+            <h3 class="text-2xl font-black text-slate-900 dark:text-white tracking-tighter">Navigate Modules</h3>
+            <button onclick="toggleQuickMenu()" class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-rose-500 transition-all flex items-center justify-center">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="flex-1 overflow-y-auto space-y-8 pr-2" id="quick-sidebar-content">
+            <!-- Panels will be rendered here via JS -->
+        </div>
+        <div class="mt-8 pt-8 border-t border-slate-100 dark:border-slate-800">
+            <button onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" class="w-full flex items-center justify-center gap-3 h-14 rounded-2xl bg-indigo-600 text-white font-black text-sm shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                Return to Lobby
+            </button>
+        </div>
+    </aside>
+
+    <!-- User Access Details Sidebar (Left) -->
+    <div id="user-access-backdrop" onclick="toggleUserAccessMenu()" class="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[70] hidden opacity-0 transition-opacity duration-300"></div>
+    <aside id="user-access-sidebar" class="fixed top-0 left-0 h-full w-[400px] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-[80] shadow-[0_0_100px_-20px_rgba(0,0,0,0.3)] -translate-x-full transition-transform duration-500 ease-out flex flex-col p-8">
+        <div class="flex items-center justify-between mb-8">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white" id="ua-avatar">?</div>
+                <div>
+                    <h3 class="text-xl font-black text-slate-900 dark:text-white tracking-tight" id="ua-name">User Name</h3>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest" id="ua-username">@username</p>
+                </div>
+            </div>
+            <button onclick="toggleUserAccessMenu()" class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-rose-500 transition-all flex items-center justify-center">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto pr-2">
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Assigned Modules</label>
+                    <div class="grid grid-cols-1 gap-3" id="ua-panels-list">
+                        <!-- User panels will be rendered here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-8 pt-8 border-t border-slate-100 dark:border-slate-800">
+            <button id="ua-edit-btn" class="w-full flex items-center justify-center gap-3 h-14 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-sm shadow-xl hover:bg-slate-800 dark:hover:bg-slate-100 transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                Manage Permissions
+            </button>
+        </div>
+    </aside>
+
     <script src="/js/analytics/analytics-core.js?v=1.0.9"></script>
     <script src="/js/analytics/analytics-overview.js?v=1.0.9"></script>
     <script src="/js/analytics/analytics-charts.js?v=1.0.9"></script>
@@ -562,6 +576,7 @@
     <script src="/js/settings.js?v=1.0.8"></script>
     <script src="/js/hierarchy.js?v=1.0.9"></script>
     <script src="/js/kitchen.js?v=1.0.8"></script>
-    <script src="/js/app.js?v=1.0.8"></script>
+    <script src="/js/products/product-image-tools.js?v=1.0.0"></script>
+    <script src="/js/app.js?v=1.0.10"></script>
 </body>
 </html>

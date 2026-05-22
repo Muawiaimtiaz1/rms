@@ -200,6 +200,87 @@ function renderSpecificSubTab(tabId, data) {
       </div>
     `;
 
+  } else if (tabId === "ai") {
+    // ─── AI EXPERT ANALYST ───
+    viewport.innerHTML = `
+      <div class="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl gap-4">
+        <div class="w-10 h-10 border-4 border-violet-200 dark:border-violet-800 border-t-violet-600 rounded-full animate-spin"></div>
+        <span class="text-sm font-bold text-slate-500">AI Analyst is scanning your records for insights...</span>
+      </div>
+    `;
+
+    api(`/api/ai/insights?period=${analyticsPeriod}`).then(aiData => {
+      viewport.innerHTML = `
+        <div class="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+          <!-- AI Verdict Banner -->
+          <div class="p-6 bg-gradient-to-r from-violet-600 to-indigo-600 rounded-3xl text-white shadow-lg shadow-indigo-600/20 flex flex-col md:flex-row justify-between items-center gap-6 border border-white/10 relative overflow-hidden">
+             <div class="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
+             <div>
+                <div class="flex items-center gap-2 mb-1">
+                   <span class="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse"></span>
+                   <span class="text-[10px] font-black uppercase tracking-widest text-indigo-100">AI Data Verdict</span>
+                </div>
+                <h3 class="text-2xl font-black tracking-tight">${aiData.summary.verdict}</h3>
+                <p class="text-xs text-indigo-100/80 mt-1">AI Confidence: ${aiData.summary.aiConfidence} based on ${analyticsPeriod} performance data.</p>
+             </div>
+             <div class="flex gap-4">
+                <div class="bg-white/10 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 text-center">
+                   <span class="text-[9px] uppercase font-black block text-indigo-200">Margin</span>
+                   <span class="text-lg font-black">${aiData.rawMetrics.margin}</span>
+                </div>
+                <div class="bg-white/10 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 text-center">
+                   <span class="text-[9px] uppercase font-black block text-indigo-200">Growth</span>
+                   <span class="text-lg font-black">${aiData.rawMetrics.growth}</span>
+                </div>
+             </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Insights List -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
+                <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-6 flex items-center gap-2">
+                   <svg class="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg> 
+                   Automated Insights
+                </h5>
+                <div class="space-y-4">
+                   ${aiData.insights.map(ins => `
+                      <div class="p-4 rounded-2xl border ${ins.type === 'danger' ? 'bg-rose-50 border-rose-100 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/40 dark:text-rose-400' : ins.type === 'warning' ? 'bg-amber-50 border-amber-100 text-amber-700 dark:bg-amber-950/20 dark:border-amber-900/40 dark:text-amber-400' : 'bg-emerald-50 border-emerald-100 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-900/40 dark:text-emerald-400'}">
+                         <h6 class="text-sm font-black">${ins.title}</h6>
+                         <p class="text-xs mt-1 font-medium opacity-90">${ins.message}</p>
+                      </div>
+                   `).join('')}
+                   ${aiData.insights.length === 0 ? `<p class="text-slate-400 text-xs italic py-4">No critical anomalies detected.</p>` : ''}
+                </div>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
+                <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-6 flex items-center gap-2">
+                   <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                   AI Recommendations
+                </h5>
+                <div class="space-y-6">
+                   ${aiData.recommendations.map(rec => `
+                      <div class="flex gap-4 group">
+                         <div class="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-800/40 group-hover:scale-110 transition-transform">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                         </div>
+                         <div>
+                            <h6 class="text-sm font-black text-slate-800 dark:text-white capitalize">${rec.action}</h6>
+                            <p class="text-[11px] text-slate-400 font-bold mt-0.5">${rec.reason}</p>
+                            <p class="text-xs text-slate-600 dark:text-slate-300 mt-1.5 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">${rec.suggestion}</p>
+                         </div>
+                      </div>
+                   `).join('')}
+                </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).catch(err => {
+      viewport.innerHTML = `<div class="p-6 text-rose-500 text-sm font-bold">Failed to load AI Insights: ${err.message}</div>`;
+    });
+
   } else if (tabId === "reports" || tabId === "custom_reports") {
     // ─── GENERAL TRANSACTION LEDGER DATA TABLE ───
     tabHtml = `

@@ -118,6 +118,7 @@ let shops = [];
 let managedShopId = null;
 let _posCustomerResults = [];
 let _posSelectedCustomer = null;
+let _posCheckoutCloseTimer = null;
 let _currentPage = "dashboard"; // ─── Setup ────────────────────────────────────────────────────────
 const AVAILABLE_PANELS = [
   {
@@ -218,7 +219,40 @@ const AVAILABLE_PANELS = [
   },
 ];
 
-const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions"];
+const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions", "settings", "users"];
+
+const MODULE_GROUPS = [
+  {
+    title: "Overview",
+    desc: "Daily command center and performance visibility.",
+    panels: ["dashboard", "analytics"],
+  },
+  {
+    title: "Sales",
+    desc: "Checkout, order history, customers, and delivery workflows.",
+    panels: ["pos", "sales-history", "customers", "delivery"],
+  },
+  {
+    title: "Inventory",
+    desc: "Products, brands, ingredients, and kitchen preparation.",
+    panels: ["products", "brands", "raw-stock", "kds"],
+  },
+  {
+    title: "Finance & Accounting",
+    desc: "Costs, subscriptions, billing controls, and money movement.",
+    panels: ["expenses", "subscriptions"],
+  },
+  {
+    title: "Operations",
+    desc: "Floor, table, and service management.",
+    panels: ["tables"],
+  },
+  {
+    title: "Administration",
+    desc: "People, permissions, platform structure, and system setup.",
+    panels: ["settings", "users", "hierarchy"],
+  },
+];
 
 // ─── Init ────────────────────────────────────────────────────────────
 async function init() {
@@ -232,11 +266,15 @@ async function init() {
     currentUser = data.user;
     currentUser.total_users = data.total_users || 1;
     currentUser.total_brands = data.total_brands || 1;
-    document.getElementById("user-name-sidebar").textContent =
-      currentUser.name || currentUser.username;
-    document.getElementById("user-role-sidebar").textContent = currentUser.role;
-    document.getElementById("user-avatar").textContent = (currentUser.name ||
-      currentUser.username)[0].toUpperCase();
+    const nameSidebar = document.getElementById("user-name-sidebar");
+    const roleSidebar = document.getElementById("user-role-sidebar");
+    const avatarHeader = document.getElementById("user-avatar");
+
+    if (nameSidebar) nameSidebar.textContent = currentUser.name || currentUser.username;
+    if (roleSidebar) roleSidebar.textContent = currentUser.role;
+    if (avatarHeader) {
+      avatarHeader.textContent = (currentUser.name || currentUser.username)[0].toUpperCase();
+    }
 
     // Display Shop Name in header
     const shopNameHeader = document.getElementById("header-shop-name");
@@ -269,7 +307,8 @@ async function init() {
     if (
       currentUser.role !== "superadmin" &&
       currentUser.allowed_panels &&
-      !currentUser.allowed_panels.includes(startPage)
+      !currentUser.allowed_panels.includes(startPage) &&
+      !(currentUser.role === 'admin' && (startPage === 'settings' || startPage === 'users'))
     ) {
       startPage = currentUser.allowed_panels[0] || "dashboard";
     }
@@ -308,6 +347,7 @@ function navigate(page) {
     if (
       !parent &&
       page !== "users" &&
+      page !== "settings" &&
       (!currentUser.allowed_panels ||
         !currentUser.allowed_panels.includes(page))
     )
@@ -416,10 +456,13 @@ async function fetchCategories() {
   }
 }
 
-let _activeSettingsTab = "profile";
+let _activeSettingsTab = localStorage.getItem("active_settings_tab") || "profile";
 
 async function renderSettings(tab) {
-  if (tab) _activeSettingsTab = tab;
+  if (tab) {
+    _activeSettingsTab = tab;
+    localStorage.setItem("active_settings_tab", tab);
+  }
 
   // Fetch receipt settings if on receipt tab
   if (_activeSettingsTab === "receipt") {
@@ -1304,6 +1347,9 @@ function productFormHtml(p = {}, brands = []) {
   const hasCompositePermission =
     currentUser.allowed_panels &&
     currentUser.allowed_panels.includes("composite_products");
+  const cropAspectOptions =
+    window.ProductImageTools?.getAspectOptions?.("pos") ||
+    '<option value="pos" selected>Product Card (4:3)</option>';
 
   const compHtml = hasCompositePermission
     ? `
@@ -1385,20 +1431,59 @@ function productFormHtml(p = {}, brands = []) {
               <input id="pf-image" type="file" accept="image/*" class="hidden" onchange="previewProductImage(this)" />
             </div>
           </div>
+          <div id="pf-crop-editor" class="hidden mt-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-4 space-y-4">
+            <div>
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h5 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Crop Image</h5>
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Saved images are normalized to the POS product card shape.</p>
+                </div>
+                <button type="button" onclick="resetProductImageCrop()" class="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300 hover:text-indigo-600 transition-all">
+                  Reset
+                </button>
+              </div>
+              <canvas id="pf-crop-canvas" class="w-full rounded-xl bg-slate-200 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-inner"></canvas>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                View
+                <select id="pf-crop-aspect" onchange="setProductImageCropAspect(this.value)" class="mt-1 w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-xs font-bold outline-none focus:border-indigo-500">
+                  ${cropAspectOptions}
+                </select>
+              </label>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Zoom
+                <input id="pf-crop-zoom" type="range" min="1" max="3" step="0.01" value="1" oninput="updateProductImageCrop({ zoom: parseFloat(this.value) })" class="mt-3 w-full accent-indigo-600" />
+              </label>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Horizontal
+                <input id="pf-crop-x" type="range" min="-100" max="100" step="1" value="0" oninput="updateProductImageCrop({ offsetX: parseFloat(this.value) })" class="mt-3 w-full accent-indigo-600" />
+              </label>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Vertical
+                <input id="pf-crop-y" type="range" min="-100" max="100" step="1" value="0" oninput="updateProductImageCrop({ offsetY: parseFloat(this.value) })" class="mt-3 w-full accent-indigo-600" />
+              </label>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                BG Sensitivity
+                <input id="pf-bg-tolerance" type="range" min="18" max="120" step="1" value="46" oninput="updateProductImageBgTolerance(this.value)" class="mt-3 w-full accent-emerald-600" />
+              </label>
+              <div class="grid grid-cols-2 gap-2">
+                <button type="button" onclick="removeProductImageBackground()" class="h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest transition-all">
+                  Remove BG
+                </button>
+                <button type="button" onclick="restoreProductImageBackground()" class="h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest hover:text-indigo-600 transition-all">
+                  Restore
+                </button>
+              </div>
+            </div>
+            <p id="pf-image-tool-status" class="text-[11px] font-bold text-slate-500 dark:text-slate-400"></p>
+            <button type="button" onclick="applyProductImageCrop()" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20">
+              Apply Crop
+            </button>
+          </div>
         </div>
       </div>
     </div>`;
-}
-
-function previewProductImage(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const preview = document.getElementById('pf-img-preview');
-    if (preview) preview.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover" />`;
-  };
-  reader.readAsDataURL(file);
 }
 
 async function openAddProduct() {
@@ -1410,6 +1495,7 @@ async function openAddProduct() {
   }
 
   window._formComponents = [];
+  window.ProductImageTools?.resetState?.();
   const randomSku = 'SKU-' + Math.random().toString(36).substring(2, 10).toUpperCase();
   openModal(
     "Add Product",
@@ -1428,6 +1514,7 @@ async function openAddProduct() {
 async function openEditProduct(id) {
   const brands = window._productBrands || (await api("/api/brands"));
   const product = allProducts.find((p) => p.id === id) || {};
+  window.ProductImageTools?.resetState?.();
 
   // Decide what to load into form components
   if (currentUser.shop_type === 'restaurant' && product.ingredients) {
@@ -1459,7 +1546,9 @@ async function saveProduct(id) {
     const ingredients = isRestaurant ?
       (window._formComponents || []).map(i => ({ raw_stock_id: i.raw_stock_id, quantity: i.quantity })) : [];
 
-    const imageFile = document.getElementById('pf-image')?.files?.[0];
+    const imageFile = window.ProductImageTools
+      ? await window.ProductImageTools.getUploadFile()
+      : document.getElementById('pf-image')?.files?.[0];
 
     const sku = $c("pf-sku").value.trim();
     const name = $c("pf-name").value.trim();
@@ -1924,48 +2013,86 @@ async function renderPOS() {
     if (targetShop) baseShopType = targetShop.shop_type;
   }
   const isRetail = baseShopType === 'retail';
-  const orderTypeClass = isRetail ? 'hidden' : 'flex';
+  window._posIsRetail = isRetail;
 
   $c("page-content").innerHTML = `
     <div class="flex flex-col gap-4">
-      <!-- Order Type Selector (Hidden for Retail) -->
-      <div class="${orderTypeClass} items-center gap-2 p-1 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-        <button id="otype-dine_in" onclick="switchOrderType('dine_in')" class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm transition-all">
-          🍽️ Dine-in
-        </button>
-        <button id="otype-takeaway" onclick="switchOrderType('takeaway')" class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
-          🛍️ Takeaway
-        </button>
-        <button id="otype-delivery" onclick="switchOrderType('delivery')" class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
-          🚚 Delivery
-        </button>
-        <button id="otype-orders" onclick="switchOrderType('orders')" class="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
-          📋 Orders
-        </button>
-      </div>
-
-      <div id="pos-content-grid" class="grid grid-cols-1 lg:grid-cols-5 gap-6 h-full transition-all">
+      <div id="pos-content-grid" class="h-full transition-all">
         <!-- Products Panel -->
-        <div class="lg:col-span-3 space-y-4">
-          <div class="flex gap-2">
+        <div class="space-y-4">
+          <div class="flex flex-col sm:flex-row gap-3">
             <input id="pos-search" oninput="filterPOSProducts()" placeholder="Search products…"
-              class="flex-1 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" />
+              class="flex-1 h-12 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" />
+            <button type="button" id="pos-orders-toolbar-btn" onclick="switchOrderType('orders')"
+              class="${isRetail ? 'hidden' : 'flex'} h-12 px-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-sm font-black transition-all items-center justify-center gap-2 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" d="M9 5h6M9 9h6M9 13h4m-7 8h12a2 2 0 002-2V5a2 2 0 00-2-2H8l-4 4v12a2 2 0 002 2z"/></svg>
+              <span>Orders</span>
+            </button>
+            <button type="button" onclick="openPOSCheckout()"
+              class="h-12 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-1.6 1.6A1 1 0 006.1 16H18M9 20a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z"/></svg>
+              <span>Checkout</span>
+              <span id="pos-checkout-count" class="min-w-6 h-6 px-2 rounded-full bg-white/20 flex items-center justify-center text-[11px]">0</span>
+              <span id="pos-checkout-total" class="hidden md:inline text-xs font-black text-indigo-100">Rs. 0.00</span>
+            </button>
           </div>
           <!-- Category pills -->
           <div id="pos-category-pills" class="flex flex-wrap gap-2">
             <button onclick="filterPOSByCategory(null)" class="cat-pill active px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-bold border border-transparent transition-all" data-cat="">All</button>
             ${(_productCategories || []).map(c => `<button onclick="filterPOSByCategory('${c.name}')" class="cat-pill px-4 py-1.5 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700 hover:border-indigo-400 transition-all" data-cat="${c.name}">${c.name}</button>`).join('')}
           </div>
-          <div id="pos-products" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[72vh] overflow-y-auto pr-1"></div>
+          <div id="pos-products" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 items-start min-h-[50vh] max-h-[calc(100vh-18rem)] overflow-y-auto pr-1 pb-4"></div>
         </div>
 
-        <!-- Cart / Order Panel -->
-        <div class="lg:col-span-2 glass rounded-2xl p-3 flex flex-col shadow-sm border border-slate-200 dark:border-slate-800 transition-all sticky top-24">
-          <h3 class="font-black text-slate-900 dark:text-white mb-2 flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800 uppercase tracking-tighter text-base">
-            <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-            Current Order
-          </h3>
+        <!-- Checkout Drawer -->
+        <div id="pos-checkout-backdrop" class="hidden fixed inset-x-0 top-20 bottom-0 z-40" aria-hidden="true">
+          <div id="pos-checkout-shade"
+            class="absolute inset-y-0 left-0 right-0 lg:right-[33.333333%] bg-slate-200/90 dark:bg-slate-950/80 backdrop-blur-sm opacity-0 transition-opacity duration-300 flex items-center justify-center p-6 text-center">
+            <div class="absolute inset-0 cursor-pointer" onclick="closePOSCheckout()"></div>
+            <div class="relative z-10 w-full max-w-lg">
+              <span class="block text-[11px] font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400 mb-3">Grand Total</span>
+              <span id="pos-checkout-overlay-total" class="block text-5xl md:text-7xl font-black tracking-tighter text-slate-900 dark:text-white mb-10">Rs. 0.00</span>
+              
+              <div class="grid ${isRetail ? 'grid-cols-1' : 'grid-cols-2'} gap-6 px-4">
+                <button onclick="checkout()" id="checkout-btn"
+                  class="py-4 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3">
+                  <span>Place Order</span>
+                </button>
+                <button onclick="sendToKitchen()" id="kitchen-btn"
+                  class="${isRetail ? 'hidden' : 'flex'} py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-black text-xl border border-slate-200 dark:border-slate-700 shadow-xl transition-all active:scale-95 disabled:opacity-40 items-center justify-center h-20 gap-3">
+                  <span>Kitchen</span>
+                </button>
+              </div>
+              <p class="mt-8 text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest opacity-50">Click background to return to cart</p>
+            </div>
+          </div>
+          <div id="pos-checkout-drawer"
+            class="absolute right-0 top-0 h-full w-full sm:w-[440px] md:w-[480px] lg:w-1/3 bg-white dark:bg-slate-900 p-4 flex flex-col shadow-2xl border-l border-slate-200 dark:border-slate-800 transition-transform duration-300 ease-out overflow-y-auto translate-x-full">
+          <div class="mb-3 flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <h3 class="font-black text-slate-900 dark:text-white flex items-center gap-2 uppercase tracking-tighter text-base">
+              <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              Current Order
+            </h3>
+            <button type="button" onclick="closePOSCheckout()" class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300 transition-all flex items-center justify-center" title="Close checkout">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
           
+          <div id="pos-order-type-selector" class="${isRetail ? 'hidden' : 'block'} mb-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-3">
+            <div class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Order Type</div>
+            <div class="grid grid-cols-3 gap-2">
+              <button id="otype-dine_in" onclick="switchOrderType('dine_in')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-indigo-600 text-white font-bold text-xs transition-all">
+                <span>🍽️</span><span>Dine-in</span>
+              </button>
+              <button id="otype-takeaway" onclick="switchOrderType('takeaway')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+                <span>🛍️</span><span>Takeaway</span>
+              </button>
+              <button id="otype-delivery" onclick="switchOrderType('delivery')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+                <span>🚚</span><span>Delivery</span>
+              </button>
+            </div>
+          </div>
+
           <div id="cart-items" class="space-y-2 min-h-20"></div>
 
           <!-- Restaurant Fields (Hidden for Retail) -->
@@ -2122,29 +2249,27 @@ async function renderPOS() {
               </label>
             </div>
 
-            <div class="${isRetail ? 'grid-cols-1' : 'grid-cols-2'} grid gap-3 mt-1">
-              <button onclick="checkout()" id="checkout-btn"
-                class="py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-lg shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-40 h-14">
-                ✅ Place Order
-              </button>
-              <button onclick="sendToKitchen()" id="kitchen-btn"
-                class="${isRetail ? 'hidden' : 'flex'} py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm shadow-lg shadow-orange-500/20 transition-all disabled:opacity-40 items-center justify-center h-14">
-                👨‍🍳 Kitchen
-              </button>
+            <div class="pt-2 text-center">
+              <p class="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">Actions available on left panel</p>
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       <!-- Orders View (Hidden by default) -->
       <div id="pos-orders-container" class="hidden">
         <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[70vh]">
-          <div class="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+          <div class="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3">
             <h3 class="font-black text-slate-900 dark:text-white flex items-center gap-2">
               <span class="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white text-sm">📋</span>
               Active Orders
             </h3>
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center justify-end gap-3">
+              <button onclick="switchOrderType(window._posLastOrderType || (window._posIsRetail ? 'takeaway' : 'dine_in'))" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" d="M12 5v14m7-7H5"/></svg>
+                New Order
+              </button>
               <div class="relative">
                 <input type="text" id="pos-orders-search" oninput="renderPOSOrders()" placeholder="Search Order ID..." class="px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-indigo-500 w-40 transition-all" />
                 <svg class="w-3.5 h-3.5 absolute right-3 top-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -2189,10 +2314,8 @@ async function renderPOS() {
 
   // Track current order type state
   window._posOrderType = isRetail ? 'takeaway' : 'dine_in';
-
-  if (isRetail) {
-    switchOrderType('takeaway');
-  }
+  window._posLastOrderType = window._posOrderType;
+  switchOrderType(window._posOrderType);
 
   // Input listener for pos-customer (legacy compatibility)
   const posCustomerInput = $c('pos-customer-input-compat');
@@ -2205,18 +2328,89 @@ async function renderPOS() {
 
   const mainProducts = products.filter((p) => p.is_component !== 1);
   renderPOSProducts(mainProducts);
+  renderCart();
+}
+
+function syncPOSCheckoutSummary(totalOverride) {
+  const grandTotal = typeof totalOverride === "number"
+    ? totalOverride
+    : parseFloat($c("cart-total")?.dataset.total) || 0;
+  const totalText = "Rs. " + grandTotal.toFixed(2);
+  const itemCount = cart.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+
+  const buttonTotal = $c("pos-checkout-total");
+  const buttonCount = $c("pos-checkout-count");
+  const overlayTotal = $c("pos-checkout-overlay-total");
+
+  if (buttonTotal) buttonTotal.textContent = totalText;
+  if (buttonCount) buttonCount.textContent = itemCount;
+  if (overlayTotal) overlayTotal.textContent = totalText;
+}
+
+function openPOSCheckout() {
+  const backdrop = $c("pos-checkout-backdrop");
+  const drawer = $c("pos-checkout-drawer");
+  const shade = $c("pos-checkout-shade");
+  if (!backdrop || !drawer) return;
+
+  if (_posCheckoutCloseTimer) clearTimeout(_posCheckoutCloseTimer);
+  syncPOSCheckoutSummary();
+  backdrop.classList.remove("hidden");
+  backdrop.setAttribute("aria-hidden", "false");
+  document.body.classList.add("overflow-hidden");
+
+  requestAnimationFrame(() => {
+    drawer.classList.remove("translate-x-full");
+    drawer.classList.add("translate-x-0");
+    if (shade) {
+      shade.classList.remove("opacity-0");
+      shade.classList.add("opacity-100");
+    }
+  });
+}
+
+function closePOSCheckout(immediate = false) {
+  const backdrop = $c("pos-checkout-backdrop");
+  const drawer = $c("pos-checkout-drawer");
+  const shade = $c("pos-checkout-shade");
+  if (!backdrop || !drawer) return;
+
+  drawer.classList.add("translate-x-full");
+  drawer.classList.remove("translate-x-0");
+  if (shade) {
+    shade.classList.add("opacity-0");
+    shade.classList.remove("opacity-100");
+  }
+  backdrop.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("overflow-hidden");
+
+  if (immediate) {
+    backdrop.classList.add("hidden");
+    return;
+  }
+
+  _posCheckoutCloseTimer = setTimeout(() => {
+    backdrop.classList.add("hidden");
+  }, 300);
 }
 
 function switchOrderType(type) {
-  window._posOrderType = type;
-  ['dine_in', 'takeaway', 'delivery', 'orders'].forEach(t => {
+  const isRetail = window._posIsRetail ?? (currentUser && currentUser.shop_type === 'retail');
+  if (type !== 'orders') {
+    window._posOrderType = type;
+    window._posLastOrderType = type;
+  }
+
+  const activeType = type === 'orders'
+    ? (window._posOrderType || (isRetail ? 'takeaway' : 'dine_in'))
+    : type;
+  const activeOrderClass = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-indigo-600 text-white font-bold text-xs transition-all';
+  const inactiveOrderClass = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-all';
+
+  ['dine_in', 'takeaway', 'delivery'].forEach(t => {
     const btn = $c(`otype-${t}`);
     if (!btn) return;
-    if (t === type) {
-      btn.className = 'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm transition-all';
-    } else {
-      btn.className = 'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all';
-    }
+    btn.className = t === activeType ? activeOrderClass : inactiveOrderClass;
   });
 
   const dineEl = $c('pos-dine-fields');
@@ -2224,10 +2418,20 @@ function switchOrderType(type) {
   const takeawayEl = $c('pos-takeaway-fields');
   const contentGrid = $c('pos-content-grid');
   const ordersContainer = $c('pos-orders-container');
+  const ordersBtn = $c('pos-orders-toolbar-btn');
+  if (ordersBtn) {
+    ordersBtn.className = type === 'orders'
+      ? `${isRetail ? 'hidden' : 'flex'} h-12 px-4 rounded-xl bg-indigo-600 text-white text-sm font-black transition-all items-center justify-center gap-2 shrink-0 shadow-lg shadow-indigo-600/20`
+      : `${isRetail ? 'hidden' : 'flex'} h-12 px-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-sm font-black transition-all items-center justify-center gap-2 shrink-0`;
+  }
 
-  const isRetail = (currentUser && currentUser.shop_type === 'retail');
+  const kitchenBtn = $c('kitchen-btn');
+  if (kitchenBtn) {
+    kitchenBtn.classList.toggle('hidden', type !== 'dine_in' && type !== 'takeaway' || isRetail);
+  }
 
   if (type === 'orders') {
+    closePOSCheckout(true);
     if (contentGrid) contentGrid.classList.add('hidden');
     if (ordersContainer) ordersContainer.classList.remove('hidden');
     renderPOSOrders();
@@ -2437,72 +2641,78 @@ function renderPOSProducts(products) {
       .map(
         (p) => `
     <button onclick="addToCart(${p.id})" ${(p.stock === 0 && !(p.ingredients && p.ingredients.length > 0)) ? "disabled" : ""}
-      class="product-card bg-white dark:bg-slate-900 rounded-2xl text-left flex flex-col ${(p.stock === 0 && !(p.ingredients && p.ingredients.length > 0)) ? "opacity-40 cursor-not-allowed" : "cursor-pointer hover:shadow-xl hover:-translate-y-1"} transition-all overflow-hidden">
-      ${p.image_url
-            ? `<div class="relative w-full h-28 overflow-hidden">
-            <img src="${p.image_url}" alt="${p.name}" class="w-full h-full object-cover" loading="lazy" />
-            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-            <span class="absolute bottom-2 left-3 text-white font-bold text-sm uppercase tracking-tight leading-tight drop-shadow">${p.name}</span>
-           </div>`
-            : ''
-          }
-      <div class="p-4 flex-1 flex flex-col justify-between">
-        ${p.image_url ? '' : `<h2 class="text-lg font-medium text-slate-900 dark:text-white uppercase tracking-tight mb-1 truncate">${p.name}</h2>`}
+      class="product-card group relative bg-white dark:bg-slate-900 rounded-3xl text-left flex flex-col p-4 border border-slate-100 dark:border-slate-800 ${(p.stock === 0 && !(p.ingredients && p.ingredients.length > 0)) ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} transition-all overflow-hidden shadow-sm">
+      
+      <!-- Top Absolute Badges -->
+      <div class="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-full ${p.stock > 0 || (p.ingredients && p.ingredients.length > 0) ? 'bg-emerald-50 dark:bg-emerald-900/30' : 'bg-rose-50 dark:bg-rose-900/30'}">
+        <div class="w-1.5 h-1.5 rounded-full ${p.stock > 0 || (p.ingredients && p.ingredients.length > 0) ? 'bg-emerald-600 dark:bg-emerald-500' : 'bg-rose-600 dark:bg-rose-500'}"></div>
+        <span class="text-[10px] font-bold ${p.stock > 0 || (p.ingredients && p.ingredients.length > 0) ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'} pt-[0.5px]">
+          ${(p.stock > 0 || (p.ingredients && p.ingredients.length > 0)) ? 'In Stock' : 'Out of stock'}
+        </span>
+      </div>
 
-        <!-- Brand + SKU -->
-        <div>
-          <div class="flex items-center gap-1.5 text-indigo-500 dark:text-indigo-400 mb-2">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+      <div class="absolute top-3 right-3 z-10 flex flex-col items-center justify-center px-2 py-1.5 rounded-xl ${p.stock > 0 || (p.ingredients && p.ingredients.length > 0) ? 'bg-emerald-50/90 dark:bg-emerald-900/40' : 'bg-rose-50/90 dark:bg-rose-900/40'} min-w-[2.5rem]">
+        ${(p.ingredients && p.ingredients.length > 0)
+          ? `<span class="text-xl font-black text-amber-500 leading-none">🍳</span>`
+          : `<span class="text-xl font-black ${p.stock > 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'} leading-none tracking-tight">${p.stock}</span>`
+        }
+      </div>
+
+      <!-- Hero Image Layer -->
+      ${p.image_url
+            ? `<div class="w-full h-28 mt-5 mb-2 flex items-center justify-center">
+                 <img src="${p.image_url}" alt="${p.name}" class="max-w-full max-h-full object-contain drop-shadow-[0_10px_15px_rgba(0,0,0,0.1)]" />
+               </div>`
+            : `<div class="w-full h-28 mt-5 mb-2 flex items-center justify-center">
+                 <svg class="w-10 h-10 text-slate-200 dark:text-slate-700 drop-shadow-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+               </div>`
+      }
+
+      <div class="flex flex-col">
+        
+        <!-- SKU Tag -->
+        <div class="mb-1.5">
+          <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <svg class="w-3 h-3 text-indigo-900 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
             </svg>
-            <span class="text-xs font-semibold">${p.brand_name || "No Brand"}</span>
-          </div>
-          <div class="inline-flex items-center px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800 mb-3">
-            <span class="text-[10px] font-black text-indigo-400 uppercase tracking-widest mr-1.5">SKU:</span>
-            <span class="text-xs font-bold text-indigo-600 dark:text-indigo-400 font-mono">${p.sku}</span>
+            <div class="text-[9px] font-bold">
+              <span class="text-slate-500 uppercase tracking-widest">SKU:</span>
+              <span class="text-slate-900 dark:text-white font-mono ml-0.5">${p.sku}</span>
+            </div>
           </div>
         </div>
 
-        <!-- Price + Stock -->
-        <div class="mt-auto space-y-3">
+        <!-- Title -->
+        <h4 class="text-lg font-black text-slate-900 dark:text-white leading-[1.1] mb-1 line-clamp-2 capitalize tracking-tight">${p.name}</h4>
+
+        <!-- Decorative Dash -->
+        <div class="flex items-center gap-1 mb-1.5">
+          <div class="w-4 h-1 bg-indigo-500 rounded-full"></div>
+          <div class="w-1 h-1 bg-indigo-500/60 rounded-full"></div>
+        </div>
+
+        <!-- Description (Optional Fallback) -->
+        ${p.description ? `<p class="text-xs font-medium text-slate-500 dark:text-slate-400 line-clamp-2 leading-snug mb-1.5">\${p.description}</p>` : ''}
+        
+        <div>
+          <!-- Divider -->
+          <div class="w-full h-px bg-slate-100 dark:bg-slate-800 mb-2 ${!p.description ? 'mt-2' : ''}"></div>
+
+          <!-- Bottom Price Bar -->
           <div class="flex items-center justify-between">
             <div class="flex flex-col">
-              <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Selling Price</span>
-              <span class="text-lg font-black text-indigo-600 dark:text-indigo-400">Rs. ${p.selling_price}</span>
+              <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Price</span>
+              <span class="text-[1.2rem] font-black text-emerald-950 dark:text-emerald-400 tracking-tight leading-none">Rs. <span class="pl-0.5">${p.selling_price}</span></span>
             </div>
-            <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            
+            <div class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-800 dark:text-emerald-400 transition-colors duration-300 pointer-events-none">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
             </div>
-          </div>
-          <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span class="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-              ${(p.ingredients && p.ingredients.length > 0) ? "Status" : "In Stock"}
-            </span>
-            ${(p.ingredients && p.ingredients.length > 0)
-            ? `<span class="text-xs font-black text-amber-500 uppercase">🍳 Recipe</span>`
-            : (p.components && p.components.length > 0)
-              ? `
-                 <div class="flex flex-col items-end">
-                    <div class="flex items-baseline gap-1">
-                       <span class="text-sm font-black ${p.stock > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>
-                       <span class="text-[8px] font-bold text-slate-400 uppercase">Units</span>
-                    </div>
-                    <div class="flex flex-wrap justify-end gap-x-2 gap-y-0.5 mt-0.5">
-                      ${p.components.map(c => `
-                        <div class="text-[10px] font-bold text-slate-500 flex items-center gap-1">
-                          <span class="text-indigo-500">${c.stock || 0}</span>
-                          <span class="text-[8px] text-slate-400">${c.name}</span>
-                        </div>
-                      `).join('')}
-                    </div>
-                 </div>
-                 `
-              : `<span class="text-sm font-black ${p.stock > 10 ? "text-emerald-600 dark:text-emerald-400" : p.stock > 0 ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500"}">${p.stock}</span>`
-          }
           </div>
         </div>
       </div>
-    </button>`,
+    </button>`
       )
       .join("") ||
     '<p class="text-slate-500 dark:text-slate-400 col-span-3 py-10 text-center italic text-lg">No products matched your search.</p>';
@@ -3043,13 +3253,11 @@ function calculateCartTotal() {
   $c("cart-tax-amt").textContent = "Rs. " + taxAmt.toFixed(2);
   $c("cart-total").textContent = "Rs. " + grandTotal.toFixed(2);
   $c("cart-total").dataset.total = grandTotal;
+  syncPOSCheckoutSummary(grandTotal);
 
-  // Auto-populate received amount if it's currently 0 or matches the old total
+  // Automatically set received as the total bill amount
   if (cart.length > 0) {
-    const currentRecv = parseFloat($c("pos-received").value) || 0;
-    if (currentRecv === 0) {
-      $c("pos-received").value = grandTotal.toFixed(2);
-    }
+    $c("pos-received").value = grandTotal.toFixed(2);
   } else {
     $c("pos-received").value = 0;
   }
@@ -3183,13 +3391,15 @@ document.addEventListener('click', (e) => {
 
 function toggleQuotationMode(isQuotation) {
   const btn = $c("checkout-btn");
+  if (!btn) return;
   if (isQuotation) {
     btn.textContent = "📑 Print Quotation";
-    btn.className = btn.className.replace("from-indigo-600 to-violet-600", "from-amber-500 to-orange-600");
-    btn.className = btn.className.replace("from-indigo-50 hover:from-indigo-500", "from-amber-400 hover:to-orange-500"); // safety check for Hover
+    btn.classList.add("bg-amber-500", "dark:bg-amber-400", "text-amber-950", "dark:text-amber-950");
+    btn.classList.remove("bg-slate-900", "dark:bg-white", "text-white", "dark:text-slate-900");
   } else {
-    btn.textContent = "✅ Place Order";
-    btn.className = btn.className.replace("from-amber-500 to-orange-600", "from-indigo-600 to-violet-600");
+    btn.textContent = "Place Order";
+    btn.classList.remove("bg-amber-500", "dark:bg-amber-400", "text-amber-950", "dark:text-amber-950");
+    btn.classList.add("bg-slate-900", "dark:bg-white", "text-white", "dark:text-slate-900");
   }
 }
 
@@ -3306,10 +3516,11 @@ async function checkout() {
     if (r.error) {
       toast(r.error, "error");
       btn.disabled = false;
-      btn.textContent = "✅ Place Order";
+      btn.textContent = "Place Order";
       return;
     }
     toast("Order placed! Rs. " + r.total);
+    closePOSCheckout(true);
     openModal(
       "Order Placed!",
       `
@@ -3328,7 +3539,7 @@ async function checkout() {
   } catch (err) {
     toast(err.message, "error");
     btn.disabled = false;
-    btn.textContent = "✅ Place Order";
+    btn.textContent = "Place Order";
   }
 }
 
@@ -3371,7 +3582,7 @@ async function printBill(saleId) {
   const dividerStyle = shop?.divider_style || "dashed";
   const dividerWidth = shop?.divider_width || 1;
   const sectionGap = shop?.section_gap || 10;
-  const dividerCss = dividerStyle === "none" ? "none" : `${dividerWidth}px ${dividerStyle} #000`;
+  const dividerCss = dividerStyle === "none" ? "none" : `${dividerWidth}px ${dividerStyle} #111827`;
 
   // Build receipt header based on settings
   let headerHtml = "";
@@ -3453,15 +3664,15 @@ async function printBill(saleId) {
       width: 80mm;
       margin: 0 auto;
       padding: 4mm;
-      color: #000;
+      color: #111827;
       font-size: 12px;
       line-height: 1.2;
-      background: #fff;
+      background: #f8fafc;
       min-height: 100vh;
       box-sizing: border-box;
     }
     @media print {
-      html, body { background: #fff; }
+      html, body { background: #f8fafc; }
       .receipt { margin: 0; width: 100%; min-height: auto; }
     }
     .text-center { text-align: center; }
@@ -3469,9 +3680,9 @@ async function printBill(saleId) {
     .bold { font-weight: bold; }
     h1 { font-size: 18px; margin: 0; text-transform: uppercase; }
     h2 { font-size: 14px; margin: 2px 0; }
-    .divider { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+    .divider { border: none; border-top: 1px dashed #111827; margin: 5px 0; }
     table { width: 100%; border-collapse: collapse; margin: 5px 0; }
-    th { text-align: left; font-size: 10px; border-bottom: 1px solid #000; padding: 2px 0; }
+    th { text-align: left; font-size: 10px; border-bottom: 1px solid #111827; padding: 2px 0; }
     td { padding: 3px 0; vertical-align: top; }
     .total-row { font-size: 14px; }
     .footer { font-size: 10px; margin-top: 10px; }
@@ -3757,15 +3968,15 @@ async function printReturnReceipt(returnId) {
     }
     @page { margin: 0; }
     html, body { margin: 0; padding: 0; background: #f0f0f0; font-family: ${shop?.receipt_font_family || "'Courier New', Courier, monospace"}; }
-    .receipt { width: 80mm; margin: 0 auto; padding: 4mm; color: #000; font-size: 12px; line-height: 1.2; background: #fff; min-height: 100vh; box-sizing: border-box; }
-    @media print { html, body { background: #fff; } .receipt { margin: 0; width: 100%; min-height: auto; } }
+    .receipt { width: 80mm; margin: 0 auto; padding: 4mm; color: #111827; font-size: 12px; line-height: 1.2; background: #f8fafc; min-height: 100vh; box-sizing: border-box; }
+    @media print { html, body { background: #f8fafc; } .receipt { margin: 0; width: 100%; min-height: auto; } }
     .text-center { text-align: center; }
     .text-right { text-align: right; }
     .bold { font-weight: bold; }
     h1 { font-size: 18px; margin: 0; text-transform: uppercase; }
-    .divider { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+    .divider { border: none; border-top: 1px dashed #111827; margin: 5px 0; }
     table { width: 100%; border-collapse: collapse; margin: 5px 0; }
-    th { text-align: left; font-size: 10px; border-bottom: 1px solid #000; padding: 2px 0; }
+    th { text-align: left; font-size: 10px; border-bottom: 1px solid #111827; padding: 2px 0; }
     td { padding: 3px 0; vertical-align: top; }
   </style></head><body>
   <div class="receipt">
@@ -5365,6 +5576,8 @@ function renderLobby() {
       return PLATFORM_OWNER_PANELS.includes(p.id);
     }
     const allowedPanels = currentUser.allowed_panels || [];
+    // Ensure settings and users are visible to shop admins in the lobby
+    if (currentUser.role === 'admin' && (p.id === 'settings' || p.id === 'users')) return true;
     return allowedPanels.includes(p.id);
   });
 
@@ -5373,19 +5586,40 @@ function renderLobby() {
     if (dash) allowed.push(dash);
   }
 
+  const allowedById = Object.fromEntries(allowed.map((panel) => [panel.id, panel]));
+  const groupedModules = MODULE_GROUPS
+    .map((group) => ({
+      ...group,
+      panels: group.panels.map((id) => allowedById[id]).filter(Boolean),
+    }))
+    .filter((group) => group.panels.length > 0);
+
   content.innerHTML = `
     <div class="flex items-center justify-between gap-4 mb-10 pb-6 border-b border-indigo-200 dark:border-indigo-900/50">
       <div>
         <h3 class="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">Switch Modules</h3>
-        <p class="text-sm text-slate-500 font-medium italic mt-1">Select an active node to manage your operations</p>
+        <p class="text-sm text-slate-500 font-medium italic mt-1">Select a workspace based on the kind of work you are doing.</p>
       </div>
     </div>
 
-    <div class="lobby-grid">
+    <div class="space-y-10">
         ${(() => {
-      return allowed.map((p, i) => {
+      let itemIndex = 0;
+      return groupedModules.map((group) => `
+        <section class="lobby-module-group">
+          <div class="mb-5">
+            <div class="flex items-center gap-3">
+              <span class="h-px w-8 bg-indigo-300 dark:bg-indigo-700"></span>
+              <h4 class="text-xs font-black uppercase tracking-[0.25em] text-slate-700 dark:text-slate-200">${group.title}</h4>
+            </div>
+            <p class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">${group.desc}</p>
+          </div>
+          <div class="lobby-grid">
+            ${group.panels.map((p) => {
+        const delay = itemIndex * 45;
+        itemIndex += 1;
         return `
-              <div class="lobby-item" onclick="navigate('${p.id}')" style="animation-delay: ${i * 50}ms">
+              <div class="lobby-item" onclick="navigate('${p.id}')" style="animation-delay: ${delay}ms">
                   <div class="lobby-icon-wrap">
                       <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
                           ${p.icon}
@@ -5394,7 +5628,10 @@ function renderLobby() {
                   <div class="lobby-label">${p.label}</div>
               </div>
             `;
-      }).join("");
+      }).join("")}
+          </div>
+        </section>
+      `).join("");
     })()}
     </div>
   `;
@@ -5698,10 +5935,10 @@ function printQuotation(data) {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', -apple-system, sans-serif; color: #1e293b; line-height: 1.5; margin: 0; padding: 0; background: #f8fafc; }
-        .page { width: 210mm; min-height: 297mm; margin: 10mm auto; background: white; padding: 20mm; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); box-sizing: border-box; position: relative; }
+        .page { width: 210mm; min-height: 297mm; margin: 10mm auto; background: #f8fafc; padding: 20mm; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); box-sizing: border-box; position: relative; }
         @media print {
             @page { size: A4; margin: 0; }
-            body { background: white; margin: 0; padding: 0; }
+            body { background: #f8fafc; margin: 0; padding: 0; }
             .page { margin: 0; box-shadow: none; border: none; width: 210mm; height: 297mm; padding: 15mm; }
         }
         .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #6366f1; padding-bottom: 20px; margin-bottom: 30px; }
@@ -5828,5 +6065,77 @@ ${policies ? `\n${policies}` : ""}
 </html>`);
   win.document.close();
 }
+function toggleQuickMenu() {
+  if (document.body.classList.contains("lobby-active")) return;
+  const sidebar = document.getElementById("quick-sidebar");
+  const backdrop = document.getElementById("quick-sidebar-backdrop");
+  const arrow = document.getElementById("quick-menu-arrow");
+  if (!sidebar || !backdrop) return;
+
+  const isOpen = !sidebar.classList.contains("-translate-x-full");
+
+  if (isOpen) {
+    sidebar.classList.add("-translate-x-full");
+    backdrop.classList.add("opacity-0");
+    if (arrow) arrow.classList.add("rotate-180");
+    setTimeout(() => backdrop.classList.add("hidden"), 300);
+  } else {
+    renderQuickSidebar();
+    backdrop.classList.remove("hidden");
+    if (arrow) arrow.classList.remove("rotate-180");
+    requestAnimationFrame(() => {
+      sidebar.classList.remove("-translate-x-full");
+      backdrop.classList.remove("opacity-0");
+    });
+  }
+}
+
+function renderQuickSidebar() {
+  const container = document.getElementById("quick-sidebar-content");
+  if (!container) return;
+
+  // Filter panels based on user permissions (reuse logic from lobby)
+  const allowed = AVAILABLE_PANELS.filter(p => {
+    if (currentUser.role === 'superadmin') {
+      return PLATFORM_OWNER_PANELS.includes(p.id);
+    }
+    const allowedPanels = currentUser.allowed_panels || [];
+    if (currentUser.role === 'admin' && (p.id === 'settings' || p.id === 'users')) return true;
+    return allowedPanels.includes(p.id);
+  });
+
+  const allowedById = Object.fromEntries(allowed.map((panel) => [panel.id, panel]));
+  const groupedModules = MODULE_GROUPS
+    .map((group) => ({
+      ...group,
+      panels: group.panels.map((id) => allowedById[id]).filter(Boolean),
+    }))
+    .filter((group) => group.panels.length > 0);
+
+  container.innerHTML = groupedModules.map(group => `
+    <div class="space-y-4">
+      <div class="flex items-center gap-2">
+        <span class="w-1 h-3 bg-indigo-500 rounded-full"></span>
+        <h4 class="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">${group.title}</h4>
+      </div>
+      <div class="grid grid-cols-1 gap-2">
+        ${group.panels.map(p => `
+          <div onclick="navigate('${p.id}'); toggleQuickMenu()" class="group flex items-center gap-4 p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-indigo-500/50 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10 transition-all cursor-pointer">
+            <div class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-500 group-hover:text-indigo-500 transition-colors">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                ${p.icon}
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-slate-700 dark:text-slate-200 group-hover:text-indigo-600 transition-colors">${p.label}</div>
+              <div class="text-[10px] text-slate-400 font-medium line-clamp-1">${p.desc}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
 
 init();

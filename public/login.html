@@ -15,16 +15,9 @@
             sans: ['Inter', 'sans-serif'],
           },
           animation: {
-            'blob': 'blob 10s infinite alternate',
             'fade-in': 'fadeIn 0.5s ease-out forwards',
           },
           keyframes: {
-            blob: {
-              '0%': { transform: 'translate(0px, 0px) scale(1)' },
-              '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
-              '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
-              '100%': { transform: 'translate(0px, 0px) scale(1)' },
-            },
             fadeIn: {
               '0%': { opacity: '0', transform: 'translateY(10px)' },
               '100%': { opacity: '1', transform: 'translateY(0)' },
@@ -70,54 +63,6 @@
       background-color: #0b1120;
     }
 
-    .blob-1,
-    .blob-2,
-    .blob-3 {
-      position: absolute;
-      border-radius: 50%;
-      animation: blob 15s infinite alternate;
-      will-change: transform;
-    }
-
-    .blob-1 {
-      top: -10%;
-      left: -10%;
-      width: 50vw;
-      height: 50vw;
-      background: radial-gradient(circle, rgba(224, 231, 255, 0.6) 0%, rgba(224, 231, 255, 0) 70%);
-      animation-delay: 0s;
-    }
-
-    .blob-2 {
-      top: 40%;
-      right: -10%;
-      width: 40vw;
-      height: 40vw;
-      background: radial-gradient(circle, rgba(219, 234, 254, 0.6) 0%, rgba(219, 234, 254, 0) 70%);
-      animation-delay: 2s;
-    }
-
-    .blob-3 {
-      bottom: -20%;
-      left: 20%;
-      width: 60vw;
-      height: 60vw;
-      background: radial-gradient(circle, rgba(241, 245, 249, 0.6) 0%, rgba(241, 245, 249, 0) 70%);
-      animation-delay: 4s;
-    }
-
-    .dark .blob-1 {
-      background: radial-gradient(circle, rgba(30, 27, 75, 0.5) 0%, rgba(30, 27, 75, 0) 70%);
-    }
-
-    .dark .blob-2 {
-      background: radial-gradient(circle, rgba(23, 37, 84, 0.4) 0%, rgba(23, 37, 84, 0) 70%);
-    }
-
-    .dark .blob-3 {
-      background: radial-gradient(circle, rgba(8, 145, 178, 0.15) 0%, rgba(8, 145, 178, 0) 70%);
-    }
-
     input:-webkit-autofill {
       -webkit-box-shadow: 0 0 0 1000px white inset !important;
       -webkit-text-fill-color: #0f172a !important;
@@ -135,10 +80,6 @@
 
   <!-- Premium Background -->
   <div class="animated-bg">
-    <div class="blob-1"></div>
-    <div class="blob-2"></div>
-    <div class="blob-3"></div>
-    <canvas id="star-rain" class="absolute inset-0 z-10 opacity-70"></canvas>
   </div>
 
   <!-- Theme Toggle -->
@@ -295,75 +236,6 @@
   </div>
 
   <script>
-    // Star Rain & Aurora Background Effect
-    document.addEventListener('DOMContentLoaded', () => {
-      const canvas = document.getElementById('star-rain');
-      const ctx = canvas.getContext('2d');
-      let particles = [];
-      const particleCount = window.innerWidth < 768 ? 20 : 35; // Lower count for better performance
-
-      function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
-      window.addEventListener('resize', resize);
-      resize();
-
-      class Particle {
-        constructor() {
-          this.reset(true);
-        }
-        reset(initial = false) {
-          this.x = Math.random() * canvas.width;
-          this.y = initial ? Math.random() * canvas.height : -50;
-          this.z = Math.random() * 2 + 0.1;
-          this.length = Math.random() * 30 + 10;
-          this.speedY = (Math.random() * 1.5 + 0.5) * this.z;
-          this.speedX = (Math.random() * 0.3 - 0.15) * this.z;
-        }
-        update() {
-          this.y += this.speedY;
-          this.x += this.speedX;
-          if (this.y > canvas.height + this.length) this.reset();
-        }
-        draw() {
-          const isDark = document.documentElement.classList.contains('dark');
-          const rgb = isDark ? '220, 230, 255' : '99, 102, 241';
-          const opacity = (this.z / 2) * (isDark ? 0.6 : 0.25);
-
-          ctx.beginPath();
-          const gradient = ctx.createLinearGradient(
-            this.x, this.y,
-            this.x - this.speedX * this.length, this.y - this.speedY * this.length
-          );
-          gradient.addColorStop(0, `rgba(${rgb}, ${opacity})`);
-          gradient.addColorStop(1, `rgba(${rgb}, 0)`);
-
-          ctx.strokeStyle = gradient;
-          ctx.lineWidth = this.z;
-          ctx.lineCap = 'round';
-          ctx.moveTo(this.x, this.y);
-          ctx.lineTo(this.x - this.speedX * this.length, this.y - this.speedY * this.length);
-          ctx.stroke();
-
-          // Subtle dot at head
-          ctx.beginPath();
-          ctx.fillStyle = `rgba(${rgb}, ${opacity + 0.2})`;
-          ctx.arc(this.x, this.y, this.z * 1.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      for (let i = 0; i < particleCount; i++) particles.push(new Particle());
-
-      function animate() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        particles.forEach(p => { p.update(); p.draw(); });
-        requestAnimationFrame(animate);
-      }
-      animate();
-    });
-
     // Theme Toggle Logic
     function toggleTheme() {
       const isDark = document.documentElement.classList.contains('dark');
