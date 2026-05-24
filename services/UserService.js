@@ -83,13 +83,21 @@ class UserService {
 
     // Superadmin logic
     const data = userSchema.partial().parse(payload);
+    
+    // Check if username is being changed and if it already exists
+    if (data.username && data.username !== userToEdit.username) {
+      const existing = await db('users').where({ username: data.username }).first();
+      if (existing) throw new Error('Username already taken');
+    }
+
     const isSuper = userToEdit.role === 'superadmin';
     const updateData = {
       name: data.name || userToEdit.name,
+      username: data.username || userToEdit.username,
       email: data.email !== undefined ? data.email : userToEdit.email,
       phone: data.phone !== undefined ? data.phone : userToEdit.phone,
       role: !isSuper ? (data.role || userToEdit.role) : userToEdit.role,
-      shop_id: !isSuper ? (data.shop_id || userToEdit.shop_id) : userToEdit.shop_id,
+      shop_id: data.hasOwnProperty('shop_id') ? data.shop_id : userToEdit.shop_id,
       status: isSuper ? 'active' : (data.status || userToEdit.status),
       allowed_panels: JSON.stringify(data.allowed_panels || JSON.parse(userToEdit.allowed_panels || '[]')),
       updated_at: db.fn.now()

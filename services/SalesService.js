@@ -409,8 +409,29 @@ class SalesService {
           }
       }
 
-      return returnId;
+      return { returnId, totalRefund };
     });
+  }
+
+  async getReturnReceipt(returnId, shopId) {
+    const ret = await db('returns').where({ id: returnId, shop_id: shopId }).first();
+    if (!ret) return null;
+
+    const items = await db('return_items as ri')
+      .select('ri.*', 'p.name as product_name')
+      .leftJoin('products as p', 'ri.product_id', 'p.id')
+      .where('ri.return_id', returnId);
+
+    const sale = await db('sales').where({ id: ret.sale_id }).first();
+    const user = await db('users').select('name').where({ id: ret.user_id }).first();
+    const shop = await db('shops').where({ id: shopId }).first();
+
+    if (shop) {
+      shop.receipt_images = shop.receipt_images_json ? JSON.parse(shop.receipt_images_json) : [];
+      shop.use_logo_on_receipt = Boolean(shop.use_logo_on_receipt);
+    }
+
+    return { return: ret, items, sale, user, shop };
   }
 }
 

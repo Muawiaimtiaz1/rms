@@ -943,11 +943,11 @@ function userFormHtml(u = {}) {
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="sm:col-span-2 lg:col-span-1">
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Full Name *</label>
-          <input id="uf-name" value="${u.name || ""}" ${!isMaster ? "readonly" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm ${!isMaster ? "opacity-70 bg-slate-50 cursor-not-allowed" : ""}" placeholder="Full name" />
+          <input id="uf-name" value="${u.name || ""}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Full name" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Username *</label>
-          <input id="uf-username" value="${u.username || ""}" readonly class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all opacity-50 shadow-sm cursor-not-allowed" placeholder="username" />
+          <input id="uf-username" value="${u.username || ""}" ${u.id && !isMaster ? "readonly" : ""} class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm ${u.id && !isMaster ? "opacity-50 cursor-not-allowed" : ""}" placeholder="username" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">New Password ${u.id ? "(Optional)" : "*"}</label>
@@ -1000,7 +1000,7 @@ function userFormHtml(u = {}) {
           <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3" id="panel-picker">
             ${AVAILABLE_PANELS.map(
         (p) => `
-              <div class="panel-tile cursor-pointer p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${u.allowed_panels?.includes(p.id) ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20" : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700"}"
+              <div class="user-panel-tile cursor-pointer p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${u.allowed_panels?.includes(p.id) ? "border-indigo-50 border-indigo-500 dark:bg-indigo-900/20" : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700"}"
                    onclick="this.dataset.selected = this.dataset.selected === 'true' ? 'false' : 'true'; this.classList.toggle('border-indigo-500'); this.classList.toggle('bg-indigo-50/50'); this.classList.toggle('dark:bg-indigo-900/20')"
                    data-id="${p.id}" data-selected="${u.allowed_panels?.includes(p.id)}">
                 <div class="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm group-hover:scale-110 transition-transform">
@@ -1137,8 +1137,8 @@ async function saveUser(id) {
       $c("uf-role").value === "admin"
         ? []
         : Array.from(
-          document.querySelectorAll('.panel-tile[data-selected="true"]'),
-        ).map((el) => el.dataset.id),
+            document.querySelectorAll('.user-panel-tile[data-selected="true"]'),
+          ).map((el) => el.dataset.id),
   };
   if (!payload.name) return toast("Name required", "error");
   if (!id && !payload.password)

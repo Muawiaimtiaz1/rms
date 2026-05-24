@@ -37,8 +37,15 @@ router.get("/:id/bill", requireAuth, async (req, res) => {
 
 // POST /api/sales/:id/return — process a return
 router.post("/:id/return", requireAuth, async (req, res) => {
-  const returnId = await salesService.processReturn(req.params.id, req.session.user.shop_id, req.session.user.id, req.body);
-  res.json({ ok: true, id: returnId });
+  const result = await salesService.processReturn(req.params.id, req.session.user.shop_id, req.session.user.id, req.body);
+  res.json({ ok: true, ...result });
+});
+
+// GET /api/sales/returns/:id/receipt — get return receipt data
+router.get("/returns/:id/receipt", requireAuth, async (req, res) => {
+  const data = await salesService.getReturnReceipt(req.params.id, req.session.user.shop_id);
+  if (!data) return res.status(404).json({ error: "Return not found" });
+  res.json(data);
 });
 
 module.exports = router;

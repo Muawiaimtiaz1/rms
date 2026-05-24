@@ -799,7 +799,7 @@ async function deleteCategory(type, id) {
 
 // ─── Dashboard ───────────────────────────────────────────────────────
 // ─── Dashboard state ──────────────────────────────────────────────────────────
-let _dashPeriod = "all";
+let _dashPeriod = "today";
 let _dashBrandId = "";
 let _dashFrom = "";
 let _dashTo = "";
@@ -828,6 +828,7 @@ async function renderDashboard(period, brandId, from, to) {
   const brands = data.brands || [];
 
   const PERIOD_OPTS = [
+    { val: "today", label: "Today" },
     { val: "all", label: "All Time" },
     { val: "1m", label: "Last 1 Month" },
     { val: "2m", label: "Last 2 Months" },
@@ -1217,18 +1218,34 @@ async function renderProducts(onlyLowStock = false) {
   const listTitle = onlyLowStock ? "low stock product(s)" : "product(s)";
 
   $c("page-content").innerHTML = `
-    <div class="flex justify-between items-center mb-6">
-      <div class="flex items-center gap-3">
-        <p class="text-slate-400 text-sm">${displayList.length} ${listTitle}</p>
-        ${onlyLowStock ? `<button onclick="navigate('products')" class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Clear Filter</button>` : ""}
+    <div class="flex items-center gap-4 mb-8">
+      <div class="flex-1 relative group">
+        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        </div>
+        <input type="text" id="inventory-search" oninput="filterInventory()" 
+               placeholder="Search by name or category..." 
+               class="w-full pl-11 pr-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm" />
       </div>
-      <div class="flex items-center gap-2">
-        <button onclick="openAddCategoryPopup('product')" class="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 transition-all">+ Add Category</button>
-        <button onclick="openAddProduct()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-all">+ Add Product</button>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="openAddCategoryPopup('product')" class="px-5 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            Add Category
+        </button>
+        <button onclick="openAddProduct()" class="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            Add Product
+        </button>
       </div>
     </div>
+
+    <div class="flex items-center gap-3 mb-4 px-2">
+      <p class="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]"><span id="product-count">${displayList.length}</span> ${listTitle}</p>
+      ${onlyLowStock ? `<button onclick="navigate('products')" class="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 transition-colors uppercase tracking-widest">Clear Filter</button>` : ""}
+    </div>
     <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
-      <table class="w-full text-sm">
+      <table class="w-full text-sm" id="inventory-table">
         <thead><tr class="border-b border-slate-200 dark:border-slate-700 text-left bg-slate-50 dark:bg-black/20">
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">SKU</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Product</th>
@@ -1239,15 +1256,18 @@ async function renderProducts(onlyLowStock = false) {
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Selling Price</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase text-right">Actions</th>
         </tr></thead>
-        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800" id="inventory-table-body">
           ${displayList.length
       ? displayList
         .map(
           (p) => `
-            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group">
+            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group inventory-row">
               <td class="px-5 py-4 text-slate-500 dark:text-slate-400 font-mono text-xs">${p.sku}</td>
-              <td class="px-5 py-4"><div class="font-bold text-slate-800 dark:text-slate-200">${p.name}</div><div class="text-[10px] text-slate-500">${p.description || ""}</div></td>
-              <td class="px-5 py-4"><span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">${p.category}</span></td>
+              <td class="px-5 py-4">
+                <div class="font-bold text-slate-800 dark:text-slate-200 product-name">${p.name}</div>
+                <div class="text-[10px] text-slate-500">${p.description || ""}</div>
+              </td>
+              <td class="px-5 py-4"><span class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider product-category">${p.category}</span></td>
               <td class="px-5 py-4 text-slate-600 dark:text-slate-400 font-medium">${p.brand_name || "—"}</td>
               <td class="px-5 py-4">
                 ${p.batches && p.batches.length > 1
@@ -1296,7 +1316,7 @@ async function renderProducts(onlyLowStock = false) {
                   ${p.damage_stock || 0} Damaged
                 </span>
               </td>
-              <td class="px-5 py-4 text-right space-x-1">
+              <td class="px-5 py-4 text-right space-x-1 whitespace-nowrap">
                 ${!(p.ingredients && p.ingredients.length > 0)
               ? `<button onclick="adjustStock(${p.id},'${p.name.replace(/'/g, "\\'")}',${p.stock},${p.buying_price})" class="px-2 py-1 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all border border-slate-200 dark:border-slate-700">Stock</button>`
               : ""
@@ -1317,6 +1337,29 @@ async function renderProducts(onlyLowStock = false) {
     </div>`;
   window._productBrands = brands;
 }
+
+
+function filterInventory() {
+  const q = document.getElementById("inventory-search").value.toLowerCase().trim();
+  const rows = document.querySelectorAll(".inventory-row");
+  let visibleCount = 0;
+
+  rows.forEach(row => {
+    const name = row.querySelector(".product-name").textContent.toLowerCase();
+    const cat = row.querySelector(".product-category").textContent.toLowerCase();
+    
+    if (name.includes(q) || cat.includes(q)) {
+      row.classList.remove("hidden");
+      visibleCount++;
+    } else {
+      row.classList.add("hidden");
+    }
+  });
+
+  const countEl = document.getElementById("product-count");
+  if (countEl) countEl.textContent = visibleCount;
+}
+
 
 function productFormHtml(p = {}, brands = []) {
   const brandOptions = brands
@@ -3892,9 +3935,9 @@ async function submitSaleReturn(saleId) {
     openModal("Return Complete!", `
       <div class="text-center space-y-4">
         <div class="text-5xl">✅</div>
-        <p class="text-slate-300">Return processed successfully — <span class="text-rose-400 font-bold">Refund: Rs. ${res.totalRefund.toFixed(2)}</span></p>
+        <p class="text-slate-300">Return processed successfully — <span class="text-rose-400 font-bold">Refund: Rs. ${(res.totalRefund || 0).toFixed(2)}</span></p>
         <div class="flex gap-3">
-          <button onclick="printReturnReceipt(${res.returnId})" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">🖨 Print Return Receipt</button>
+          <button onclick="printReturnReceipt(${res.returnId || 0})" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">🖨 Print Return Receipt</button>
           <button onclick="closeModal();renderSalesHistory();" class="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium transition-all">Back to History</button>
         </div>
       </div>
@@ -4019,7 +4062,7 @@ async function printReturnReceipt(returnId) {
 // ─── Sales History ─────────────────────────────────────────────────────────
 // ─── Sales History ─────────────────────────────────────────────────────────
 
-let _allSalesCache = [];
+let _salesRangeFilter = "today"; // today, last_week, etc. or null for manual
 let _salesPendingFilter = false;
 let _salesPage = 1;
 const _salesPageSize = 25;
@@ -4048,12 +4091,24 @@ async function renderSalesHistory(onlyPendingDues = false) {
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
+            <label class="text-[10px] uppercase font-bold text-slate-400">Range</label>
+            <select id="sales-range-filter" onchange="setSalesHistoryRange(this.value)" class="bg-transparent text-sm focus:outline-none dark:text-white font-bold cursor-pointer">
+              <option value="today" ${_salesRangeFilter === 'today' ? 'selected' : ''}>Today</option>
+              <option value="last_week" ${_salesRangeFilter === 'last_week' ? 'selected' : ''}>Last Week</option>
+              <option value="last_month" ${_salesRangeFilter === 'last_month' ? 'selected' : ''}>Last Month</option>
+              <option value="6_month" ${_salesRangeFilter === '6_month' ? 'selected' : ''}>6 Months</option>
+              <option value="last_year" ${_salesRangeFilter === 'last_year' ? 'selected' : ''}>Last Year</option>
+              <option value="all" ${_salesRangeFilter === 'all' ? 'selected' : ''}>All Time</option>
+              <option value="custom" ${_salesRangeFilter === null ? 'selected' : ''} disabled>Custom Range</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
             <label class="text-[10px] uppercase font-bold text-slate-400">From</label>
-            <input type="date" id="sales-from" value="${today}" onchange="_renderSalesTable()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
+            <input type="date" id="sales-from" value="" onchange="setSalesManualDate()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
           </div>
           <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
             <label class="text-[10px] uppercase font-bold text-slate-400">To</label>
-            <input type="date" id="sales-to" value="${today}" onchange="_renderSalesTable()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
+            <input type="date" id="sales-to" value="" onchange="setSalesManualDate()" class="bg-transparent text-sm focus:outline-none dark:text-white" />
           </div>
           <div class="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
             <label class="text-[10px] uppercase font-bold text-slate-400">Type</label>
@@ -4067,12 +4122,11 @@ async function renderSalesHistory(onlyPendingDues = false) {
           <button onclick="navigate('${onlyPendingDues ? 'sales-history' : 'pending-dues'}')" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-100 dark:border-transparent hover:bg-indigo-100 transition-all text-xs">
             ${onlyPendingDues ? '📄 View Paid Slips' : '🔴 View Pending Dues'}
           </button>
+          <div class="flex-1 min-w-[200px]">
+             <input id="sales-search" oninput="_renderSalesTable()" placeholder="Search Bill #, Name, Phone..."
+               class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all text-sm shadow-sm" />
+          </div>
         </div>
-      </div>
-
-      <div class="w-full">
-        <input id="sales-search" oninput="_renderSalesTable()" placeholder="Search by Bill ID, Name, or Phone..."
-          class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all text-sm shadow-sm" />
       </div>
     </div>
 
@@ -4102,6 +4156,25 @@ async function renderSalesHistory(onlyPendingDues = false) {
     $c("page-content").innerHTML =
       `<div class="p-10 text-center text-rose-500 font-bold">Failed to load sales: ${err.message}</div>`;
   }
+}
+
+function setSalesHistoryRange(val) {
+  _salesRangeFilter = val;
+  
+  // Clear manual inputs visually
+  const fromInput = document.getElementById("sales-from");
+  const toInput = document.getElementById("sales-to");
+  if (fromInput) fromInput.value = "";
+  if (toInput) toInput.value = "";
+  
+  _renderSalesTable();
+}
+
+function setSalesManualDate() {
+  _salesRangeFilter = null;
+  const rangeDropdown = document.getElementById("sales-range-filter");
+  if (rangeDropdown) rangeDropdown.value = "custom";
+  _renderSalesTable();
 }
 
 function _renderSalesTable() {
@@ -4136,8 +4209,25 @@ function _renderSalesTable() {
         (s) => Number(s.total || 0) - Number(s.amount_received || 0) <= 0.01,
       );
 
-    // Filter by Date Range
-    if (fromDate || toDate) {
+    // Filter by Date (Quick Range OR Manual Range)
+    if (_salesRangeFilter) {
+      if (_salesRangeFilter !== 'all') {
+        const now = new Date();
+        let fromDateLimit = new Date();
+        fromDateLimit.setHours(0, 0, 0, 0);
+
+        if (_salesRangeFilter === 'last_week') fromDateLimit.setDate(now.getDate() - 7);
+        else if (_salesRangeFilter === 'last_month') fromDateLimit.setMonth(now.getMonth() - 1);
+        else if (_salesRangeFilter === '6_month') fromDateLimit.setMonth(now.getMonth() - 6);
+        else if (_salesRangeFilter === 'last_year') fromDateLimit.setFullYear(now.getFullYear() - 1);
+        // else today = already set to today
+
+        displayList = displayList.filter((s) => {
+          const sDate = new Date(s.created_at);
+          return sDate >= fromDateLimit;
+        });
+      }
+    } else if (fromDate || toDate) {
       displayList = displayList.filter((s) => {
         const sDate = s.created_at.split(" ")[0]; // Extract YYYY-MM-DD
         if (fromDate && sDate < fromDate) return false;
@@ -4160,7 +4250,7 @@ function _renderSalesTable() {
         const sellerName = (s.served_by_name || "").toLowerCase();
         const sellerUser = (s.served_by_username || "").toLowerCase();
         return (
-          id === query ||
+          id.includes(query) ||
           name.includes(query) ||
           phone.includes(query) ||
           sellerName.includes(query) ||
@@ -5586,14 +5676,6 @@ function renderLobby() {
     if (dash) allowed.push(dash);
   }
 
-  const allowedById = Object.fromEntries(allowed.map((panel) => [panel.id, panel]));
-  const groupedModules = MODULE_GROUPS
-    .map((group) => ({
-      ...group,
-      panels: group.panels.map((id) => allowedById[id]).filter(Boolean),
-    }))
-    .filter((group) => group.panels.length > 0);
-
   content.innerHTML = `
     <div class="flex items-center justify-between gap-4 mb-10 pb-6 border-b border-indigo-200 dark:border-indigo-900/50">
       <div>
@@ -5602,40 +5684,37 @@ function renderLobby() {
       </div>
     </div>
 
-    <div class="space-y-10">
-        ${(() => {
-      let itemIndex = 0;
-      return groupedModules.map((group) => `
-        <section class="lobby-module-group">
-          <div class="mb-5">
-            <div class="flex items-center gap-3">
-              <span class="h-px w-8 bg-indigo-300 dark:bg-indigo-700"></span>
-              <h4 class="text-xs font-black uppercase tracking-[0.25em] text-slate-700 dark:text-slate-200">${group.title}</h4>
-            </div>
-            <p class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">${group.desc}</p>
-          </div>
-          <div class="lobby-grid">
-            ${group.panels.map((p) => {
-        const delay = itemIndex * 45;
-        itemIndex += 1;
-        return `
-              <div class="lobby-item" onclick="navigate('${p.id}')" style="animation-delay: ${delay}ms">
-                  <div class="lobby-icon-wrap">
-                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none">
-                          ${p.icon}
-                      </svg>
-                  </div>
-                  <div class="lobby-label">${p.label}</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      ${allowed.map((p, index) => {
+    const delay = index * 40;
+    return `
+          <div onclick="navigate('${p.id}')" 
+               style="animation: lobby-fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; animation-delay: ${delay}ms; opacity: 0;"
+               class="group flex items-center gap-5 p-5 rounded-[2.5rem] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10 transition-all cursor-pointer shadow-sm hover:shadow-xl hover:-translate-y-1">
+              
+              <div class="w-14 h-14 min-w-[3.5rem] rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400 group-hover:scale-110 transition-all duration-300 shadow-inner">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                      ${p.icon}
+                  </svg>
               </div>
-            `;
-      }).join("")}
+              
+              <div class="flex-1 min-w-0">
+                  <div class="text-lg font-black text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors tracking-tight truncate">${p.label}</div>
+                  <div class="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 line-clamp-2 opacity-80">${p.desc || ""}</div>
+              </div>
+
+              <div class="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 shrink-0">
+                  <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+              </div>
           </div>
-        </section>
-      `).join("");
-    })()}
+        `;
+  }).join("")}
     </div>
   `;
 }
+
 
 // ─── TABLE MANAGEMENT ────────────────────────────────────────────────────────
 let _allTables = [];
