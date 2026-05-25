@@ -2548,15 +2548,9 @@ async function renderPOSOrders() {
               <button onclick="showOrderPrintModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
                 Print
               </button>
-              ${s.order_status !== 'pending' ? `
               <button onclick="completeOrderFromPOS(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
                 Complete
               </button>
-              ` : `
-              <button disabled class="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-400 font-bold text-[10px] uppercase cursor-not-allowed">
-                Complete
-              </button>
-              `}
             </div>
           </td>
         </tr>
@@ -2570,6 +2564,11 @@ async function renderPOSOrders() {
 async function completeOrderFromPOS(id) {
   if (!confirm('Are you sure you want to complete this order and move it to sales history?')) return;
   try {
+    const s = _posActiveOrders.find(o => o.id === id);
+    if (s && s.order_type === 'dine_in' && s.table_id) {
+      await api(`/api/tables/${s.table_id}/status`, 'PATCH', { status: 'available' });
+    }
+    
     await api(`/api/kds/${id}/status`, 'PATCH', { status: 'completed' });
     toast('Order completed!');
     renderPOSOrders();
