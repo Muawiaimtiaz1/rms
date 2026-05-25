@@ -3563,6 +3563,13 @@ async function checkout() {
     }
     toast("Order placed! Rs. " + r.total);
     closePOSCheckout(true);
+
+    // AUTO PRINT KITCHEN IF FLAG SET
+    if (window._lastOrderAutoPrintKitchen) {
+      printKitchenBill(r.saleId);
+      window._lastOrderAutoPrintKitchen = false;
+    }
+
     openModal(
       "Order Placed!",
       `
@@ -3570,12 +3577,21 @@ async function checkout() {
         <div class="text-5xl">🎉</div>
         <p class="text-slate-300">Order #${r.saleId} — <span class="text-emerald-400 font-bold">Rs. ${r.total.toFixed(2)}</span></p>
         ${orderType === 'takeaway' ? `<p class="text-amber-400 font-bold text-lg">Token: ${token_number}</p>` : ''}
-        <div class="flex gap-3">
-          <button onclick="printBill(${r.saleId})" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">🖨 Print Bill</button>
-          <button onclick="closeModal();renderPOS();" class="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium transition-all">New Order</button>
+        <div class="grid grid-cols-1 gap-2">
+          <div class="flex gap-2">
+            <button onclick="printBill(${r.saleId})" class="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+              Print Bill
+            </button>
+            <button onclick="printKitchenBill(${r.saleId})" class="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+              Kitchen Print
+            </button>
+          </div>
+          <button onclick="closeModal();renderPOS();" class="w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm transition-all">New Order</button>
         </div>
       </div>`,
-      "max-w-xl",
+      "max-w-md",
       true,
     );
   } catch (err) {
@@ -3585,9 +3601,106 @@ async function checkout() {
   }
 }
 
+async function printKitchenBill(saleId) {
+  const data = await api(`/api/sales/${saleId}/bill`);
+  if (!data) return;
+  const { sale, items } = data;
+
+  const win = window.open("", "_blank");
+  win.document.write(`<!DOCTYPE html><html><head><title>KITCHEN ORDER #${sale.id}</title>
+  <style>
+    @page { margin: 0; }
+    body { margin: 0; padding: 0; font-family: 'Courier New', Courier, monospace; }
+    .receipt { width: 80mm; margin: 0 auto; padding: 5mm; background: #fff; box-sizing: border-box; }
+    .text-center { text-align: center; }
+    .bold { font-weight: bold; }
+    h1 { font-size: 24px; margin: 0; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 5px; }
+    .order-info { font-size: 14px; margin: 10px 0; border-bottom: 1px solid #000; padding-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+    th { text-align: left; font-size: 14px; border-bottom: 2px solid #000; padding: 5px 0; }
+    td { padding: 8px 0; border-bottom: 1px solid #eee; vertical-align: top; }
+    .item-name { font-size: 16px; font-weight: bold; }
+    .item-details { font-size: 12px; color: #333; margin-top: 2px; }
+    .special-note { font-size: 14px; color: #000; border: 1px solid #000; padding: 3px; display: inline-block; margin-top: 5px; font-weight: bold; }
+    .qty { font-size: 22px; font-weight: 900; }
+    .footer { font-size: 12px; margin-top: 20px; text-align: center; border-top: 1px dashed #000; padding-top: 10px; }
+    @media print { .receipt { margin: 0; width: 100%; } }
+  </style></head><body>
+  <div class="receipt">
+    <div class="text-center">
+      <h1 class="bold">KITCHEN ORDER</h1>
+      <h2 class="bold" style="font-size: 32px; margin: 10px 0;">#${sale.id}</h2>
+    </div>
+
+    <div class="order-info">
+      <div class="bold" style="font-size: 18px;">${sale.order_type === 'dine_in' ? '🍽️ DINE-IN' : sale.order_type === 'takeaway' ? '🥡 TAKEAWAY' : '🚚 DELIVERY'}</div>
+      ${sale.table_id ? `<div class="bold" style="font-size: 20px;">TABLE: ${sale.table_number || 'N/A'}</div>` : ''}
+      ${sale.token_number ? `<div class="bold" style="font-size: 20px;">TOKEN: ${sale.token_number}</div>` : ''}
+      <div style="margin-top: 5px;">Time: ${new Date(sale.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 20%;" class="text-center">Qty</th>
+          <th>Item Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(i => {
+          let details = [];
+          if (i.variants_json) {
+            try {
+              const variants = JSON.parse(i.variants_json);
+              details.push(Object.values(variants).join(', '));
+            } catch(e){}
+          }
+          if (i.addons_json) {
+            try {
+              const addons = JSON.parse(i.addons_json);
+              details.push('Addons: ' + addons.map(a => a.name).join(', '));
+            } catch(e){}
+          }
+
+          return `
+            <tr>
+              <td class="qty text-center">x${i.quantity}</td>
+              <td>
+                <div class="item-name">${i.product_name || i.custom_name}</div>
+                ${details.length ? `<div class="item-details">${details.join(' | ')}</div>` : ''}
+                ${i.special_instructions ? `<div class="special-note">NOTE: ${i.special_instructions}</div>` : ''}
+              </td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+
+    ${sale.special_instructions ? `
+      <div style="margin-top: 15px; padding: 10px; border: 2px solid #000;">
+        <div class="bold" style="font-size: 12px; text-transform: uppercase;">Order Note:</div>
+        <div style="font-size: 14px;">${sale.special_instructions}</div>
+      </div>
+    ` : ''}
+
+    <div class="footer">
+      Generated at ${new Date().toLocaleTimeString()}
+    </div>
+  </div>
+  <script>
+    window.onload = function() {
+      window.print();
+      setTimeout(function() { window.close(); }, 700);
+    };
+  </script>
+  </body></html>`);
+  win.document.close();
+}
+
+window._lastOrderAutoPrintKitchen = false;
 async function sendToKitchen() {
   if (!cart.length) return toast("Add items to the order first", "error");
-  toast("Order sent to kitchen! Placing order...");
+  window._lastOrderAutoPrintKitchen = true;
   checkout();
 }
 
