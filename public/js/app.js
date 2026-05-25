@@ -2545,10 +2545,10 @@ async function renderPOSOrders() {
           <td class="px-4 py-4 text-xs font-medium text-slate-400">${date}</td>
           <td class="px-4 py-4 text-right">
             <div class="flex justify-end gap-2">
-              <button onclick="showOrderPrintModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
+              <button onclick="printBill(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
                 Print
               </button>
-              <button onclick="completeOrderFromPOS(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
+              <button onclick="showOrderCompleteModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
                 Complete
               </button>
             </div>
@@ -2561,8 +2561,8 @@ async function renderPOSOrders() {
   }
 }
 
-async function completeOrderFromPOS(id) {
-  if (!confirm('Are you sure you want to complete this order and move it to sales history?')) return;
+async function completeOrderFromPOS(id, skipConfirm = false) {
+  if (!skipConfirm && !confirm('Are you sure you want to complete this order and move it to sales history?')) return;
   try {
     const s = _posActiveOrders.find(o => o.id === id);
     if (s && s.order_type === 'dine_in' && s.table_id) {
@@ -2577,7 +2577,7 @@ async function completeOrderFromPOS(id) {
   }
 }
 
-function showOrderPrintModal(id) {
+function showOrderCompleteModal(id) {
   const s = _posActiveOrders.find(o => o.id === id);
   if (!s) return toast('Order not found', 'error');
 
@@ -2587,7 +2587,7 @@ function showOrderPrintModal(id) {
   const received = s.amount_received || s.total;
   const total = s.total;
 
-  openModal('Order Payment Details', `
+  openModal('Finish Order & Payment', `
     <div class="space-y-4">
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -2618,15 +2618,15 @@ function showOrderPrintModal(id) {
           <span class="text-slate-500 font-bold">Order Total:</span>
           <span class="text-slate-900 dark:text-white font-black">PKR ${total.toLocaleString()}</span>
         </div>
-        <button onclick="updateAndPrintOrder(${id})" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/25 transition-all">
-          🖨️ Update & Print Receipt
+        <button onclick="updateAndCompleteOrder(${id})" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black shadow-lg shadow-emerald-600/25 transition-all">
+          ✅ Update & Complete Order
         </button>
       </div>
     </div>
   `, 'max-w-md');
 }
 
-async function updateAndPrintOrder(id) {
+async function updateAndCompleteOrder(id) {
   const nameEl = $c('op-name');
   if (!nameEl) return;
 
@@ -2639,10 +2639,8 @@ async function updateAndPrintOrder(id) {
 
   try {
     await api(`/api/sales/${id}/details`, 'PATCH', data);
-    toast('Order details updated!');
+    await completeOrderFromPOS(id, true);
     closeModal();
-    printBill(id);
-    renderPOSOrders();
   } catch (e) {
     toast(e.message, 'error');
   }
