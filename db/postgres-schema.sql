@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS sales (
   payment_method TEXT NOT NULL DEFAULT 'cash',
   amount_received DOUBLE PRECISION NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   customer_id INTEGER REFERENCES customers(id),
   delivery_address TEXT DEFAULT '',
   order_type TEXT DEFAULT 'dine_in',
@@ -244,7 +245,8 @@ CREATE TABLE IF NOT EXISTS expenses (
   amount DOUBLE PRECISION NOT NULL DEFAULT 0,
   note TEXT,
   date DATE NOT NULL DEFAULT CURRENT_DATE,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS brand_expense_payments (

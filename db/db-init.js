@@ -66,6 +66,28 @@ async function initPostgres() {
       console.log("✅ users.updated_at added.");
     }
 
+    // Check for updated_at in sales
+    const salesUpdateCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'sales' AND column_name = 'updated_at'
+    `);
+    if (salesUpdateCheck.rows.length === 0) {
+      console.log("🔧 Migrating sales table: Adding updated_at column...");
+      await query("ALTER TABLE sales ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()");
+      console.log("✅ sales.updated_at added.");
+    }
+
+    // Check for updated_at in expenses
+    const expensesUpdateCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'expenses' AND column_name = 'updated_at'
+    `);
+    if (expensesUpdateCheck.rows.length === 0) {
+      console.log("🔧 Migrating expenses table: Adding updated_at column...");
+      await query("ALTER TABLE expenses ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()");
+      console.log("✅ expenses.updated_at added.");
+    }
+
   } catch (err) {
     console.error("❌ PostgreSQL Initialization Error:", err.message);
     // Don't crash the server, but log the error
