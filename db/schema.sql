@@ -335,3 +335,23 @@ CREATE TABLE IF NOT EXISTS product_recipe_links (
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
   FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS discounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'percentage', -- percentage, amount
+  value REAL NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS taxes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  percentage REAL NOT NULL DEFAULT 0,
+  linked_payment_method TEXT, -- cash, card, online
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);

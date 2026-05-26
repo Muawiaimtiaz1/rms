@@ -45,6 +45,22 @@ function toggleTheme() {
   }
 }
 
+function toggleSettingsNav() {
+  const nav = document.getElementById("settings-nav-drawer");
+  const backdrop = document.getElementById("settings-nav-backdrop");
+  if (!nav || !backdrop) return;
+  if (nav.classList.contains("-translate-x-full")) {
+    nav.classList.remove("-translate-x-full");
+    backdrop.classList.remove("hidden");
+    setTimeout(() => backdrop.classList.add("opacity-100"), 10);
+  } else {
+    nav.classList.add("-translate-x-full");
+    backdrop.classList.remove("opacity-100");
+    setTimeout(() => backdrop.classList.add("hidden"), 300);
+  }
+}
+
+
 // ─── Dropdown ──────────────────────────────────────────────────────────
 function toggleUserDropdown(e) {
   if (e) e.stopPropagation();
@@ -389,6 +405,19 @@ function navigate(page) {
   const content = document.getElementById("page-content");
   content.innerHTML =
     '<div class="flex items-center justify-center h-40 text-slate-600">Loading…</div>';
+
+  const container = document.querySelector('main > div');
+  const pageHeader = document.getElementById('page-header-wrap');
+  if (page === 'settings' || page === 'pos') {
+    container.classList.remove('container', 'mx-auto', 'px-6');
+    container.classList.add('w-full', 'px-4', 'md:px-12');
+    if (pageHeader) pageHeader.classList.add('hidden');
+  } else {
+    container.classList.add('container', 'mx-auto', 'px-6');
+    container.classList.remove('w-full', 'px-4', 'md:px-12');
+    if (pageHeader) pageHeader.classList.remove('hidden');
+  }
+
   const pages = {
     dashboard: renderDashboard,
     brands: renderBrands,
@@ -469,53 +498,74 @@ async function renderSettings(tab) {
     await fetchReceiptSettings();
   }
 
+  // Populate the Sidebar/Drawer content
+  const navItems = [
+    { id: 'profile', label: 'Account Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+    { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' }
+  ];
+
+  const navHtml = navItems.map(item => `
+    <button onclick="renderSettings('${item.id}'); if(!document.getElementById('settings-nav-drawer').classList.contains('-translate-x-full')) toggleSettingsNav();" class="w-full flex items-center justify-between px-6 py-5 rounded-2xl text-sm font-black transition-all group ${_activeSettingsTab === item.id
+      ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30"
+      : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+    }">
+      <div class="flex items-center gap-4">
+        <svg class="w-6 h-6 ${_activeSettingsTab === item.id ? "text-white" : "text-slate-400 group-hover:text-indigo-500"}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${item.icon}"/></svg>
+        ${item.label}
+      </div>
+      ${_activeSettingsTab === item.id ? '<div class="w-2 h-2 rounded-full bg-white animate-pulse"></div>' : ""}
+    </button>
+  `).join('');
+
+  const drawerContent = document.getElementById("settings-nav-content");
+  if (drawerContent) {
+    drawerContent.innerHTML = `
+      <div class="px-2 pb-6">
+        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-4">System Control</h4>
+        <div class="space-y-2">
+          ${navHtml}
+        </div>
+        <div class="mt-10 pt-10 border-t border-slate-100 dark:border-slate-800 px-4">
+          <button onclick="logout()" class="flex items-center gap-3 text-rose-500 hover:text-rose-600 font-black text-xs uppercase tracking-widest transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            Sign Out
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  const activeLabel = navItems.find(i => i.id === _activeSettingsTab)?.label || "Settings";
+
   const contentHtml = `
-    <div class="flex flex-col lg:flex-row gap-8 items-start animate-in fade-in slide-in-from-bottom-2 duration-500">
-      <!-- Settings Sidebar -->
-      <aside class="w-full lg:w-72 flex flex-col gap-1.5 sticky top-24">
-        <div class="px-5 py-3 mb-2">
-            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">System Control</h4>
-            <p class="text-xs text-slate-500 lowercase italic line-clamp-1">Personalise your dashboard</p>
+    <div class="animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <!-- Settings Header -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+        <div class="flex items-center gap-6">
+          <button onclick="toggleSettingsNav()" class="group relative flex items-center justify-center w-16 h-16 rounded-[2rem] bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-indigo-600 hover:border-indigo-500 transition-all shadow-xl shadow-slate-200/50 dark:shadow-none active:scale-95">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            <div class="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 rounded-full border-2 border-white dark:border-slate-900"></div>
+          </button>
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+              <h3 class="text-4xl font-black text-slate-950 dark:text-white tracking-tighter uppercase">${activeLabel}</h3>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400 font-medium italic">Configure and personalize your RMS experience</p>
+          </div>
         </div>
         
-        <button onclick="renderSettings('profile')" class="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-bold transition-all group ${_activeSettingsTab === "profile"
-      ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30"
-      : "text-slate-500 hover:bg-white dark:hover:bg-slate-900 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
-    }">
-          <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 ${_activeSettingsTab === "profile"
-      ? "text-white"
-      : "text-slate-400 group-hover:text-indigo-500"
-    }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-            Account Profile
-          </div>
-          ${_activeSettingsTab === "profile" ? '<div class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>' : ""}
-        </button>
-
-        <button onclick="renderSettings('receipt')" class="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-bold transition-all group ${_activeSettingsTab === "receipt"
-      ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30"
-      : "text-slate-500 hover:bg-white dark:hover:bg-slate-900 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
-    }">
-          <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 ${_activeSettingsTab === "receipt"
-      ? "text-white"
-      : "text-slate-400 group-hover:text-indigo-500"
-    }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            Receipt Settings
-          </div>
-          ${_activeSettingsTab === "receipt" ? '<div class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>' : ""}
-        </button>
-
-        <div class="mt-8 pt-8 border-t border-slate-200 dark:border-slate-800 px-5">
-            <button onclick="logout()" class="w-full flex items-center gap-3 text-rose-500 dark:text-rose-400 hover:text-rose-600 font-black text-xs uppercase tracking-widest transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-                Sign Out
+        <div class="flex items-center gap-3">
+            <div class="h-10 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden md:block"></div>
+            <button onclick="navigate('dashboard')" class="px-6 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                Dashboard
             </button>
         </div>
-      </aside>
+      </div>
 
-      <!-- Main Settings Panel -->
-      <div class="flex-1 w-full bg-white dark:bg-slate-900/50 rounded-[2.5rem] p-8 lg:p-12 border border-slate-200 dark:border-slate-800 shadow-sm min-h-[70vh]">
+      <!-- Full Screen Settings Content -->
+      <div class="w-full">
         ${renderActiveSettingsContent()}
       </div>
     </div>
@@ -524,10 +574,12 @@ async function renderSettings(tab) {
   document.getElementById("page-content").innerHTML = contentHtml;
 }
 
+
 function renderActiveSettingsContent() {
   if (_activeSettingsTab === "profile") {
     return `
-      <div class="max-w-4xl animate-in fade-in slide-in-from-right-4 duration-500">
+      <div class="w-full animate-in fade-in slide-in-from-right-4 duration-500">
+
         <header class="mb-12">
             <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-2 tracking-tight">Account Profile</h3>
             <p class="text-slate-500 dark:text-slate-400 text-sm italic">Manage your identification and store assignment here.</p>
@@ -2499,6 +2551,171 @@ function switchOrderType(type) {
   }
 }
 
+async function showPrintOptionsModal(id) {
+  try {
+    const [data, discounts, taxes] = await Promise.all([
+      api(`/api/sales/${id}/bill`),
+      api("/api/shop-settings/discounts"),
+      api("/api/shop-settings/taxes")
+    ]);
+    const { sale, items } = data;
+    const subtotal = items.reduce((sum, item) => sum + (Number(item.price_at_sale) * Number(item.quantity)), 0);
+
+    openModal('Print Options', `
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Payment Method</label>
+            <select id="pp-method" onchange="applyLinkedTax(${subtotal})" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold">
+              <option value="cash" ${sale.payment_method === 'cash' ? 'selected' : ''}>Cash</option>
+              <option value="card" ${sale.payment_method === 'card' ? 'selected' : ''}>Card</option>
+              <option value="online" ${sale.payment_method === 'online' ? 'selected' : ''}>Online Transfer</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Tax (%)</label>
+            <select id="pp-tax-preset" class="hidden">
+              <option value="">Presets</option>
+              ${taxes.map(t => `<option value="${t.percentage}" data-method="${t.linked_payment_method || ''}">${t.name} (${t.percentage}%)</option>`).join("")}
+            </select>
+            <input id="pp-tax" type="number" step="0.01" value="${sale.tax_percentage || 0}" 
+              oninput="updatePrintSummary(${subtotal})"
+              class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+          </div>
+        </div>
+        
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Discount</label>
+          <div class="flex gap-2">
+            <select id="pp-disc-preset" onchange="applyDiscPreset(${subtotal})" class="w-1/2 px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all">
+              <option value="">Presets</option>
+              ${discounts.map(d => `<option value="${d.value}" data-type="${d.type}">${d.name} (${d.type === 'percentage' ? d.value + '%' : 'Rs.' + d.value})</option>`).join("")}
+            </select>
+            <input id="pp-discount" type="number" step="0.01" value="${sale.discount || 0}" 
+              oninput="updatePrintSummary(${subtotal})"
+              class="flex-1 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+          </div>
+        </div>
+
+        <!-- Bill Summary Section -->
+        <div class="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 space-y-2">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500 font-bold uppercase tracking-wider">Subtotal</span>
+            <span class="text-slate-900 dark:text-white font-black">Rs. ${subtotal.toLocaleString()}</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500 font-bold uppercase tracking-wider">Discount</span>
+            <span id="ps-discount" class="text-rose-500 font-black">- Rs. ${Number(sale.discount || 0).toLocaleString()}</span>
+          </div>
+          <div class="flex justify-between text-xs border-b border-slate-100 dark:border-slate-700 pb-2">
+            <span class="text-slate-500 font-bold uppercase tracking-wider">Tax</span>
+            <span id="ps-tax" class="text-slate-900 dark:text-white font-black">Rs. 0</span>
+          </div>
+          <div class="flex justify-between items-center pt-1">
+            <span class="text-slate-500 font-black uppercase tracking-widest text-[10px]">Grand Total</span>
+            <span id="ps-total" class="text-lg font-black text-indigo-600 dark:text-indigo-400">Rs. ${Number(sale.total).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div class="pt-2">
+          <button onclick="updateAndPrintBill(${id})" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black shadow-lg shadow-indigo-600/25 transition-all">
+            🖨️ Update & Print Unpaid Bill
+          </button>
+        </div>
+      </div>
+    `, 'max-w-md');
+
+    // Initial sync
+    setTimeout(() => {
+      applyLinkedTax(subtotal);
+      updatePrintSummary(subtotal);
+    }, 0);
+  } catch (err) {
+    console.error(err);
+    toast("Error loading print options", "error");
+  }
+}
+
+function applyTaxPreset(subtotal) {
+  const sel = document.getElementById("pp-tax-preset");
+  const val = sel.value;
+  if (val !== "") {
+    document.getElementById("pp-tax").value = val;
+    updatePrintSummary(subtotal);
+  }
+}
+
+function applyDiscPreset(subtotal) {
+  const sel = document.getElementById("pp-disc-preset");
+  const opt = sel.options[sel.selectedIndex];
+  if (sel.value !== "") {
+    const type = opt.dataset.type;
+    const val = parseFloat(sel.value);
+    if (type === 'percentage') {
+      const amount = (subtotal * val) / 100;
+      document.getElementById("pp-discount").value = amount.toFixed(2);
+    } else {
+      document.getElementById("pp-discount").value = val;
+    }
+    updatePrintSummary(subtotal);
+  }
+}
+
+function applyLinkedTax(subtotal) {
+  const method = document.getElementById("pp-method").value;
+  const taxPresetSel = document.getElementById("pp-tax-preset");
+  // Find a preset linked to this method
+  for (let i = 0; i < taxPresetSel.options.length; i++) {
+    if (taxPresetSel.options[i].dataset.method === method) {
+      taxPresetSel.selectedIndex = i;
+      document.getElementById("pp-tax").value = taxPresetSel.options[i].value;
+      break;
+    }
+  }
+  updatePrintSummary(subtotal);
+}
+
+
+
+
+
+function updatePrintSummary(subtotal) {
+  const discInp = document.getElementById('pp-discount');
+  const taxInp = document.getElementById('pp-tax');
+  if (!discInp || !taxInp) return;
+
+  const discount = parseFloat(discInp.value) || 0;
+  const taxPct = parseFloat(taxInp.value) || 0;
+
+  const taxAmt = (subtotal - discount) * (taxPct / 100);
+  const total = subtotal - discount + taxAmt;
+
+  const ds = document.getElementById('ps-discount');
+  const ts = document.getElementById('ps-tax');
+  const gs = document.getElementById('ps-total');
+
+  if (ds) ds.textContent = `- PKR ${discount.toLocaleString()}`;
+  if (ts) ts.textContent = `PKR ${taxAmt.toLocaleString()}`;
+  if (gs) gs.textContent = `PKR ${total.toLocaleString()}`;
+}
+
+async function updateAndPrintBill(id) {
+  const data = {
+    payment_method: $c('pp-method').value,
+    tax_percentage: parseFloat($c('pp-tax').value) || 0,
+    discount: parseFloat($c('pp-discount').value) || 0
+  };
+
+  try {
+    await api(`/api/sales/${id}/details`, 'PATCH', data);
+    printBill(id, true);
+    closeModal();
+    renderPOSOrders();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 async function renderPOSOrders() {
   const tbody = $c('pos-orders-table-body');
   if (!tbody) return;
@@ -2557,7 +2774,7 @@ async function renderPOSOrders() {
           <td class="px-4 py-4 text-xs font-medium text-slate-400">${date}</td>
           <td class="px-4 py-4 text-right">
             <div class="flex justify-end gap-2">
-              <button onclick="printBill(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
+              <button onclick="showPrintOptionsModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
                 Print
               </button>
               <button onclick="showOrderCompleteModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
@@ -2606,47 +2823,84 @@ function showOrderCompleteModal(id) {
           <input id="op-phone" type="text" placeholder="Phone" value="${phone}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1">Payment Method</label>
-          <select id="op-method" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold">
-            <option value="cash" ${method === 'cash' ? 'selected' : ''}>Cash</option>
-            <option value="card" ${method === 'card' ? 'selected' : ''}>Card</option>
-            <option value="online" ${method === 'online' ? 'selected' : ''}>Online Transfer</option>
-          </select>
-        </div>
+      <div class="grid grid-cols-1">
         <div>
           <label class="block text-xs font-bold text-slate-500 mb-1">Amount Received</label>
-          <input id="op-received" type="number" step="0.01" value="${received}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold" />
+          <input id="op-received" type="number" step="0.01" value="${received}" 
+            oninput="updateCompleteOrderSummary(${total})"
+            class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold text-xl text-emerald-600" />
         </div>
       </div>
-      <div class="pt-2">
-        <div class="flex justify-between text-sm mb-2 px-1">
-          <span class="text-slate-500 font-bold">Order Total:</span>
+
+      <div class="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 space-y-2">
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-500 font-bold uppercase tracking-wider">Order Total</span>
           <span class="text-slate-900 dark:text-white font-black">PKR ${total.toLocaleString()}</span>
         </div>
+        <div id="oc-due-row" class="flex justify-between text-xs hidden">
+          <span class="text-slate-500 font-bold uppercase tracking-wider">Remaining Due</span>
+          <span id="oc-due" class="text-rose-500 font-black">PKR 0</span>
+        </div>
+        <div id="oc-change-row" class="flex justify-between text-xs hidden">
+          <span class="text-slate-500 font-bold uppercase tracking-wider">Change to Give</span>
+          <span id="oc-change" class="text-emerald-500 font-black">PKR 0</span>
+        </div>
+      </div>
+
+      <div class="pt-2">
         <button onclick="updateAndCompleteOrder(${id})" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black shadow-lg shadow-emerald-600/25 transition-all">
           ✅ Update & Complete Order
         </button>
       </div>
     </div>
   `, 'max-w-md');
+
+  // Initial trigger to sync summary
+  updateCompleteOrderSummary(total);
+}
+
+function updateCompleteOrderSummary(total) {
+  const receivedInp = document.getElementById('op-received');
+  if (!receivedInp) return;
+
+  const received = parseFloat(receivedInp.value) || 0;
+  const diff = received - total;
+
+  const dueRow = document.getElementById('oc-due-row');
+  const dueVal = document.getElementById('oc-due');
+  const changeRow = document.getElementById('oc-change-row');
+  const changeVal = document.getElementById('oc-change');
+
+  if (diff < 0) {
+    dueRow?.classList.remove('hidden');
+    changeRow?.classList.add('hidden');
+    if (dueVal) dueVal.textContent = `PKR ${Math.abs(diff).toLocaleString()}`;
+  } else if (diff > 0) {
+    dueRow?.classList.add('hidden');
+    changeRow?.classList.remove('hidden');
+    if (changeVal) changeVal.textContent = `PKR ${diff.toLocaleString()}`;
+  } else {
+    dueRow?.classList.add('hidden');
+    changeRow?.classList.add('hidden');
+  }
 }
 
 async function updateAndCompleteOrder(id) {
   const nameEl = $c('op-name');
   if (!nameEl) return;
 
+  const s = _posActiveOrders.find(o => o.id === id);
   const data = {
     customer_name: nameEl.value.trim(),
     customer_phone: $c('op-phone').value.trim(),
-    payment_method: $c('op-method').value,
+    payment_method: s ? (s.payment_method || 'cash') : 'cash',
     amount_received: parseFloat($c('op-received').value) || 0
   };
 
   try {
     await api(`/api/sales/${id}/details`, 'PATCH', data);
     await completeOrderFromPOS(id, true);
+    printBill(id);
     closeModal();
   } catch (e) {
     toast(e.message, 'error');
@@ -3147,45 +3401,9 @@ function renderCart() {
   }
 
   cartEl.innerHTML = `
-    <div class="space-y-2 mb-3">
-      ${cart.map(item => `
-        <div class="group relative grid grid-cols-10 items-center gap-2 p-1.5 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl hover:shadow-lg hover:border-indigo-200 dark:hover:border-indigo-800 transition-all overflow-hidden">
-          <!-- Image -->
-          <div class="col-span-1 w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 flex-shrink-0 overflow-hidden">
-             ${(item.product && item.product.image_url)
-      ? `<img src="${item.product.image_url}" class="w-full h-full object-cover" />`
-      : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`
-    }
-          </div>
-
-          <!-- Name -->
-          <div class="col-span-4 min-w-0">
-             <div class="text-[11px] font-black text-slate-900 dark:text-white truncate">${item.product?.name || item.name}</div>
-          </div>
-
-          <!-- Price -->
-          <div class="col-span-2 text-right">
-             <div class="text-[10px] font-black text-indigo-600 dark:text-indigo-400">Rs. ${item.selling_price}</div>
-          </div>
-
-          <!-- Quantity -->
-          <div class="col-span-2 flex items-center justify-center gap-1 bg-slate-50 dark:bg-slate-800 p-0.5 rounded-lg">
-            <button onclick="updateCartQty(${item.product_id}, ${item.quantity - 1})" class="w-6 h-6 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-500 transition-all font-bold">-</button>
-            <span class="w-4 text-center text-[10px] font-black">${item.quantity}</span>
-            <button onclick="updateCartQty(${item.product_id}, ${item.quantity + 1})" class="w-6 h-6 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-500 transition-all font-bold group-hover:shadow-sm">+</button>
-          </div>
-
-          <!-- Delete -->
-          <div class="col-span-1 flex justify-end">
-            <button onclick="removeFromCart(${item.product_id})" class="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-400 hover:text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-all shadow-sm" title="Remove Item">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-            </button>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-    <button onclick="showCartModal()" class="w-full py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 transition-all flex items-center justify-center gap-2 shadow-inner">
-      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+    
+    <button onclick="showCartModal()" class="w-full py-4 px-5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 transition-all flex items-center justify-center gap-2 shadow-inner">
+      <svg class="w-5 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
       Expand Cart Management
     </button>`;
 
@@ -3465,7 +3683,7 @@ function handlePOSMethodChange(method) {
   }
 }
 
-async function checkout() {
+async function checkout(status = 'completed') {
   if (!cart.length) return toast("Cart is empty", "error");
 
   // CLIENT SIDE QUOTATION CHECK
@@ -3557,6 +3775,7 @@ async function checkout() {
     kitchen_id,
     guest_count,
     token_number,
+    order_status: status,
   };
 
   try {
@@ -3709,10 +3928,10 @@ window._lastOrderAutoPrintKitchen = false;
 async function sendToKitchen() {
   if (!cart.length) return toast("Add items to the order first", "error");
   window._lastOrderAutoPrintKitchen = true;
-  checkout();
+  checkout('pending');
 }
 
-async function printBill(saleId) {
+async function printBill(saleId, isUnpaid = false) {
   const data = await api(`/api/sales/${saleId}/bill`);
   const { sale, items, seller, shop } = data;
 
@@ -3854,7 +4073,7 @@ async function printBill(saleId) {
   <div class="receipt">
     <div class="text-center">
       ${headerHtml}
-      <div class="bold">Sales Receipt</div>
+      <div class="bold">${isUnpaid ? 'Unpaid Bill' : 'Sales Receipt'}</div>
       ${contactHtml}
     </div>
 
@@ -3867,6 +4086,7 @@ async function printBill(saleId) {
       <strong>Customer:</strong> ${sale.customer_name || "Walk-in"}<br>
       ${sale.customer_phone ? `<strong>Phone:</strong> ${sale.customer_phone}<br>` : ""}
       <strong>Order Type:</strong> ${sale.order_type === 'dine_in' ? 'Dine-in' : sale.order_type === 'takeaway' ? 'Takeaway' : 'Delivery'}<br>
+      <strong>Payment Method:</strong> ${method}<br>
     </div>
 
     <hr class="divider" />
@@ -3908,10 +4128,17 @@ async function printBill(saleId) {
     <hr class="divider" />
 
     <div style="font-size: 11px;">
-      <div><strong>Method:</strong> ${method}</div>
-      <div><strong>Received:</strong> Rs. ${received.toFixed(0)}</div>
-      ${remaining > 0 ? `<div class="bold"><strong>Due:</strong> Rs. ${remaining.toFixed(0)}</div>` : ""}
-      ${remaining < 0 ? `<div class="bold"><strong>Change:</strong> Rs. ${Math.abs(remaining).toFixed(0)}</div>` : ""}
+      ${isUnpaid ? `
+        <div style="text-align: center; border: 1px dashed #111827; padding: 5px; margin-top: 5px; font-weight: bold;">
+          *** UNPAID BILL ***<br>
+          Please pay PKR ${grandTotal.toFixed(0)} at the counter.
+        </div>
+      ` : `
+        <div><strong>Method:</strong> ${method}</div>
+        <div><strong>Received:</strong> Rs. ${received.toFixed(0)}</div>
+        ${remaining > 0 ? `<div class="bold"><strong>Due:</strong> Rs. ${remaining.toFixed(0)}</div>` : ""}
+        ${remaining < 0 ? `<div class="bold"><strong>Change:</strong> Rs. ${Math.abs(remaining).toFixed(0)}</div>` : ""}
+      `}
     </div>
 
     <hr class="divider" />

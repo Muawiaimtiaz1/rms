@@ -187,7 +187,10 @@ function renderReceiptSettings() {
   const images = settings.receipt_images || [];
 
   // Delay preview update until after render
-  setTimeout(updateReceiptPreview, 0);
+  setTimeout(() => {
+    updateReceiptPreview();
+    renderPresetLists();
+  }, 0);
 
   return `
     <div class="w-full animate-in fade-in slide-in-from-right-4 duration-500">
@@ -473,6 +476,59 @@ function renderReceiptSettings() {
                          class="w-full px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm">
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Taxes & Discounts Presets -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <!-- Discount Presets -->
+          <div class="bg-slate-50 dark:bg-slate-900/50 rounded-[2rem] p-8 border border-slate-200 dark:border-slate-800">
+            <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
+              <svg class="w-6 h-6 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" /></svg>
+              Discount Presets
+            </h4>
+            
+            <div class="space-y-4 mb-6">
+              <input id="preset-disc-name" type="text" placeholder="Preset Name (e.g. Eid Discount)" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+              <div class="flex gap-2">
+                <select id="preset-disc-type" class="w-1/3 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+                  <option value="percentage">Percentage (%)</option>
+                  <option value="amount">Fixed Amount</option>
+                </select>
+                <input id="preset-disc-val" type="number" step="0.01" placeholder="Value" class="flex-1 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+                <button type="button" onclick="saveDiscountPreset()" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all">Add</button>
+              </div>
+            </div>
+
+            <div id="discount-presets-list" class="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              <!-- Presets rendered here -->
+            </div>
+          </div>
+
+          <!-- Tax Presets -->
+          <div class="bg-slate-50 dark:bg-slate-900/50 rounded-[2rem] p-8 border border-slate-200 dark:border-slate-800">
+            <h4 class="text-lg font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
+              <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>
+              Tax Presets
+            </h4>
+            
+            <div class="space-y-4 mb-6">
+              <input id="preset-tax-name" type="text" placeholder="Tax Name (e.g. Card Tax)" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+              <div class="flex gap-2">
+                <input id="preset-tax-pct" type="number" step="0.01" placeholder="Percent (%)" class="w-1/2 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+                <select id="preset-tax-method" class="flex-1 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm">
+                  <option value="">All Methods</option>
+                  <option value="cash">Linked: Cash</option>
+                  <option value="card">Linked: Card</option>
+                  <option value="online">Linked: Online</option>
+                </select>
+                <button type="button" onclick="saveTaxPreset()" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all">Add</button>
+              </div>
+            </div>
+
+            <div id="tax-presets-list" class="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              <!-- Presets rendered here -->
             </div>
           </div>
         </div>
@@ -1668,6 +1724,111 @@ function openUserAccess(user) {
   }
 
   toggleUserAccessMenu();
+}
+
+// --- Preset Management Logic ---
+let _discountPresets = [];
+let _taxPresets = [];
+
+async function fetchPresets() {
+  try {
+    [_discountPresets, _taxPresets] = await Promise.all([
+      api("/api/shop-settings/discounts"),
+      api("/api/shop-settings/taxes")
+    ]);
+  } catch (e) {
+    console.error("Fetch presets error:", e);
+  }
+}
+
+async function renderPresetLists() {
+  await fetchPresets();
+  const discList = document.getElementById("discount-presets-list");
+  const taxList = document.getElementById("tax-presets-list");
+
+  if (discList) {
+    discList.innerHTML = _discountPresets.map(p => `
+      <div class="flex items-center justify-between p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm animate-in fade-in slide-in-from-bottom-2">
+        <div>
+          <p class="text-sm font-bold text-slate-800 dark:text-slate-200">${p.name}</p>
+          <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">${p.type === 'percentage' ? p.value + '%' : 'Rs. ' + p.value}</p>
+        </div>
+        <button onclick="deleteDiscountPreset(${p.id})" class="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-all">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        </button>
+      </div>
+    `).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">No discount presets yet.</p>';
+  }
+
+  if (taxList) {
+    taxList.innerHTML = _taxPresets.map(p => `
+      <div class="flex items-center justify-between p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm animate-in fade-in slide-in-from-bottom-2">
+        <div>
+          <p class="text-sm font-bold text-slate-800 dark:text-slate-200">${p.name}</p>
+          <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">${p.percentage}% ${p.linked_payment_method ? '(linked: ' + p.linked_payment_method + ')' : ''}</p>
+        </div>
+        <button onclick="deleteTaxPreset(${p.id})" class="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-all">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        </button>
+      </div>
+    `).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">No tax presets yet.</p>';
+  }
+}
+
+async function saveDiscountPreset() {
+  const name = document.getElementById("preset-disc-name").value;
+  const type = document.getElementById("preset-disc-type").value;
+  const value = parseFloat(document.getElementById("preset-disc-val").value);
+
+  if (!name || isNaN(value)) return toast("Please fill name and value", "error");
+
+  try {
+    await api("/api/shop-settings/discounts", "POST", { name, type, value });
+    toast("Discount preset added");
+    document.getElementById("preset-disc-name").value = "";
+    document.getElementById("preset-disc-val").value = "";
+    renderPresetLists();
+  } catch (e) {
+    toast("Failed to save preset", "error");
+  }
+}
+
+async function deleteDiscountPreset(id) {
+  if (!confirm("Are you sure?")) return;
+  try {
+    await api(`/api/shop-settings/discounts/${id}`, "DELETE");
+    renderPresetLists();
+  } catch (e) {
+    toast("Failed to delete", "error");
+  }
+}
+
+async function saveTaxPreset() {
+  const name = document.getElementById("preset-tax-name").value;
+  const percentage = parseFloat(document.getElementById("preset-tax-pct").value);
+  const linked_payment_method = document.getElementById("preset-tax-method").value;
+
+  if (!name || isNaN(percentage)) return toast("Please fill name and percentage", "error");
+
+  try {
+    await api("/api/shop-settings/taxes", "POST", { name, percentage, linked_payment_method });
+    toast("Tax preset added");
+    document.getElementById("preset-tax-name").value = "";
+    document.getElementById("preset-tax-pct").value = "";
+    renderPresetLists();
+  } catch (e) {
+    toast("Failed to save preset", "error");
+  }
+}
+
+async function deleteTaxPreset(id) {
+  if (!confirm("Are you sure?")) return;
+  try {
+    await api(`/api/shop-settings/taxes/${id}`, "DELETE");
+    renderPresetLists();
+  } catch (e) {
+    toast("Failed to delete", "error");
+  }
 }
 
 

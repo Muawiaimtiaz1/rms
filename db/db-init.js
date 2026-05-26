@@ -88,6 +88,53 @@ async function initPostgres() {
       console.log("✅ expenses.updated_at added.");
     }
 
+    // Check for discounts table
+    const discountsTableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'discounts'
+      );
+    `);
+    if (!discountsTableCheck.rows[0].exists) {
+      console.log("🔧 Migrating database: Adding discounts table...");
+      await query(`
+        CREATE TABLE IF NOT EXISTS discounts (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'percentage',
+          value DOUBLE PRECISION NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      console.log("✅ discounts table added.");
+    }
+
+    // Check for taxes table
+    const taxesTableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'taxes'
+      );
+    `);
+    if (!taxesTableCheck.rows[0].exists) {
+      console.log("🔧 Migrating database: Adding taxes table...");
+      await query(`
+        CREATE TABLE IF NOT EXISTS taxes (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          percentage DOUBLE PRECISION NOT NULL DEFAULT 0,
+          linked_payment_method TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      console.log("✅ taxes table added.");
+    }
+
+
   } catch (err) {
     console.error("❌ PostgreSQL Initialization Error:", err.message);
     // Don't crash the server, but log the error

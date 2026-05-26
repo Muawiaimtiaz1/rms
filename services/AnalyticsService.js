@@ -106,6 +106,7 @@ class AnalyticsService {
       // 1. KPI Aggregates
       const kpi = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .select(
           db.raw('COALESCE(SUM(total), 0) as total_sales'),
@@ -115,6 +116,7 @@ class AnalyticsService {
 
       const customersCount = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .whereNotNull('customer_id')
         .countDistinct('customer_id as val').first();
@@ -126,6 +128,7 @@ class AnalyticsService {
       // 2. Summary (Returns, COGS, Discounts)
       const discounts = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .sum('discount as val').first();
 
@@ -140,6 +143,7 @@ class AnalyticsService {
       const cogsStats = await db('sale_items as si')
         .join('sales as s', 'si.sale_id', 's.id')
         .modify(qb => shopId ? qb.where('s.shop_id', shopId) : qb)
+        .where('s.order_status', 'completed')
         .whereBetween('s.created_at', [bounds.start, bounds.end])
         .select(db.raw('SUM(si.quantity * si.buying_price_at_sale) as val')).first();
 
@@ -169,6 +173,7 @@ class AnalyticsService {
       // 3. Growth
       const prevKpi = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [prevBounds.start, prevBounds.end])
         .select(db.raw('COALESCE(SUM(total), 0) as total_sales'), db.raw('COUNT(id) as total_orders')).first();
 
@@ -190,6 +195,7 @@ class AnalyticsService {
       const getTrendData = async (lblExpr) => {
         const raw = await db('sales')
           .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+          .where({ order_status: 'completed' })
           .whereBetween('created_at', [bounds.start, bounds.end])
           .select(db.raw(`${lblExpr} as label`))
           .select(db.raw('SUM(total) as sales'), db.raw('COUNT(id) as orders'))
@@ -208,6 +214,7 @@ class AnalyticsService {
 
       const paymentBreakdownRaw = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .select('payment_method as label')
         .sum('total as sales').groupBy('label').orderBy('sales', 'desc');
@@ -215,6 +222,7 @@ class AnalyticsService {
 
       const channelBreakdownRaw = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .select('order_type as label')
         .sum('total as sales').groupBy('label').orderBy('sales', 'desc');
@@ -224,6 +232,7 @@ class AnalyticsService {
         .join('sales as s', 'si.sale_id', 's.id')
         .join('products as p', 'si.product_id', 'p.id')
         .modify(qb => shopId ? qb.where('s.shop_id', shopId) : qb)
+        .where('s.order_status', 'completed')
         .whereBetween('s.created_at', [bounds.start, bounds.end])
         .select(db.raw("COALESCE(p.category, 'General') as label"))
         .select(db.raw('SUM(si.quantity * si.price_at_sale) as sales'))
@@ -232,6 +241,7 @@ class AnalyticsService {
 
       const hourQ = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .select(db.raw(isSqlite ? "strftime('%H', created_at) as label" : "TO_CHAR(created_at, 'HH24') as label"))
         .sum('total as sales').count('id as orders')
@@ -242,6 +252,7 @@ class AnalyticsService {
         .join('sales as s', 'si.sale_id', 's.id')
         .join('products as p', 'si.product_id', 'p.id')
         .modify(qb => shopId ? qb.where('s.shop_id', shopId) : qb)
+        .where('s.order_status', 'completed')
         .whereBetween('s.created_at', [bounds.start, bounds.end])
         .select('p.id', 'p.name', 'p.image_path', 'p.stock')
         .sum('si.quantity as quantity_sold')
@@ -265,6 +276,7 @@ class AnalyticsService {
       }
       const heatmapRawData = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
         .whereBetween('created_at', [heatmapStartBound, bounds.end])
         .select(
           db.raw(isSqlite ? "date(created_at) as dt" : "TO_CHAR(created_at, 'YYYY-MM-DD') as dt"),

@@ -829,6 +829,43 @@ if (!tableExists) {
       `);
       console.log("✅ Restaurant columns added to sale_items.");
     }
+
+    // Check for discounts table
+    const discountsExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='discounts'").get();
+    if (!discountsExists) {
+      console.log("🔧 Updating database: Adding discounts table...");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS discounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shop_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'percentage',
+          value REAL NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+        );
+      `);
+      console.log("✅ discounts table added.");
+    }
+
+    // Check for taxes table
+    const taxesExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='taxes'").get();
+    if (!taxesExists) {
+      console.log("🔧 Updating database: Adding taxes table...");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS taxes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shop_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          percentage REAL NOT NULL DEFAULT 0,
+          linked_payment_method TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+        );
+      `);
+      console.log("✅ taxes table added.");
+    }
+
   }
 }
 

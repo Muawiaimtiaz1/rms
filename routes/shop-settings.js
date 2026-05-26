@@ -210,4 +210,110 @@ router.delete("/images/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// --- Discounts & Taxes Prefab Logic ---
+
+// GET /api/shop-settings/discounts
+router.get("/discounts", requireAuth, async (req, res) => {
+  try {
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    const query = `SELECT * FROM discounts WHERE shop_id = ${isPostgres ? '$1' : '?'}`;
+    let rows;
+    if (isPostgres) rows = (await getPostgres().query(query, [shopId])).rows;
+    else rows = getSqlite().prepare(query).all(shopId);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch discounts" });
+  }
+});
+
+// POST /api/shop-settings/discounts
+router.post("/discounts", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const shopId = req.session.user.shop_id;
+    const { name, type, value } = req.body;
+    if (!name || !value) return res.status(400).json({ error: "Missing name or value" });
+
+    const isPostgres = usePostgres();
+    if (isPostgres) {
+      await getPostgres().query(
+        "INSERT INTO discounts (shop_id, name, type, value) VALUES ($1, $2, $3, $4)",
+        [shopId, name, type || 'percentage', value]
+      );
+    } else {
+      getSqlite().prepare(
+        "INSERT INTO discounts (shop_id, name, type, value) VALUES (?, ?, ?, ?)"
+      ).run(shopId, name, type || 'percentage', value);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to save discount" });
+  }
+});
+
+// DELETE /api/shop-settings/discounts/:id
+router.delete("/discounts/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    if (isPostgres) await getPostgres().query("DELETE FROM discounts WHERE id = $1 AND shop_id = $2", [req.params.id, shopId]);
+    else getSqlite().prepare("DELETE FROM discounts WHERE id = ? AND shop_id = ?").run(req.params.id, shopId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to delete discount" });
+  }
+});
+
+// GET /api/shop-settings/taxes
+router.get("/taxes", requireAuth, async (req, res) => {
+  try {
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    const query = `SELECT * FROM taxes WHERE shop_id = ${isPostgres ? '$1' : '?'}`;
+    let rows;
+    if (isPostgres) rows = (await getPostgres().query(query, [shopId])).rows;
+    else rows = getSqlite().prepare(query).all(shopId);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch taxes" });
+  }
+});
+
+// POST /api/shop-settings/taxes
+router.post("/taxes", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const shopId = req.session.user.shop_id;
+    const { name, percentage, linked_payment_method } = req.body;
+    if (!name || percentage === undefined) return res.status(400).json({ error: "Missing name or percentage" });
+
+    const isPostgres = usePostgres();
+    if (isPostgres) {
+      await getPostgres().query(
+        "INSERT INTO taxes (shop_id, name, percentage, linked_payment_method) VALUES ($1, $2, $3, $4)",
+        [shopId, name, percentage, linked_payment_method || null]
+      );
+    } else {
+      getSqlite().prepare(
+        "INSERT INTO taxes (shop_id, name, percentage, linked_payment_method) VALUES (?, ?, ?, ?)"
+      ).run(shopId, name, percentage, linked_payment_method || null);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to save tax" });
+  }
+});
+
+// DELETE /api/shop-settings/taxes/:id
+router.delete("/taxes/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    if (isPostgres) await getPostgres().query("DELETE FROM taxes WHERE id = $1 AND shop_id = $2", [req.params.id, shopId]);
+    else getSqlite().prepare("DELETE FROM taxes WHERE id = ? AND shop_id = ?").run(req.params.id, shopId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to delete tax" });
+  }
+});
+
 module.exports = router;

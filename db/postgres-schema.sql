@@ -375,3 +375,21 @@ CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
 CREATE INDEX IF NOT EXISTS idx_customer_ledger_created_at ON customer_ledger(created_at);
 
+CREATE TABLE IF NOT EXISTS discounts (
+  id SERIAL PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'percentage', -- percentage, amount
+  value DOUBLE PRECISION NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS taxes (
+  id SERIAL PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  percentage DOUBLE PRECISION NOT NULL DEFAULT 0,
+  linked_payment_method TEXT, -- cash, card, online
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+

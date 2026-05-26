@@ -29,6 +29,7 @@ const checkoutSchema = z.object({
   token_number: z.string().nullable().optional(),
   delivery_address: z.string().nullable().optional(),
   kitchen_id: z.number().int().nullable().optional(),
+  order_status: z.string().default('pending'),
 });
 
 class SalesService {
@@ -136,7 +137,8 @@ class SalesService {
           rider_id: data.rider_id,
           kitchen_id: data.kitchen_id,
           guest_count: data.guest_count,
-          token_number: data.token_number
+          token_number: data.token_number,
+          order_status: data.order_status
         })
         .returning('id');
       const saleId = typeof saleIdObj === 'object' ? saleIdObj.id : saleIdObj;
@@ -292,16 +294,39 @@ class SalesService {
     });
   }
 
-  async updateDetails(saleId, shopId, { customer_name, customer_phone, payment_method, amount_received }) {
-    await db('sales')
-      .where({ id: saleId, shop_id: shopId })
-      .update({
-        customer_name: customer_name || '',
-        customer_phone: customer_phone || '',
-        payment_method: payment_method || 'cash',
-        amount_received: amount_received || 0,
-        updated_at: db.fn.now()
-      });
+  async updateDetails(saleId, shopId, { customer_name, customer_phone, payment_method, amount_received, discount, tax_percentage }) {
+    return await db.transaction(async (trx) => {
+      const sale = await trx('sales').where({ id: saleId, shop_id: shopId }).first();
+      if (!sale) throw new Error("Sale not found");
+
+      const updateData = {
+        updated_at: trx.fn.now()
+      };
+
+      if (customer_name !== undefined) updateData.customer_name = customer_name;
+      if (customer_phone !== undefined) updateData.customer_phone = customer_phone;
+      if (payment_method !== undefined) updateData.payment_method = payment_method;
+      if (amount_received !== undefined) updateData.amount_received = amount_received;
+
+      const newDiscount = discount !== undefined ? parseFloat(discount) : sale.discount;
+      const newTaxPct = tax_percentage !== undefined ? parseFloat(tax_percentage) : sale.tax_percentage;
+
+      // Recalculate Total if discount or tax changed
+      if (discount !== undefined || tax_percentage !== undefined) {
+        const items = await trx('sale_items').where({ sale_id: saleId });
+        const subtotal = items.reduce((sum, item) => sum + (Number(item.price_at_sale) * Number(item.quantity)), 0);
+        const taxAmount = (subtotal - newDiscount) * (newTaxPct / 100);
+        const grandTotal = subtotal - newDiscount + taxAmount;
+
+        updateData.discount = newDiscount;
+        updateData.tax_percentage = newTaxPct;
+        updateData.total = grandTotal;
+      }
+
+      await trx('sales')
+        .where({ id: saleId, shop_id: shopId })
+        .update(updateData);
+    });
   }
 
   async getBill(saleId, shopId) {
