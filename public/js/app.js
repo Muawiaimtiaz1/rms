@@ -1347,7 +1347,7 @@ function filterInventory() {
   rows.forEach(row => {
     const name = row.querySelector(".product-name").textContent.toLowerCase();
     const cat = row.querySelector(".product-category").textContent.toLowerCase();
-    
+
     if (name.includes(q) || cat.includes(q)) {
       row.classList.remove("hidden");
       visibleCount++;
@@ -1657,15 +1657,15 @@ async function addComponentToForm(isIngredient = false) {
   if (isIngredient) {
     const stocks = await api("/api/raw-stock");
     if (!stocks.length) return toast("Add Raw Ingredients first!", "error");
-    window._formComponents.push({ 
-      raw_stock_id: stocks[0].id, 
-      name: stocks[0].name, 
-      quantity: 1, 
-      cost: stocks[0].buying_price, 
-      unit: stocks[0].unit, 
+    window._formComponents.push({
+      raw_stock_id: stocks[0].id,
+      name: stocks[0].name,
+      quantity: 1,
+      cost: stocks[0].buying_price,
+      unit: stocks[0].unit,
       usage_unit: stocks[0].usage_unit || stocks[0].unit,
       conversion_factor: stocks[0].conversion_factor || 1,
-      is_ingredient: true 
+      is_ingredient: true
     });
     window._rawStocksList = stocks; // Cache for dropdown
   } else {
@@ -2671,8 +2671,8 @@ function onPosFloorChange() {
   const tableSelect = $c('pos-table');
   if (!tableSelect) return;
 
-  const filteredTables = _posAllTables.filter(t => 
-    (!floorId || t.floor_id == floorId) && 
+  const filteredTables = _posAllTables.filter(t =>
+    (!floorId || t.floor_id == floorId) &&
     (t.status === 'available' || t.status === 'reserved')
   );
 
@@ -2701,9 +2701,9 @@ function renderPOSProducts(products) {
 
       <div class="absolute top-3 right-3 z-10 flex flex-col items-center justify-center px-2 py-1.5 rounded-xl ${p.stock > 0 || (p.ingredients && p.ingredients.length > 0) ? 'bg-emerald-50/90 dark:bg-emerald-900/40' : 'bg-rose-50/90 dark:bg-rose-900/40'} min-w-[2.5rem]">
         ${(p.ingredients && p.ingredients.length > 0)
-          ? `<span class="text-xl font-black text-amber-500 leading-none">🍳</span>`
-          : `<span class="text-xl font-black ${p.stock > 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'} leading-none tracking-tight">${p.stock}</span>`
-        }
+            ? `<span class="text-xl font-black text-amber-500 leading-none">🍳</span>`
+            : `<span class="text-xl font-black ${p.stock > 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'} leading-none tracking-tight">${p.stock}</span>`
+          }
       </div>
 
       <!-- Hero Image Layer -->
@@ -2714,7 +2714,7 @@ function renderPOSProducts(products) {
             : `<div class="w-full h-28 mt-5 mb-2 flex items-center justify-center">
                  <svg class="w-10 h-10 text-slate-200 dark:text-slate-700 drop-shadow-sm" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                </div>`
-      }
+          }
 
       <div class="flex flex-col">
         
@@ -3656,21 +3656,21 @@ async function printKitchenBill(saleId) {
       </thead>
       <tbody>
         ${items.map(i => {
-          let details = [];
-          if (i.variants_json) {
-            try {
-              const variants = JSON.parse(i.variants_json);
-              details.push(Object.values(variants).join(', '));
-            } catch(e){}
-          }
-          if (i.addons_json) {
-            try {
-              const addons = JSON.parse(i.addons_json);
-              details.push('Addons: ' + addons.map(a => a.name).join(', '));
-            } catch(e){}
-          }
+    let details = [];
+    if (i.variants_json) {
+      try {
+        const variants = JSON.parse(i.variants_json);
+        details.push(Object.values(variants).join(', '));
+      } catch (e) { }
+    }
+    if (i.addons_json) {
+      try {
+        const addons = JSON.parse(i.addons_json);
+        details.push('Addons: ' + addons.map(a => a.name).join(', '));
+      } catch (e) { }
+    }
 
-          return `
+    return `
             <tr>
               <td class="qty text-center">x${i.quantity}</td>
               <td>
@@ -3680,7 +3680,7 @@ async function printKitchenBill(saleId) {
               </td>
             </tr>
           `;
-        }).join('')}
+  }).join('')}
       </tbody>
     </table>
 
@@ -3799,7 +3799,7 @@ async function printBill(saleId) {
   if (shop?.name && !useLogo) {
     footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px;">${shop.name}</div>`;
   }
-  footerHtml += `<div style="font-size: ${footerFontSize}px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE AND CONTACT 03226155209</div>`;
+  footerHtml += `<div style="font-size: ${footerFontSize}px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE - 03226155209</div>`;
   footerHtml += `</div>`;
 
   const win = window.open("", "_blank");
@@ -4113,7 +4113,7 @@ async function printReturnReceipt(returnId) {
   if (shop?.name && !useLogo) {
     footerHtml += `<br>${shop.name}`;
   }
-  footerHtml += `<div style="font-size: 8px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE AND CONTACT 03226155209</div>`;
+  footerHtml += `<div style="font-size: 8px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE - 03226155209</div>`;
   footerHtml += `</div>`;
 
   const win = window.open("", "_blank");
@@ -4282,13 +4282,13 @@ async function renderSalesHistory(onlyPendingDues = false) {
 
 function setSalesHistoryRange(val) {
   _salesRangeFilter = val;
-  
+
   // Clear manual inputs visually
   const fromInput = document.getElementById("sales-from");
   const toInput = document.getElementById("sales-to");
   if (fromInput) fromInput.value = "";
   if (toInput) toInput.value = "";
-  
+
   _renderSalesTable();
 }
 
@@ -5852,7 +5852,7 @@ async function renderTables() {
     ]);
     tables = data[0] || [];
     floors = data[1] || [];
-  } catch (e) {}
+  } catch (e) { }
   _allTables = tables;
 
   const filteredTables = _currentTableFloorFilter
@@ -5890,11 +5890,9 @@ async function renderTables() {
           <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white text-xl">🪑</div>
           <div>
             <h3 class="font-black text-slate-900 dark:text-white text-sm">Floor Plan</h3>
-            <p class="text-xs text-slate-500">${
-              filteredTables.filter((t) => t.status === "available").length
-            } available, ${
-    filteredTables.filter((t) => t.status === "occupied").length
-  } occupied</p>
+            <p class="text-xs text-slate-500">${filteredTables.filter((t) => t.status === "available").length
+    } available, ${filteredTables.filter((t) => t.status === "occupied").length
+    } occupied</p>
           </div>
         </div>
         
@@ -5904,22 +5902,20 @@ async function renderTables() {
              <select onchange="_currentTableFloorFilter = this.value; renderTables()" class="w-full pl-9 pr-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-white focus:outline-none focus:border-indigo-500 transition-all appearance-none cursor-pointer">
                 <option value="">All Floors</option>
                 ${floors
-                  .map(
-                    (f) =>
-                      `<option value="${f.id}" ${
-                        _currentTableFloorFilter == f.id ? "selected" : ""
-                      }>${f.name}</option>`
-                  )
-                  .join("")}
+      .map(
+        (f) =>
+          `<option value="${f.id}" ${_currentTableFloorFilter == f.id ? "selected" : ""
+          }>${f.name}</option>`
+      )
+      .join("")}
              </select>
              <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
              </div>
           </div>
 
-          ${
-            !isReadOnly
-              ? `
+          ${!isReadOnly
+      ? `
           <div class="flex gap-2">
             <button onclick="renderFloors()" class="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm transition-all border border-slate-200 dark:border-slate-700 flex items-center gap-2">
               🏢 Floors
@@ -5930,8 +5926,8 @@ async function renderTables() {
             </button>
           </div>
           `
-              : ""
-          }
+      : ""
+    }
         </div>
       </div>
 
@@ -5944,46 +5940,39 @@ async function renderTables() {
 
       <!-- Table Grid -->
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        ${
-          filteredTables.length === 0
-            ? `
+        ${filteredTables.length === 0
+      ? `
           <div class="col-span-full flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
             <div class="text-5xl mb-3">🪑</div>
             <p class="text-slate-500 text-sm font-medium">No tables found in this section</p>
             <button onclick="showAddTableModal()" class="mt-4 px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-500 transition-all">Add New Table</button>
           </div>
         `
-            : filteredTables
-                .map(
-                  (t) => `
-          <div class="group relative flex flex-col items-center justify-center p-5 rounded-2xl border-2 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-xl ${
-            statusBg[t.status] || "bg-white border-slate-200"
-          }"
-               onclick="showTableActions(${t.id}, '${t.table_number}', '${
-                    t.status
-                  }', ${t.capacity})">
-            <div class="absolute top-3 right-3 w-2.5 h-2.5 rounded-full ${
-              statusColor[t.status] || "bg-slate-400"
+      : filteredTables
+        .map(
+          (t) => `
+          <div class="group relative flex flex-col items-center justify-center p-5 rounded-2xl border-2 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-xl ${statusBg[t.status] || "bg-white border-slate-200"
+            }"
+               onclick="showTableActions(${t.id}, '${t.table_number}', '${t.status
+            }', ${t.capacity})">
+            <div class="absolute top-3 right-3 w-2.5 h-2.5 rounded-full ${statusColor[t.status] || "bg-slate-400"
             }"></div>
             <div class="text-3xl mb-1">🪑</div>
-            <div class="font-black text-slate-900 dark:text-white text-lg">${
-              t.table_number
+            <div class="font-black text-slate-900 dark:text-white text-lg">${t.table_number
             }</div>
-            <div class="text-xs font-medium text-slate-500 mt-1">Cap: ${
-              t.capacity
+            <div class="text-xs font-medium text-slate-500 mt-1">Cap: ${t.capacity
             } guests</div>
-            <div class="text-[10px] font-black uppercase tracking-wide mt-1 ${
-              t.status === "available"
-                ? "text-emerald-600"
-                : t.status === "occupied"
+            <div class="text-[10px] font-black uppercase tracking-wide mt-1 ${t.status === "available"
+              ? "text-emerald-600"
+              : t.status === "occupied"
                 ? "text-red-600"
                 : "text-amber-600"
             }">${t.status}</div>
           </div>
         `
-                )
-                .join("")
-        }
+        )
+        .join("")
+    }
       </div>
     </div>
   `;
