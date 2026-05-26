@@ -3799,6 +3799,7 @@ async function printBill(saleId) {
   if (shop?.name && !useLogo) {
     footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px;">${shop.name}</div>`;
   }
+  footerHtml += `<div style="font-size: ${footerFontSize}px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE AND CONTACT 03226155209</div>`;
   footerHtml += `</div>`;
 
   const win = window.open("", "_blank");
@@ -4112,6 +4113,7 @@ async function printReturnReceipt(returnId) {
   if (shop?.name && !useLogo) {
     footerHtml += `<br>${shop.name}`;
   }
+  footerHtml += `<div style="font-size: 8px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE AND CONTACT 03226155209</div>`;
   footerHtml += `</div>`;
 
   const win = window.open("", "_blank");
