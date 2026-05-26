@@ -290,8 +290,8 @@ async function renderRawStock() {
                 </div>
                 <div class="text-right">
                   <span class="text-xs font-black uppercase tracking-widest text-slate-400">Current Stock</span>
-                  <div class="text-2xl font-black text-slate-950 dark:text-white">${rs.current_stock} <span class="text-sm font-bold text-slate-400">${rs.unit}</span></div>
-                  ${rs.usage_unit ? `<div class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">= ${(rs.current_stock * rs.conversion_factor).toFixed(1)} ${rs.usage_unit}</div>` : ''}
+                  <div class="text-2xl font-black text-slate-950 dark:text-white">${Number(Number(rs.current_stock).toFixed(3))} <span class="text-sm font-bold text-slate-400">${rs.unit}</span></div>
+                  ${rs.usage_unit ? `<div class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">= ${Number((rs.current_stock * rs.conversion_factor).toFixed(2))} ${rs.usage_unit}</div>` : ''}
                 </div>
               </div>
               <h4 class="text-lg font-black text-slate-900 dark:text-white mb-2">${rs.name}</h4>
@@ -561,7 +561,7 @@ async function renderRecipes() {
                   ${r.ingredients.map(ing => `
                     <div class="flex justify-between items-center text-sm">
                       <span class="font-bold text-slate-700 dark:text-slate-300">${ing.ingredient_name}</span>
-                      <span class="font-black text-indigo-600 dark:text-indigo-400">${ing.quantity} ${ing.unit}</span>
+                      <span class="font-black text-indigo-600 dark:text-indigo-400">${ing.quantity} ${ing.usage_unit || ing.unit}</span>
                     </div>
                   `).join('')}
                 </div>

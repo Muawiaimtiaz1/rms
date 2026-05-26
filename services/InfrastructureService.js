@@ -79,6 +79,17 @@ class InfrastructureService {
     await db('sales')
       .where({ id: saleId, shop_id: shopId })
       .update({ order_status: status });
+
+    if (status === 'completed') {
+      const sale = await db('sales')
+        .where({ id: saleId, shop_id: shopId })
+        .first();
+      if (sale && sale.table_id) {
+        await db('tables')
+          .where({ id: sale.table_id, shop_id: shopId })
+          .update({ status: 'available' });
+      }
+    }
   }
 }
 

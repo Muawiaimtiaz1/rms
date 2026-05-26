@@ -967,9 +967,14 @@ function userFormHtml(u = {}) {
         <div>
           <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">Role</label>
           <select id="uf-role" onchange="toggleUserPanelPicker(this.value)" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
-            <option value="pos_user" ${u.role === "pos_user" ? "selected" : ""}>POS User</option>
+            <option value="user" ${u.role === "user" ? "selected" : ""}>General Staff</option>
+            <option value="pos_user" ${u.role === "pos_user" ? "selected" : ""}>POS Operator</option>
+            <option value="waiter" ${u.role === "waiter" ? "selected" : ""}>Waiter / Server</option>
+            <option value="rider" ${u.role === "rider" ? "selected" : ""}>Rider / Delivery</option>
+            <option value="kitchen" ${u.role === "kitchen" ? "selected" : ""}>Kitchen Terminal</option>
             <option value="manager" ${u.role === "manager" ? "selected" : ""}>Manager</option>
-            <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin/Shop Owner</option>
+            <option value="receptionist" ${u.role === "receptionist" ? "selected" : ""}>Receptionist</option>
+            <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin / Shop Owner</option>
           </select>
         </div>
         `
@@ -1085,10 +1090,10 @@ function togglePanel(el) {
   }
 }
 
-function openCreateUser(shopId = null) {
+function openCreateUser(shopId = null, defaultRole = 'user') {
   openModal(
     "Create User",
-    userFormHtml({ shop_id: shopId }) +
+    userFormHtml({ shop_id: shopId, role: defaultRole }) +
     `<button onclick="saveUser()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Create User</button>`,
     "max-w-2xl",
   );

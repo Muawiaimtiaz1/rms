@@ -1657,7 +1657,16 @@ async function addComponentToForm(isIngredient = false) {
   if (isIngredient) {
     const stocks = await api("/api/raw-stock");
     if (!stocks.length) return toast("Add Raw Ingredients first!", "error");
-    window._formComponents.push({ raw_stock_id: stocks[0].id, name: stocks[0].name, quantity: 1, cost: stocks[0].buying_price, unit: stocks[0].unit, is_ingredient: true });
+    window._formComponents.push({ 
+      raw_stock_id: stocks[0].id, 
+      name: stocks[0].name, 
+      quantity: 1, 
+      cost: stocks[0].buying_price, 
+      unit: stocks[0].unit, 
+      usage_unit: stocks[0].usage_unit || stocks[0].unit,
+      conversion_factor: stocks[0].conversion_factor || 1,
+      is_ingredient: true 
+    });
     window._rawStocksList = stocks; // Cache for dropdown
   } else {
     window._formComponents.push({ name: "", quantity: 1, price: 0, cost: 0, is_ingredient: false });
@@ -1696,6 +1705,8 @@ function updateIngredientInForm(index, rawStockId) {
     comp.name = stock.name;
     comp.cost = stock.buying_price;
     comp.unit = stock.unit;
+    comp.usage_unit = stock.usage_unit || stock.unit;
+    comp.conversion_factor = stock.conversion_factor || 1;
     recalculateComponentPrices();
   }
 }
@@ -1715,7 +1726,8 @@ function recalculateComponentPrices() {
   if (isRestaurant) {
     let totalCost = 0;
     components.forEach(c => {
-      totalCost += (c.cost || 0) * (c.quantity || 1);
+      const lineCost = (c.cost || 0) / (c.conversion_factor || 1);
+      totalCost += lineCost * (c.quantity || 0);
     });
     if (count > 0) {
       buyEl.value = totalCost.toFixed(2);
@@ -1799,7 +1811,7 @@ function renderFormCompositionList() {
 
         <!-- Qty -->
         <div class="col-span-6 sm:col-span-2">
-           <label class="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-1 block">Qty ${c.unit ? `(${c.unit})` : ""}</label>
+           <label class="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1 mb-1 block">Qty (${isRestaurant ? (c.usage_unit || c.unit || "unit") : (c.unit || "unit")})</label>
            <input type="number" value="${c.quantity || 1}" step="0.01" min="0.01" oninput="updateComponentQtyInForm(${idx}, this.value)"
               class="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-center focus:border-indigo-500 outline-none" />
         </div>
@@ -2154,7 +2166,7 @@ async function renderPOS() {
                   <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Table</label>
                   <select id="pos-table" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                     <option value="">-- Select Table --</option>
-                    ${(tables || []).map(t => `<option value="${t.id}">${t.table_number} (${t.status})</option>`).join('')}
+                    ${(tables || []).filter(t => t.status === 'available' || t.status === 'reserved').map(t => `<option value="${t.id}">${t.table_number} (${t.status})</option>`).join('')}
                   </select>
                 </div>
               </div>
@@ -2564,11 +2576,6 @@ async function renderPOSOrders() {
 async function completeOrderFromPOS(id, skipConfirm = false) {
   if (!skipConfirm && !confirm('Are you sure you want to complete this order and move it to sales history?')) return;
   try {
-    const s = _posActiveOrders.find(o => o.id === id);
-    if (s && s.order_type === 'dine_in' && s.table_id) {
-      await api(`/api/tables/${s.table_id}/status`, 'PATCH', { status: 'available' });
-    }
-    
     await api(`/api/kds/${id}/status`, 'PATCH', { status: 'completed' });
     toast('Order completed!');
     renderPOSOrders();
@@ -2664,9 +2671,10 @@ function onPosFloorChange() {
   const tableSelect = $c('pos-table');
   if (!tableSelect) return;
 
-  const filteredTables = floorId
-    ? _posAllTables.filter(t => t.floor_id == floorId)
-    : _posAllTables;
+  const filteredTables = _posAllTables.filter(t => 
+    (!floorId || t.floor_id == floorId) && 
+    (t.status === 'available' || t.status === 'reserved')
+  );
 
   tableSelect.innerHTML = `
     <option value="">-- Select Table --</option>
@@ -3581,10 +3589,12 @@ async function checkout() {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
               Print Bill
             </button>
+            ${window._posIsRetail ? '' : `
             <button onclick="printKitchenBill(${r.saleId})" class="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
               Kitchen Print
             </button>
+            `}
           </div>
           <button onclick="closeModal();renderPOS();" class="w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm transition-all">New Order</button>
         </div>
@@ -5828,38 +5838,99 @@ function renderLobby() {
 
 // ─── TABLE MANAGEMENT ────────────────────────────────────────────────────────
 let _allTables = [];
+let _currentTableFloorFilter = "";
+
 async function renderTables() {
   let tables = [];
-  try { tables = await api('/api/tables'); } catch (e) { }
+  let floors = [];
+  try {
+    const data = await Promise.all([
+      api("/api/tables"),
+      api("/api/tables/floors"),
+    ]);
+    tables = data[0] || [];
+    floors = data[1] || [];
+  } catch (e) {}
   _allTables = tables;
 
-  const isReadOnly = currentUser.role !== 'admin' && currentUser.role !== 'superadmin' && currentUser.role !== 'manager';
-  const statusColor = { available: 'bg-emerald-500', occupied: 'bg-red-500', reserved: 'bg-amber-500' };
-  const statusLabel = { available: '✅ Available', occupied: '🔴 Occupied', reserved: '🟡 Reserved' };
-  const statusBg = { available: 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800', occupied: 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800', reserved: 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800' };
+  const filteredTables = _currentTableFloorFilter
+    ? tables.filter((t) => t.floor_id == _currentTableFloorFilter)
+    : tables;
 
-  $c('page-content').innerHTML = `
+  const isReadOnly =
+    currentUser.role !== "admin" &&
+    currentUser.role !== "superadmin" &&
+    currentUser.role !== "manager";
+  const statusColor = {
+    available: "bg-emerald-500",
+    occupied: "bg-red-500",
+    reserved: "bg-amber-500",
+  };
+  const statusLabel = {
+    available: "✅ Available",
+    occupied: "🔴 Occupied",
+    reserved: "🟡 Reserved",
+  };
+  const statusBg = {
+    available:
+      "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+    occupied:
+      "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800",
+    reserved:
+      "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
+  };
+
+  $c("page-content").innerHTML = `
     <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <!-- Header Bar -->
-      <div class="flex items-center justify-between gap-4 bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white text-xl">🪑</div>
           <div>
             <h3 class="font-black text-slate-900 dark:text-white text-sm">Floor Plan</h3>
-            <p class="text-xs text-slate-500">${tables.filter(t => t.status === 'available').length} available, ${tables.filter(t => t.status === 'occupied').length} occupied</p>
+            <p class="text-xs text-slate-500">${
+              filteredTables.filter((t) => t.status === "available").length
+            } available, ${
+    filteredTables.filter((t) => t.status === "occupied").length
+  } occupied</p>
           </div>
         </div>
-        ${!isReadOnly ? `
-        <div class="flex gap-2">
-          <button onclick="renderFloors()" class="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm transition-all border border-slate-200 dark:border-slate-700 flex items-center gap-2">
-            🏢 Floors
-          </button>
-          <button onclick="showAddTableModal()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-            Add Table
-          </button>
+        
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Floor Filter -->
+          <div class="relative min-w-[160px]">
+             <select onchange="_currentTableFloorFilter = this.value; renderTables()" class="w-full pl-9 pr-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-white focus:outline-none focus:border-indigo-500 transition-all appearance-none cursor-pointer">
+                <option value="">All Floors</option>
+                ${floors
+                  .map(
+                    (f) =>
+                      `<option value="${f.id}" ${
+                        _currentTableFloorFilter == f.id ? "selected" : ""
+                      }>${f.name}</option>`
+                  )
+                  .join("")}
+             </select>
+             <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+             </div>
+          </div>
+
+          ${
+            !isReadOnly
+              ? `
+          <div class="flex gap-2">
+            <button onclick="renderFloors()" class="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm transition-all border border-slate-200 dark:border-slate-700 flex items-center gap-2">
+              🏢 Floors
+            </button>
+            <button onclick="showAddTableModal()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+              Add Table
+            </button>
+          </div>
+          `
+              : ""
+          }
         </div>
-        ` : ''}
       </div>
 
       <!-- Status Legend -->
@@ -5871,22 +5942,46 @@ async function renderTables() {
 
       <!-- Table Grid -->
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        ${tables.length === 0 ? `
+        ${
+          filteredTables.length === 0
+            ? `
           <div class="col-span-full flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">
             <div class="text-5xl mb-3">🪑</div>
-            <p class="text-slate-500 text-sm font-medium">No tables configured yet</p>
-            <button onclick="showAddTableModal()" class="mt-4 px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-500 transition-all">Add Your First Table</button>
+            <p class="text-slate-500 text-sm font-medium">No tables found in this section</p>
+            <button onclick="showAddTableModal()" class="mt-4 px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-500 transition-all">Add New Table</button>
           </div>
-        ` : tables.map(t => `
-          <div class="group relative flex flex-col items-center justify-center p-5 rounded-2xl border-2 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-xl ${statusBg[t.status] || 'bg-white border-slate-200'}"
-               onclick="showTableActions(${t.id}, '${t.table_number}', '${t.status}', ${t.capacity})">
-            <div class="absolute top-3 right-3 w-2.5 h-2.5 rounded-full ${statusColor[t.status] || 'bg-slate-400'}"></div>
+        `
+            : filteredTables
+                .map(
+                  (t) => `
+          <div class="group relative flex flex-col items-center justify-center p-5 rounded-2xl border-2 cursor-pointer transition-all hover:-translate-y-1 hover:shadow-xl ${
+            statusBg[t.status] || "bg-white border-slate-200"
+          }"
+               onclick="showTableActions(${t.id}, '${t.table_number}', '${
+                    t.status
+                  }', ${t.capacity})">
+            <div class="absolute top-3 right-3 w-2.5 h-2.5 rounded-full ${
+              statusColor[t.status] || "bg-slate-400"
+            }"></div>
             <div class="text-3xl mb-1">🪑</div>
-            <div class="font-black text-slate-900 dark:text-white text-lg">${t.table_number}</div>
-            <div class="text-xs font-medium text-slate-500 mt-1">Cap: ${t.capacity} guests</div>
-            <div class="text-[10px] font-black uppercase tracking-wide mt-1 ${t.status === 'available' ? 'text-emerald-600' : t.status === 'occupied' ? 'text-red-600' : 'text-amber-600'}">${t.status}</div>
+            <div class="font-black text-slate-900 dark:text-white text-lg">${
+              t.table_number
+            }</div>
+            <div class="text-xs font-medium text-slate-500 mt-1">Cap: ${
+              t.capacity
+            } guests</div>
+            <div class="text-[10px] font-black uppercase tracking-wide mt-1 ${
+              t.status === "available"
+                ? "text-emerald-600"
+                : t.status === "occupied"
+                ? "text-red-600"
+                : "text-amber-600"
+            }">${t.status}</div>
           </div>
-        `).join('')}
+        `
+                )
+                .join("")
+        }
       </div>
     </div>
   `;

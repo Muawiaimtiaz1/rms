@@ -54,7 +54,7 @@ class ProductService {
 
       // Ingredients
       p.ingredients = await db('product_recipe_links as prl')
-        .select('ri.raw_stock_id as id', 'rs.name', 'rs.unit', 'ri.quantity')
+        .select('ri.raw_stock_id as id', 'rs.name', 'rs.unit', 'rs.usage_unit', 'rs.conversion_factor', 'ri.quantity')
         .join('recipe_ingredients as ri', 'prl.recipe_id', 'ri.recipe_id')
         .join('raw_stocks as rs', 'ri.raw_stock_id', 'rs.id')
         .where('prl.product_id', p.id);

@@ -141,6 +141,13 @@ class SalesService {
         .returning('id');
       const saleId = typeof saleIdObj === 'object' ? saleIdObj.id : saleIdObj;
 
+      // 4.1 Update Table Status to occupied
+      if (data.table_id) {
+        await trx('tables')
+          .where({ id: data.table_id, shop_id: shopId })
+          .update({ status: 'occupied' });
+      }
+
       // 5. Process Items and Deduct Stock
       for (const item of resolvedItems) {
         let priceAtSale = item.selling_price;

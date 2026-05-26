@@ -17,6 +17,7 @@ router.get('/', requireAuth, async (req, res) => {
                         'raw_stock_id', ri.raw_stock_id,
                         'ingredient_name', rs.name,
                         'unit', rs.unit,
+                        'usage_unit', rs.usage_unit,
                         'quantity', ri.quantity
                     )
                 )
@@ -36,6 +37,7 @@ router.get('/', requireAuth, async (req, res) => {
                         'raw_stock_id', ri.raw_stock_id,
                         'ingredient_name', rs.name,
                         'unit', rs.unit,
+                        'usage_unit', rs.usage_unit,
                         'quantity', ri.quantity
                     )
                 )
