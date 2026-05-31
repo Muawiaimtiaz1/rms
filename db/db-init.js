@@ -192,6 +192,17 @@ async function initPostgres() {
       `);
       console.log("✅ printers table added.");
     }
+    
+    // Check for bill_printer in shops
+    const billPrinterCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'shops' AND column_name = 'bill_printer'
+    `);
+    if (billPrinterCheck.rows.length === 0) {
+      console.log("🔧 Migrating shops table: Adding bill_printer column...");
+      await query("ALTER TABLE shops ADD COLUMN bill_printer TEXT");
+      console.log("✅ shops.bill_printer added.");
+    }
 
   } catch (err) {
     console.error("❌ PostgreSQL Initialization Error:", err.message);

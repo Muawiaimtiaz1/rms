@@ -71,10 +71,14 @@ class SalesService {
 
     // 3. Create jobs in print_queue
     const sale = await dbInstance('sales').where({ id: saleId }).first();
+    const shop = await dbInstance('shops').where({ id: shopId }).first();
+
+    // 3a. Handle regular station jobs (KOTs)
     for (const [station, stationItems] of Object.entries(jobs)) {
-      if (station === 'NONE') continue; // Skip if explicitly disabled
+      if (station === 'NONE' || station === 'BILL') continue; // Use station BILL for actual bills later
       
       const content = {
+        job_type: 'kot',
         sale_id: saleId,
         order_type: sale.order_type,
         table_number: sale.table_id ? (await dbInstance('tables').where({id: sale.table_id}).first())?.table_number : null,
@@ -87,6 +91,45 @@ class SalesService {
         shop_id: shopId,
         station_name: station,
         content_json: JSON.stringify(content),
+        status: 'pending'
+      });
+    }
+
+    // 3b. Generate Full Bill if bill_printer is set
+    if (shop && shop.bill_printer) {
+      const billContent = {
+        job_type: 'bill',
+        sale_id: saleId,
+        order_type: sale.order_type,
+        table_number: sale.table_id ? (await dbInstance('tables').where({id: sale.table_id}).first())?.table_number : null,
+        token_number: sale.token_number,
+        customer_name: sale.customer_name || 'Walk-in',
+        created_at: sale.created_at,
+        
+        // Totals
+        subtotal: items.reduce((sum, it) => sum + (it.quantity * it.selling_price), 0),
+        discount: sale.discount || 0,
+        tax_percentage: sale.tax_percentage || 0,
+        total: sale.total,
+        amount_received: sale.amount_received,
+        change: Math.max(0, (sale.amount_received || 0) - (sale.total || 0)),
+        payment_method: sale.payment_method,
+
+        // Full items list for the bill
+        items: items.map(it => ({
+          name: it.product ? it.product.name : (it.name || it.custom_name),
+          quantity: it.quantity,
+          price: it.selling_price,
+          total: it.quantity * it.selling_price,
+          variants: it.variants_json ? JSON.parse(it.variants_json) : (it.variants || []),
+          addons: it.addons_json ? JSON.parse(it.addons_json) : (it.addons || [])
+        }))
+      };
+
+      await dbInstance('print_queue').insert({
+        shop_id: shopId,
+        station_name: shop.bill_printer,
+        content_json: JSON.stringify(billContent),
         status: 'pending'
       });
     }
