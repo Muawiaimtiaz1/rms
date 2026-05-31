@@ -41,10 +41,6 @@ app.use("/api/tables", require("./routes/tables"));
 app.use("/api/kds", require("./routes/kds"));
 app.use("/api/print-jobs", require("./routes/print-jobs"));
 app.use("/api/printers", require("./routes/printers"));
-app.get("/api/download-print-agent", (req, res) => {
-  const filePath = path.join(__dirname, "print-agent.js");
-  res.download(filePath, "print-agent.js");
-});
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get("/", (req, res) => {

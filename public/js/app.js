@@ -6935,25 +6935,13 @@ async function renderPrinterRouting() {
 
   // Initial load
   _allPrinters = await api('/api/printers');
-  if (typeof fetchReceiptSettings === 'function') {
-    await fetchReceiptSettings();
-  }
   await fetchCategories(); // Refresh categories to get latest station mappings
 
   const contentHtml = `
     <div class="animate-in fade-in slide-in-from-right-4 duration-500 max-w-6xl mx-auto pb-20">
-      <header class="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-           <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-2 tracking-tight">Printers & Routing</h3>
-           <p class="text-slate-500 dark:text-slate-400 text-sm italic">Define your physical printers and link them to product categories for automatic ticket routing.</p>
-        </div>
-        <a href="/api/download-print-agent" download class="flex items-center gap-3 px-6 py-3 rounded-2xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 hover:scale-105 transition-all shadow-xl shadow-slate-900/10 active:scale-95 group">
-           <svg class="w-5 h-5 group-hover:bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-           <div class="flex flex-col items-start leading-none">
-              <span class="text-[10px] font-black uppercase tracking-widest opacity-50">Local Agent</span>
-              <span class="text-sm font-bold">Download v2.0</span>
-           </div>
-        </a>
+      <header class="mb-12">
+        <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-2 tracking-tight">Printers & Routing</h3>
+        <p class="text-slate-500 dark:text-slate-400 text-sm italic">Define your physical printers and link them to product categories for automatic ticket routing.</p>
       </header>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -6981,23 +6969,6 @@ async function renderPrinterRouting() {
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50 dark:divide-slate-800">
-                <!-- NEW: Customer Bill Printer -->
-                <tr class="bg-indigo-50/30 dark:bg-indigo-900/10 transition-colors">
-                  <td class="px-6 py-5">
-                    <div class="flex items-center gap-3">
-                      <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></div>
-                      <span class="font-black text-slate-900 dark:text-white uppercase tracking-tighter">Customer Receipt (Full Bill)</span>
-                    </div>
-                  </td>
-                  <td class="px-6 py-5">
-                    <select onchange="updateShopBillPrinter(this.value)" class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-4 py-2.5 rounded-xl text-xs font-black text-indigo-600 focus:outline-none focus:border-indigo-500 transition-all cursor-pointer shadow-sm">
-                      <option value="">Off (No Auto-Print)</option>
-                      ${_allPrinters.map(p => `
-                        <option value="${p.system_name}" ${(_receiptSettings && _receiptSettings.bill_printer === p.system_name) ? 'selected' : ''}>${p.display_name} (${p.system_name})</option>
-                      `).join('')}
-                    </select>
-                  </td>
-                </tr>
                 ${renderCategoryRoutingRowsHtml()}
               </tbody>
             </table>
@@ -7119,19 +7090,6 @@ async function updateCategoryPrinterStation(catId, stationName) {
     if (r.error) return toast(r.error, "error");
     toast("Routing updated!");
     await fetchCategories(); // Refresh local state
-  } catch (err) {
-    toast("Update failed", "error");
-  }
-}
-
-async function updateShopBillPrinter(printerSystemName) {
-  try {
-    const r = await api("/api/shop-settings", "POST", { bill_printer: printerSystemName || null });
-    if (r.error) return toast(r.error, "error");
-    toast("Bill Printer updated!");
-    // Refresh receipt settings
-    const res = await fetch("/api/shop-settings");
-    if (res.ok) _receiptSettings = await res.json();
   } catch (err) {
     toast("Update failed", "error");
   }
