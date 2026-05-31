@@ -135,6 +135,9 @@ let managedShopId = null;
 let _posCustomerResults = [];
 let _posSelectedCustomer = null;
 let _posCheckoutCloseTimer = null;
+let _editingOrderId = null; // ID of the sale being edited in the POS
+let _tempEditCart = []; // Temporary cart for the edit modal
+let _tempEditSaleDetails = null; // Temporary sale details for the edit modal
 let _currentPage = "dashboard"; // ─── Setup ────────────────────────────────────────────────────────
 const AVAILABLE_PANELS = [
   {
@@ -501,7 +504,8 @@ async function renderSettings(tab) {
   // Populate the Sidebar/Drawer content
   const navItems = [
     { id: 'profile', label: 'Account Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-    { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' }
+    { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    { id: 'printer-routing', label: 'Printers & Routing', icon: 'M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z' }
   ];
 
   const navHtml = navItems.map(item => `
@@ -566,7 +570,7 @@ async function renderSettings(tab) {
 
       <!-- Full Screen Settings Content -->
       <div class="w-full">
-        ${renderActiveSettingsContent()}
+        ${await renderActiveSettingsContent()}
       </div>
     </div>
   `;
@@ -575,7 +579,7 @@ async function renderSettings(tab) {
 }
 
 
-function renderActiveSettingsContent() {
+async function renderActiveSettingsContent() {
   if (_activeSettingsTab === "profile") {
     return `
       <div class="w-full animate-in fade-in slide-in-from-right-4 duration-500">
@@ -647,7 +651,12 @@ function renderActiveSettingsContent() {
 
   // Receipt Settings Tab
   if (_activeSettingsTab === "receipt") {
-    return renderReceiptSettings();
+    return await renderReceiptSettings();
+  }
+
+  // Printer Routing Tab
+  if (_activeSettingsTab === "printer-routing") {
+    return await renderPrinterRouting();
   }
 
   return "";
@@ -677,7 +686,7 @@ function toggleLobbyCategoryMenu(event) {
   }
 }
 
-function openAddCategoryPopup(type) {
+async function openAddCategoryPopup(type) {
   // Hide both potential menus
   const menu1 = document.getElementById("add-category-menu");
   const menu2 = document.getElementById("lobby-category-menu");
@@ -686,11 +695,27 @@ function openAddCategoryPopup(type) {
 
   const isProduct = type === 'product';
   const title = isProduct ? 'Add Product Category' : 'Add Expense Category';
+  
+  // Fetch printers if not already loaded or to keep fresh
+  _allPrinters = await api('/api/printers');
+
   const emojiHtml = !isProduct ? `
     <div>
       <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Emoji</label>
       <input id="pop-cat-emoji" value="📦" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-xl text-xl text-center outline-none focus:border-indigo-500 transition-all font-bold" />
     </div>` : '';
+
+  const printerOptions = _allPrinters.map(p => `<option value="${p.system_name}">${p.display_name} (${p.system_name})</option>`).join('');
+
+  const extraHtml = isProduct ? `
+    <div>
+      <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Printer Station (Routing)</label>
+      <select id="pop-cat-printer" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all font-bold cursor-pointer">
+        <option value="">No Routing / Printer</option>
+        ${printerOptions}
+      </select>
+      <p class="text-[9px] text-slate-400 mt-1 px-1 italic">Linked to your registered printers in Settings.</p>
+    </div>` : emojiHtml;
 
   openModal(
     title,
@@ -705,7 +730,7 @@ function openAddCategoryPopup(type) {
           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Category Label</label>
           <input id="pop-cat-name" onkeydown="if(event.key==='Enter') submitPopCategory('${type}')" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:border-indigo-500 transition-all outline-none font-bold text-lg" placeholder="e.g. ${isProduct ? 'Beverages' : 'Rent'}" />
         </div>
-        ${emojiHtml}
+        ${extraHtml}
         <button onclick="submitPopCategory('${type}')" class="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all flex items-center justify-center gap-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
           Save Category
@@ -734,7 +759,9 @@ async function submitPopCategory(type) {
 
   const payload = { name };
   if (type === "expense") {
-    payload.emoji = document.getElementById("pop-cat-emoji").value || "📦";
+    payload.emoji = document.getElementById("pop-cat-emoji")?.value || "📦";
+  } else if (type === "product") {
+    payload.printer_station = document.getElementById("pop-cat-printer")?.value.trim().toUpperCase() || null;
   }
 
   const url = type === "product" ? "/api/product-categories" : "/api/expense-categories";
@@ -768,13 +795,31 @@ function updateCategoryListInPopup(type) {
     <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 transition-all hover:border-indigo-300 dark:hover:border-indigo-700 group">
       <div class="flex items-center gap-3">
         ${type === 'expense' && c.emoji ? `<span class="text-lg">${c.emoji}</span>` : `<div class="w-2 h-2 rounded-full bg-indigo-500"></div>`}
-        <span class="text-sm font-bold text-slate-800 dark:text-slate-200">${c.name}</span>
+        <div>
+          <span class="text-sm font-bold text-slate-800 dark:text-slate-200">${c.name}</span>
+          ${type === 'product' ? `<div class="text-[9px] font-black text-indigo-500/60 uppercase tracking-tighter cursor-pointer hover:text-indigo-600" onclick="event.stopPropagation(); updateCategoryPrinter(${c.id}, '${c.printer_station || ''}')">${c.printer_station || 'No Printer'} ✎</div>` : ''}
+        </div>
       </div>
       <button onclick="deleteCategoryFromPopup('${type}', ${c.id}, '${c.name.replace(/'/g, "\\'")}')" class="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
       </button>
     </div>
   `).join('');
+}
+
+async function updateCategoryPrinter(id, current) {
+  const newVal = prompt("Enter Printer Station Name (e.g. KITCHEN, BAR, RECEIPT):", current);
+  if (newVal === null) return;
+  
+  try {
+    const r = await api(`/api/product-categories/${id}`, "PATCH", { printer_station: newVal.trim().toUpperCase() || null });
+    if (r.error) return toast(r.error, "error");
+    toast("Station updated!");
+    await fetchCategories();
+    updateCategoryListInPopup('product');
+  } catch (e) {
+    toast("Update failed", "error");
+  }
 }
 
 async function deleteCategoryFromPopup(type, id, name) {
@@ -798,12 +843,13 @@ async function deleteCategoryFromPopup(type, id, name) {
 async function addCategory(type) {
   const name = $c("new-cat-name").value.trim();
   const emoji = type === "expense" ? $c("new-cat-emoji").value.trim() : null;
+  const printer_station = type === "product" ? $c("new-cat-printer")?.value.trim().toUpperCase() : null;
 
   if (!name) return toast("Name label required", "error");
 
   const endpoint =
     type === "product" ? "/api/product-categories" : "/api/expense-categories";
-  const payload = type === "product" ? { name } : { name, emoji };
+  const payload = type === "product" ? { name, printer_station } : { name, emoji };
 
   try {
     const r = await api(endpoint, "POST", payload);
@@ -2108,9 +2154,11 @@ async function renderPOS() {
   syncProductMap(products);
   updateLowStockBadge(products);
 
-  cart = [];
+  if (!_editingOrderId) {
+    cart = [];
+    _posSelectedCustomer = null;
+  }
   _posCustomerResults = [];
-  _posSelectedCustomer = null;
   const waiterList = (waiters || []).filter(u => ['admin', 'user', 'waiter'].includes(u.role));
   const kitchenList = (waiters || []).filter(u => u.role === 'kitchen');
 
@@ -2774,6 +2822,12 @@ async function renderPOSOrders() {
           <td class="px-4 py-4 text-xs font-medium text-slate-400">${date}</td>
           <td class="px-4 py-4 text-right">
             <div class="flex justify-end gap-2">
+              <button onclick="viewOrderItems(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] uppercase hover:bg-emerald-100 transition-all">
+                View
+              </button>
+              <button onclick="editOrder(${s.id})" class="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase hover:bg-indigo-100 transition-all">
+                Edit
+              </button>
               <button onclick="showPrintOptionsModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
                 Print
               </button>
@@ -2788,6 +2842,184 @@ async function renderPOSOrders() {
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-20 text-center text-rose-500">Failed to load orders: ${e.message}</td></tr>`;
   }
+}
+
+async function viewOrderItems(id) {
+  try {
+    const data = await api(`/api/sales/${id}/bill`);
+    if (!data || !data.sale) return toast("Order not found", "error");
+
+    const itemsHtml = data.items.map(item => `
+        <div class="flex items-center justify-between py-3 border-b border-slate-50 dark:border-slate-800/50 last:border-0">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
+              ${item.quantity}x
+            </div>
+            <div>
+              <div class="text-sm font-bold text-slate-800 dark:text-slate-200">${item.product_name}</div>
+              ${item.variants_json ? `<div class="text-[10px] text-slate-400">${JSON.parse(item.variants_json).map(v => v.name || v).join(', ')}</div>` : ''}
+              ${item.special_instructions ? `<div class="text-[10px] italic text-amber-500">${item.special_instructions}</div>` : ''}
+            </div>
+          </div>
+          <div class="text-sm font-black text-slate-700 dark:text-slate-300">
+            PKR ${(item.quantity * item.price_at_sale).toLocaleString()}
+          </div>
+        </div>
+    `).join('');
+
+    openModal(`Order #${id} - Items`, `
+      <div class="space-y-4">
+        <div class="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 max-h-[60vh] overflow-y-auto">
+          ${itemsHtml}
+        </div>
+        <div class="flex justify-between items-center p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/50">
+          <span class="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Total Amount</span>
+          <span class="text-xl font-black text-indigo-700 dark:text-indigo-300">PKR ${data.sale.total.toLocaleString()}</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <button onclick="closeModal()" class="py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-sm hover:bg-slate-200 transition-all">Close</button>
+          <button onclick="closeModal(); editOrder(${id})" class="py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20">Edit Order</button>
+        </div>
+      </div>
+    `);
+  } catch (e) {
+    toast("Failed to load items: " + e.message, "error");
+  }
+}
+
+async function editOrder(id) {
+  try {
+    if (!allProducts || allProducts.length === 0) {
+      const products = await api("/api/products");
+      allProducts = products;
+      syncProductMap(products);
+    }
+
+    const details = await api(`/api/sales/${id}/bill`);
+    if (!details || !details.sale) return toast("Order details not found", "error");
+
+    _tempEditSaleDetails = details.sale;
+    _tempEditCart = details.items.map(item => {
+      const p = productMap[item.product_id];
+      return {
+        product_id: item.product_id,
+        name: item.product_name,
+        quantity: item.quantity,
+        selling_price: Number(item.price_at_sale),
+        buying_price: Number(item.buying_price_at_sale),
+        special_instructions: item.special_instructions,
+        variants: item.variants_json ? JSON.parse(item.variants_json) : [],
+        addons: item.addons_json ? JSON.parse(item.addons_json) : [],
+        product: p || null,
+        batch_id: item.batch_id,
+        parent_id: item.parent_id
+      };
+    });
+
+    renderEditOrderModal(id);
+  } catch (e) {
+    console.error(e);
+    toast("Failed to load order for editing: " + e.message, "error");
+  }
+}
+
+function renderEditOrderModal(id) {
+  const itemsHtml = _tempEditCart.map((item, index) => `
+    <div class="flex items-center justify-between py-4 border-b border-slate-50 dark:border-slate-800/50 last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 px-2 rounded-xl transition-all group">
+      <div class="flex items-center gap-4">
+        <div class="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-black text-xs shadow-sm">
+          ${item.quantity}x
+        </div>
+        <div>
+          <div class="text-sm font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">${item.name}</div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">PKR ${item.selling_price.toLocaleString()} / unit</div>
+          ${item.variants.length ? `<div class="text-[10px] text-indigo-500 font-bold mt-1 uppercase tracking-tighter">Variants: ${item.variants.map(v => v.name || v).join(', ')}</div>` : ''}
+          ${item.special_instructions ? `<div class="text-[10px] italic text-amber-500 font-medium mt-0.5">"${item.special_instructions}"</div>` : ''}
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="text-sm font-black text-slate-900 dark:text-white">PKR ${(item.quantity * item.selling_price).toLocaleString()}</div>
+        <button onclick="removeTempOrderItem(${index}, ${id})" class="p-2 rounded-xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all opacity-0 group-hover:opacity-100" title="Delete Item">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  openModal(`Edit Order #${id}`, `
+    <div class="space-y-6">
+      <div class="p-1 px-1 bg-slate-50 dark:bg-slate-900/50 rounded-2xl">
+        <button onclick="proceedToPOSUpdate(${id})" class="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+          Update Order / Add More Items
+        </button>
+      </div>
+
+      <div class="space-y-1">
+        <div class="flex items-center justify-between px-2 mb-3">
+          <span class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Order Items</span>
+          <span class="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em]">${_tempEditCart.length} Active Items</span>
+        </div>
+        <div class="max-h-[50vh] overflow-y-auto custom-scrollbar space-y-1 pr-2">
+          ${_tempEditCart.length ? itemsHtml : '<div class="py-10 text-center text-slate-400 text-xs font-bold uppercase tracking-widest italic opacity-50">No items remaining</div>'}
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-100 dark:border-slate-800">
+        <div class="flex justify-between items-center mb-6 px-1">
+          <div class="text-xs font-black text-slate-400 uppercase tracking-widest">Modified Total</div>
+          <div class="text-2xl font-black text-slate-900 dark:text-white tracking-tighter">PKR ${(_tempEditCart.reduce((sum, item) => sum + (item.quantity * item.selling_price), 0)).toLocaleString()}</div>
+        </div>
+        <button onclick="closeModal()" class="w-full py-3 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-black text-xs uppercase tracking-[0.2em] transition-all">Cancel Changes</button>
+      </div>
+    </div>
+  `, "max-w-xl");
+}
+
+function removeTempOrderItem(index, id) {
+  _tempEditCart.splice(index, 1);
+  renderEditOrderModal(id);
+}
+
+function proceedToPOSUpdate(id) {
+  if (_tempEditCart.length === 0) {
+    if (!confirm("Your order is empty. Proceed to POS to add new items?")) return;
+  }
+
+  cart = [..._tempEditCart];
+  _editingOrderId = id;
+  _posSelectedCustomer = _tempEditSaleDetails.customer_id ? { 
+    id: _tempEditSaleDetails.customer_id, 
+    name: _tempEditSaleDetails.customer_name, 
+    phone: _tempEditSaleDetails.customer_phone 
+  } : null;
+
+  closeModal();
+  navigate('pos');
+
+  // Restore checkout headers/extra info if needed
+  setTimeout(() => {
+    if ($c('pos-discount')) $c('pos-discount').value = _tempEditSaleDetails.discount || 0;
+    if ($c('pos-tax')) $c('pos-tax').value = _tempEditSaleDetails.tax_percentage || 0;
+    if ($c('pos-received')) $c('pos-received').value = _tempEditSaleDetails.amount_received || 0;
+    if ($c('pos-cust-name')) $c('pos-cust-name').value = _tempEditSaleDetails.customer_name || '';
+    if ($c('pos-cust-phone')) $c('pos-cust-phone').value = _tempEditSaleDetails.customer_phone || '';
+    
+    switchOrderType(_tempEditSaleDetails.order_type || 'dine_in');
+    
+    renderCart();
+    calculateCartTotal();
+    toast(`Editing Order #${id} in POS`, "info");
+  }, 100);
+}
+
+function cancelEdit() {
+  if (!confirm("Are you sure you want to cancel editing? Changes will be lost.")) return;
+  _editingOrderId = null;
+  cart = [];
+  renderCart();
+  calculateCartTotal();
+  toast("Edit cancelled");
 }
 
 async function completeOrderFromPOS(id, skipConfirm = false) {
@@ -3528,6 +3760,29 @@ function calculateCartTotal() {
     $c("pos-received").value = 0;
   }
 
+  // Update Checkout Button UI if editing
+  const checkoutBtn = $c("checkout-btn");
+  if (checkoutBtn) {
+    if (_editingOrderId) {
+      checkoutBtn.innerHTML = `<span>Update Order #${_editingOrderId}</span>`;
+      checkoutBtn.className = "py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-white font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3 w-full";
+      
+      // Add cancel button if not exists
+      if (!$c("cancel-edit-btn")) {
+        const cancelBtn = document.createElement("button");
+        cancelBtn.id = "cancel-edit-btn";
+        cancelBtn.onclick = cancelEdit;
+        cancelBtn.className = "mt-4 w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all";
+        cancelBtn.textContent = "Cancel Editing";
+        checkoutBtn.parentElement.appendChild(cancelBtn);
+      }
+    } else {
+      checkoutBtn.innerHTML = `<span>Place Order</span>`;
+      checkoutBtn.className = "py-4 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3";
+      $c("cancel-edit-btn")?.remove();
+    }
+  }
+
   calculateRemaining();
 }
 
@@ -3778,38 +4033,49 @@ async function checkout(status = 'completed') {
     order_status: status,
   };
 
+  const isEditing = _editingOrderId !== null;
+  const url = isEditing ? `/api/sales/${_editingOrderId}/items` : "/api/sales";
+  const method = isEditing ? "PUT" : "POST";
+
   try {
-    const r = await api("/api/sales", "POST", payload);
+    const r = await api(url, method, payload);
     if (r.error) {
       toast(r.error, "error");
       btn.disabled = false;
-      btn.textContent = "Place Order";
+      btn.textContent = isEditing ? "Update Order" : "Place Order";
       return;
     }
-    toast("Order placed! Rs. " + r.total);
+    
+    if (isEditing) {
+      toast("Order updated successfully!");
+      _editingOrderId = null;
+    } else {
+      toast("Order placed! Rs. " + r.total);
+    }
+
     closePOSCheckout(true);
 
     // AUTO PRINT KITCHEN IF FLAG SET
     if (window._lastOrderAutoPrintKitchen) {
-      printKitchenBill(r.saleId);
+      printKitchenBill(r.saleId || _editingOrderId);
       window._lastOrderAutoPrintKitchen = false;
     }
 
     openModal(
-      "Order Placed!",
+      isEditing ? "Order Updated!" : "Order Placed!",
       `
       <div class="text-center space-y-4">
-        <div class="text-5xl">🎉</div>
-        <p class="text-slate-300">Order #${r.saleId} — <span class="text-emerald-400 font-bold">Rs. ${r.total.toFixed(2)}</span></p>
+        <div class="text-5xl">${isEditing ? '📝' : '🎉'}</div>
+        <p class="text-slate-300">Order #${r.saleId || _editingOrderId} — <span class="text-emerald-400 font-bold">Rs. ${r.total.toFixed(2)}</span></p>
         ${orderType === 'takeaway' ? `<p class="text-amber-400 font-bold text-lg">Token: ${token_number}</p>` : ''}
         <div class="grid grid-cols-1 gap-2">
           <div class="flex gap-2">
-            <button onclick="printBill(${r.saleId})" class="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+            <button onclick="printBill(${r.saleId || _editingOrderId})" class="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
               Print Bill
             </button>
             ${window._posIsRetail ? '' : `
-            <button onclick="printKitchenBill(${r.saleId})" class="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+            <button onclick="printKitchenBill(${r.saleId || _editingOrderId})" class="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
               Kitchen Print
             </button>
@@ -3824,8 +4090,35 @@ async function checkout(status = 'completed') {
   } catch (err) {
     toast(err.message, "error");
     btn.disabled = false;
-    btn.textContent = "Place Order";
+    btn.textContent = isEditing ? "Update Order" : "Place Order";
   }
+}
+
+function silentPrint(html, title = "Print") {
+  // Use existing iframe or create one
+  let iframe = document.getElementById("silent-print-frame");
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = "silent-print-frame";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    document.body.appendChild(iframe);
+  }
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  // Wait for images and resources to load before printing
+  iframe.contentWindow.focus();
+  setTimeout(() => {
+    iframe.contentWindow.print();
+  }, 500); // Give it half a second to load images/fonts
 }
 
 async function printKitchenBill(saleId) {
@@ -3833,37 +4126,36 @@ async function printKitchenBill(saleId) {
   if (!data) return;
   const { sale, items } = data;
 
-  const win = window.open("", "_blank");
-  win.document.write(`<!DOCTYPE html><html><head><title>KITCHEN ORDER #${sale.id}</title>
+  const html = `<!DOCTYPE html><html><head><title>KITCHEN ORDER #${sale.id}</title>
   <style>
     @page { margin: 0; }
     body { margin: 0; padding: 0; font-family: 'Courier New', Courier, monospace; }
     .receipt { width: 80mm; margin: 0 auto; padding: 5mm; background: #fff; box-sizing: border-box; }
     .text-center { text-align: center; }
     .bold { font-weight: bold; }
-    h1 { font-size: 24px; margin: 0; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 5px; }
-    .order-info { font-size: 14px; margin: 10px 0; border-bottom: 1px solid #000; padding-bottom: 10px; }
+    h1 { font-size: 18px; margin: 0; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 5px; }
+    .order-info { font-size: 12px; margin: 10px 0; border-bottom: 1px solid #000; padding-bottom: 10px; }
     table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-    th { text-align: left; font-size: 14px; border-bottom: 2px solid #000; padding: 5px 0; }
-    td { padding: 8px 0; border-bottom: 1px solid #eee; vertical-align: top; }
-    .item-name { font-size: 16px; font-weight: bold; }
-    .item-details { font-size: 12px; color: #333; margin-top: 2px; }
-    .special-note { font-size: 14px; color: #000; border: 1px solid #000; padding: 3px; display: inline-block; margin-top: 5px; font-weight: bold; }
-    .qty { font-size: 22px; font-weight: 900; }
-    .footer { font-size: 12px; margin-top: 20px; text-align: center; border-top: 1px dashed #000; padding-top: 10px; }
+    th { text-align: left; font-size: 12px; border-bottom: 2px solid #000; padding: 5px 0; }
+    td { padding: 4px 0; border-bottom: 1px solid #eee; vertical-align: top; }
+    .item-name { font-size: 14px; font-weight: bold; }
+    .item-details { font-size: 10px; color: #333; margin-top: 2px; }
+    .special-note { font-size: 12px; color: #000; border: 1px solid #000; padding: 2px; display: inline-block; margin-top: 4px; font-weight: bold; }
+    .qty { font-size: 18px; font-weight: 900; }
+    .footer { font-size: 10px; margin-top: 15px; text-align: center; border-top: 1px dashed #000; padding-top: 10px; }
     @media print { .receipt { margin: 0; width: 100%; } }
   </style></head><body>
   <div class="receipt">
     <div class="text-center">
       <h1 class="bold">KITCHEN ORDER</h1>
-      <h2 class="bold" style="font-size: 32px; margin: 10px 0;">#${sale.id}</h2>
+      <h2 class="bold" style="font-size: 24px; margin: 8px 0;">#${sale.id}</h2>
     </div>
 
     <div class="order-info">
-      <div class="bold" style="font-size: 18px;">${sale.order_type === 'dine_in' ? '🍽️ DINE-IN' : sale.order_type === 'takeaway' ? '🥡 TAKEAWAY' : '🚚 DELIVERY'}</div>
-      ${sale.table_id ? `<div class="bold" style="font-size: 20px;">TABLE: ${sale.table_number || 'N/A'}</div>` : ''}
-      ${sale.token_number ? `<div class="bold" style="font-size: 20px;">TOKEN: ${sale.token_number}</div>` : ''}
-      <div style="margin-top: 5px;">Time: ${new Date(sale.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+      <div class="bold" style="font-size: 14px;">${sale.order_type === 'dine_in' ? '🍽️ DINE-IN' : sale.order_type === 'takeaway' ? '🥡 TAKEAWAY' : '🚚 DELIVERY'}</div>
+      ${sale.table_id ? `<div class="bold" style="font-size: 16px;">TABLE: ${sale.table_number || 'N/A'}</div>` : ''}
+      ${sale.token_number ? `<div class="bold" style="font-size: 16px;">TOKEN: ${sale.token_number}</div>` : ''}
+      <div style="margin-top: 3px;">Time: ${new Date(sale.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
     </div>
 
     <table>
@@ -3904,9 +4196,9 @@ async function printKitchenBill(saleId) {
     </table>
 
     ${sale.special_instructions ? `
-      <div style="margin-top: 15px; padding: 10px; border: 2px solid #000;">
-        <div class="bold" style="font-size: 12px; text-transform: uppercase;">Order Note:</div>
-        <div style="font-size: 14px;">${sale.special_instructions}</div>
+      <div style="margin-top: 10px; padding: 8px; border: 1px solid #000;">
+        <div class="bold" style="font-size: 10px; text-transform: uppercase;">Order Note:</div>
+        <div style="font-size: 12px;">${sale.special_instructions}</div>
       </div>
     ` : ''}
 
@@ -3914,14 +4206,9 @@ async function printKitchenBill(saleId) {
       Generated at ${new Date().toLocaleTimeString()}
     </div>
   </div>
-  <script>
-    window.onload = function() {
-      window.print();
-      setTimeout(function() { window.close(); }, 700);
-    };
-  </script>
-  </body></html>`);
-  win.document.close();
+  </body></html>`;
+
+  silentPrint(html, `KITCHEN ORDER #${sale.id}`);
 }
 
 window._lastOrderAutoPrintKitchen = false;
@@ -4021,8 +4308,7 @@ async function printBill(saleId, isUnpaid = false) {
   footerHtml += `<div style="font-size: ${footerFontSize}px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE - 03226155209</div>`;
   footerHtml += `</div>`;
 
-  const win = window.open("", "_blank");
-  win.document.write(`<!DOCTYPE html><html><head><title>Bill #${sale.id}</title>
+  const html = `<!DOCTYPE html><html><head><title>Bill #${sale.id}</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     @font-face {
@@ -4040,7 +4326,7 @@ async function printBill(saleId, isUnpaid = false) {
     html, body {
       margin: 0;
       padding: 0;
-      background: #f0f0f0;
+      background: #fff;
     }
     .receipt {
       font-family: ${shop?.receipt_font_family || "'Courier New', Courier, monospace"};
@@ -4048,27 +4334,25 @@ async function printBill(saleId, isUnpaid = false) {
       margin: 0 auto;
       padding: 4mm;
       color: #111827;
-      font-size: 12px;
+      font-size: 11px;
       line-height: 1.2;
-      background: #f8fafc;
-      min-height: 100vh;
+      background: #fff;
       box-sizing: border-box;
     }
     @media print {
-      html, body { background: #f8fafc; }
-      .receipt { margin: 0; width: 100%; min-height: auto; }
+      .receipt { margin: 0; width: 100%; }
     }
     .text-center { text-align: center; }
     .text-right { text-align: right; }
     .bold { font-weight: bold; }
-    h1 { font-size: 18px; margin: 0; text-transform: uppercase; }
-    h2 { font-size: 14px; margin: 2px 0; }
+    h1 { font-size: 16px; margin: 0; text-transform: uppercase; }
+    h2 { font-size: 12px; margin: 2px 0; }
     .divider { border: none; border-top: 1px dashed #111827; margin: 5px 0; }
     table { width: 100%; border-collapse: collapse; margin: 5px 0; }
     th { text-align: left; font-size: 10px; border-bottom: 1px solid #111827; padding: 2px 0; }
     td { padding: 3px 0; vertical-align: top; }
-    .total-row { font-size: 14px; }
-    .footer { font-size: 10px; margin-top: 10px; }
+    .total-row { font-size: 13px; }
+    .footer { font-size: 9px; margin-top: 10px; }
   </style></head><body>
   <div class="receipt">
     <div class="text-center">
@@ -4079,14 +4363,14 @@ async function printBill(saleId, isUnpaid = false) {
 
     <hr class="divider" />
 
-    <div style="font-size: 11px;">
+    <div style="font-size: 10px;">
       <strong>Bill #:</strong> ${sale.id}<br>
       <strong>Date:</strong> ${new Date(sale.created_at).toLocaleString()}<br>
-      <strong>Seller:</strong> ${seller ? seller.name : "Staff"}<br>
+      <strong>Staff:</strong> ${seller ? seller.name : "Staff"}<br>
       <strong>Customer:</strong> ${sale.customer_name || "Walk-in"}<br>
       ${sale.customer_phone ? `<strong>Phone:</strong> ${sale.customer_phone}<br>` : ""}
-      <strong>Order Type:</strong> ${sale.order_type === 'dine_in' ? 'Dine-in' : sale.order_type === 'takeaway' ? 'Takeaway' : 'Delivery'}<br>
-      <strong>Payment Method:</strong> ${method}<br>
+      <strong>Type:</strong> ${sale.order_type === 'dine_in' ? 'Dine-in' : sale.order_type === 'takeaway' ? 'Takeaway' : 'Delivery'}<br>
+      <strong>Payment:</strong> ${method}<br>
     </div>
 
     <hr class="divider" />
@@ -4127,7 +4411,7 @@ async function printBill(saleId, isUnpaid = false) {
 
     <hr class="divider" />
 
-    <div style="font-size: 11px;">
+    <div style="font-size: 10px;">
       ${isUnpaid ? `
         <div style="text-align: center; border: 1px dashed #111827; padding: 5px; margin-top: 5px; font-weight: bold;">
           *** UNPAID BILL ***<br>
@@ -4145,9 +4429,10 @@ async function printBill(saleId, isUnpaid = false) {
 
     ${promoImagesHtml}
     ${footerHtml}
-  <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close();setTimeout(()=>{if(!window.closed)window.close();},5000);}<\/script>
-  </body></html>`);
-  win.document.close();
+  </div>
+  </body></html>`;
+
+  silentPrint(html, `Bill #${sale.id}`);
 }
 
 async function returnSaleItems(saleId) {
@@ -6639,5 +6924,175 @@ function renderQuickSidebar() {
   `).join('');
 }
 
+
+
+// --- Printer & Routing Logic ---
+let _allPrinters = [];
+
+async function renderPrinterRouting() {
+  const container = document.getElementById("page-content");
+  if (!container) return;
+
+  // Initial load
+  _allPrinters = await api('/api/printers');
+  await fetchCategories(); // Refresh categories to get latest station mappings
+
+  const contentHtml = `
+    <div class="animate-in fade-in slide-in-from-right-4 duration-500 max-w-6xl mx-auto pb-20">
+      <header class="mb-12">
+        <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-2 tracking-tight">Printers & Routing</h3>
+        <p class="text-slate-500 dark:text-slate-400 text-sm italic">Define your physical printers and link them to product categories for automatic ticket routing.</p>
+      </header>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        <!-- Left: Registered Printers -->
+        <div class="lg:col-span-12 xl:col-span-5 space-y-6">
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest">1. Registered Printers</h4>
+            <button onclick="openAddPrinterModal()" class="text-[10px] font-black text-indigo-600 hover:text-indigo-500 uppercase tracking-widest">+ Add Printer</button>
+          </div>
+          
+          <div id="printers-list" class="space-y-3">
+            ${renderPrintersListHtml()}
+          </div>
+        </div>
+
+        <!-- Right: Category Routing -->
+        <div class="lg:col-span-12 xl:col-span-7 space-y-6">
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest">2. Category Routing</h4>
+          <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-black tracking-widest text-slate-400">
+                <tr>
+                  <th class="px-6 py-4">Category</th>
+                  <th class="px-6 py-4">Assigned Printer</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50 dark:divide-slate-800">
+                ${renderCategoryRoutingRowsHtml()}
+              </tbody>
+            </table>
+          </div>
+          <p class="text-[10px] text-slate-400 italic px-4">Note: Items in categories with "No Printer" will not generate kitchen/bar tickets.</p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return contentHtml;
+}
+
+function renderPrintersListHtml() {
+  if (_allPrinters.length === 0) {
+    return `
+      <div class="p-8 rounded-[2rem] bg-slate-50 dark:bg-slate-800/40 border-2 border-dashed border-slate-200 dark:border-slate-700 text-center">
+        <p class="text-xs text-slate-400 italic mb-4">No physical printers registered yet.</p>
+        <button onclick="openAddPrinterModal()" class="px-6 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[10px] font-black uppercase tracking-widest hover:border-indigo-500 transition-all">Register First Printer</button>
+      </div>
+    `;
+  }
+
+  return _allPrinters.map(p => `
+    <div class="group flex items-center justify-between p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 transition-all shadow-sm">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-indigo-500 shadow-inner">
+           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+        </div>
+        <div>
+          <p class="text-sm font-black text-slate-800 dark:text-slate-100">${p.display_name}</p>
+          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">System ID: ${p.system_name}</p>
+        </div>
+      </div>
+      <button onclick="deletePrinter(${p.id})" class="p-2.5 rounded-xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all opacity-0 group-hover:opacity-100">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+function renderCategoryRoutingRowsHtml() {
+  return _productCategories.map(cat => `
+    <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
+      <td class="px-6 py-5">
+        <div class="flex items-center gap-3">
+          <div class="w-2 h-2 rounded-full bg-indigo-500"></div>
+          <span class="font-bold text-slate-700 dark:text-slate-300">${cat.name}</span>
+        </div>
+      </td>
+      <td class="px-6 py-5">
+        <select onchange="updateCategoryPrinterStation(${cat.id}, this.value)" class="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 focus:outline-none focus:border-indigo-500 transition-all cursor-pointer">
+          <option value="">No Printer</option>
+          ${_allPrinters.map(p => `
+            <option value="${p.system_name}" ${cat.printer_station === p.system_name ? 'selected' : ''}>${p.display_name} (${p.system_name})</option>
+          `).join('')}
+        </select>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openAddPrinterModal() {
+  openModal(
+    "Register Physical Printer",
+    `
+    <div class="space-y-6">
+      <div class="p-4 bg-amber-50 dark:bg-amber-950/20 rounded-2xl border border-amber-100 dark:border-amber-900/50">
+        <p class="text-[10px] font-black text-amber-800 dark:text-amber-200 uppercase tracking-[0.2em] mb-1">Important Note</p>
+        <p class="text-xs text-amber-700/70 dark:text-amber-400/70 italic">The "System Name" must EXACTLY match the printer name installed on your computer (e.g. <code>XP-80</code> or <code>POS-80</code>).</p>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Display Label</label>
+          <input id="printer-display-name" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:border-indigo-500 transition-all outline-none font-bold text-lg" placeholder="e.g. Kitchen Printer" />
+        </div>
+        <div>
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">System Name (Actual Name)</label>
+          <input id="printer-system-name" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:border-indigo-500 transition-all outline-none font-mono text-sm" placeholder="e.g. EPSON_L3110_Series" />
+        </div>
+        <button onclick="savePrinter()" class="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all">Register Printer</button>
+      </div>
+    </div>
+    `
+  );
+}
+
+async function savePrinter() {
+  const display_name = $c("printer-display-name").value.trim();
+  const system_name = $c("printer-system-name").value.trim();
+
+  if (!display_name || !system_name) return toast("Both names are required", "error");
+
+  try {
+    const r = await api("/api/printers", "POST", { display_name, system_name });
+    if (r.error) return toast(r.error, "error");
+    toast("Printer registered!");
+    closeModal();
+    renderSettings('printer-routing'); // Reload the tab
+  } catch (err) {
+    toast("Failed to save", "error");
+  }
+}
+
+async function deletePrinter(id) {
+  if (!confirm("Remove this printer registration? Existing routing links will be broken.")) return;
+  try {
+    await api(`/api/printers/${id}`, "DELETE");
+    toast("Printer removed");
+    renderSettings('printer-routing');
+  } catch (err) {
+    toast("Delete failed", "error");
+  }
+}
+
+async function updateCategoryPrinterStation(catId, stationName) {
+  try {
+    const r = await api(`/api/product-categories/${catId}`, "PATCH", { printer_station: stationName || null });
+    if (r.error) return toast(r.error, "error");
+    toast("Routing updated!");
+    await fetchCategories(); // Refresh local state
+  } catch (err) {
+    toast("Update failed", "error");
+  }
+}
 
 init();

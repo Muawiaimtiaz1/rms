@@ -9,6 +9,12 @@ router.post("/", requireAuth, async (req, res) => {
   res.json({ ok: true, ...result });
 });
 
+// PUT /api/sales/:id/items — update an existing sale items/details
+router.put("/:id/items", requireAuth, async (req, res) => {
+  const result = await salesService.updateSaleItems(req.params.id, req.body, req.session.user.shop_id, req.session.user.id);
+  res.json({ ok: true, ...result });
+});
+
 // GET /api/sales — list sales for current shop
 router.get("/", requireAuth, async (req, res) => {
   const sales = await salesService.getSales(req.session.user.shop_id);

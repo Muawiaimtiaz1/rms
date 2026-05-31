@@ -21,22 +21,44 @@ router.get('/', requireAuth, async (req, res) => {
 
 // POST /api/product-categories
 router.post('/', requireAuth, async (req, res) => {
-    const { name } = req.body;
+    const { name, printer_station } = req.body;
     const shopId = req.session.user.shop_id;
     if (!name) return res.status(400).json({ error: 'name is required' });
 
     try {
         const isPostgres = usePostgres();
-        const query = isPostgres ? 'INSERT INTO product_categories (shop_id, name) VALUES ($1, $2) RETURNING id' : 'INSERT INTO product_categories (shop_id, name) VALUES (?, ?)';
         if (isPostgres) {
-            const { rows } = await getPostgres().query(query, [shopId, name]);
+            const query = 'INSERT INTO product_categories (shop_id, name, printer_station) VALUES ($1, $2, $3) RETURNING id';
+            const { rows } = await getPostgres().query(query, [shopId, name, printer_station || null]);
             res.json({ ok: true, id: rows[0].id });
         } else {
-            const result = getSqlite().prepare(query).run(shopId, name);
+            const query = 'INSERT INTO product_categories (shop_id, name, printer_station) VALUES (?, ?, ?)';
+            const result = getSqlite().prepare(query).run(shopId, name, printer_station || null);
             res.json({ ok: true, id: result.lastInsertRowid });
         }
     } catch (err) {
         console.error("Create category error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/product-categories/:id
+router.patch('/:id', requireAuth, async (req, res) => {
+    const { printer_station } = req.body;
+    const catId = parseInt(req.params.id);
+    const shopId = req.session.user.shop_id;
+    const isPostgres = usePostgres();
+    try {
+        const query = isPostgres 
+            ? 'UPDATE product_categories SET printer_station = $1 WHERE id = $2 AND shop_id = $3'
+            : 'UPDATE product_categories SET printer_station = ? WHERE id = ? AND shop_id = ?';
+        
+        if (isPostgres) await getPostgres().query(query, [printer_station || null, catId, shopId]);
+        else getSqlite().prepare(query).run(printer_station || null, catId, shopId);
+        
+        res.json({ ok: true });
+    } catch (err) {
+        console.error("Update category error:", err);
         res.status(500).json({ error: err.message });
     }
 });

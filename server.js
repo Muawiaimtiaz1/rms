@@ -39,6 +39,8 @@ app.use("/api/shop-settings", require("./routes/shop-settings"));
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/tables", require("./routes/tables"));
 app.use("/api/kds", require("./routes/kds"));
+app.use("/api/print-jobs", require("./routes/print-jobs"));
+app.use("/api/printers", require("./routes/printers"));
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get("/", (req, res) => {

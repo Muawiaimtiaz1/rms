@@ -34,6 +34,65 @@ const checkoutSchema = z.object({
 
 class SalesService {
   /**
+   * Generates automatic print jobs based on item categories and stations
+   */
+  async generatePrintJobs(saleId, items, shopId, trx) {
+    const dbInstance = trx || db;
+    
+    // 1. Fetch category-to-station mapping for this shop
+    const categories = await dbInstance('product_categories')
+      .where({ shop_id: shopId })
+      .select('name', 'printer_station');
+    
+    const stationMap = {};
+    categories.forEach(c => {
+      stationMap[c.name] = c.printer_station || 'DEFAULT';
+    });
+
+    // 2. Group items by station
+    const jobs = {};
+    for (const item of items) {
+      let station = 'DEFAULT';
+      if (item.product && item.product.category) {
+        station = stationMap[item.product.category] || 'DEFAULT';
+      } else if (item.category) {
+        station = stationMap[item.category] || 'DEFAULT';
+      }
+      
+      if (!jobs[station]) jobs[station] = [];
+      jobs[station].push({
+        name: item.product ? item.product.name : (item.name || item.custom_name),
+        quantity: item.quantity,
+        special_instructions: item.special_instructions,
+        variants: item.variants_json ? JSON.parse(item.variants_json) : (item.variants || []),
+        addons: item.addons_json ? JSON.parse(item.addons_json) : (item.addons || [])
+      });
+    }
+
+    // 3. Create jobs in print_queue
+    const sale = await dbInstance('sales').where({ id: saleId }).first();
+    for (const [station, stationItems] of Object.entries(jobs)) {
+      if (station === 'NONE') continue; // Skip if explicitly disabled
+      
+      const content = {
+        sale_id: saleId,
+        order_type: sale.order_type,
+        table_number: sale.table_id ? (await dbInstance('tables').where({id: sale.table_id}).first())?.table_number : null,
+        token_number: sale.token_number,
+        items: stationItems,
+        created_at: new Date().toISOString()
+      };
+
+      await dbInstance('print_queue').insert({
+        shop_id: shopId,
+        station_name: station,
+        content_json: JSON.stringify(content),
+        status: 'pending'
+      });
+    }
+  }
+
+  /**
    * Main Checkout Workflow
    */
   async createSale(payload, shopId, userId) {
@@ -253,9 +312,227 @@ class SalesService {
         });
       }
 
+      // 7. Automatic Kitchen/Station Printing
+      await this.generatePrintJobs(saleId, resolvedItems, shopId, trx);
+
       return { saleId, total: grandTotal, customer_id: customer?.id, customer_name: data.customer_name, customer_phone: data.customer_phone };
     });
   }
+
+  async updateSaleItems(saleId, payload, shopId, userId) {
+    const data = checkoutSchema.parse(payload);
+    
+    return await db.transaction(async (trx) => {
+      const sale = await trx('sales').where({ id: saleId, shop_id: shopId }).first();
+      if (!sale) throw new Error("Sale not found");
+      if (sale.order_status === 'completed') throw new Error("Cannot edit a completed order");
+
+      // 1. Fetch previous items to restore stock
+      const oldItems = await trx('sale_items').where({ sale_id: saleId });
+
+      // 2. Restore Stock for Old Items
+      for (const item of oldItems) {
+        if (item.product_id) {
+          if (item.batch_id) {
+            // Retail item restoration
+            await trx('product_batches').where({ id: item.batch_id }).update({ quantity: db.raw('quantity + ?', [item.quantity]) });
+            await trx('products').where({ id: item.product_id }).update({ stock: db.raw('stock + ?', [item.quantity]) });
+          } else {
+            // Recipe or Oversold item
+            const variantNames = item.variants_json ? JSON.parse(item.variants_json).map(v => v.name || v) : [];
+            const activeLinks = await trx('product_recipe_links')
+              .where({ product_id: item.product_id, shop_id: shopId })
+              .andWhere(function() {
+                if (variantNames.length > 0) this.whereIn('variant_name', variantNames);
+              });
+
+            if (activeLinks.length > 0) {
+              // Recipe Restoration
+              for (const link of activeLinks) {
+                const ingredients = await trx('recipe_ingredients').where({ recipe_id: link.recipe_id });
+                for (const ing of ingredients) {
+                  const rs = await trx('raw_stocks').where({ id: ing.raw_stock_id }).first();
+                  const factor = rs.conversion_factor || 1;
+                  const totalToRestore = (ing.quantity * item.quantity) / factor;
+                  await trx('raw_stocks').where({ id: ing.raw_stock_id }).update({ current_stock: db.raw('current_stock + ?', [totalToRestore]) });
+                  const newestBatch = await trx('raw_stock_batches').where({ raw_stock_id: ing.raw_stock_id, shop_id: shopId }).orderBy('created_at', 'desc').first();
+                  if (newestBatch) await trx('raw_stock_batches').where({ id: newestBatch.id }).update({ quantity: db.raw('quantity + ?', [totalToRestore]) });
+                }
+              }
+            } else {
+              // Oversold retail item restoration
+              await trx('products').where({ id: item.product_id }).update({ stock: db.raw('stock + ?', [item.quantity]) });
+              const newestBatch = await trx('product_batches').where({ product_id: item.product_id, shop_id: shopId }).orderBy('created_at', 'desc').first();
+              if (newestBatch) await trx('product_batches').where({ id: newestBatch.id }).update({ quantity: db.raw('quantity + ?', [item.quantity]) });
+            }
+          }
+        }
+      }
+
+      // 3. Delete old items and Ledger entries associated with this sale
+      await trx('sale_items').where({ sale_id: saleId }).del();
+      
+      // Handle Ledger and Balance restoration
+      const oldLedgerEntries = await trx('customer_ledger').where({ sale_id: saleId, type: 'sale' });
+      for (const entry of oldLedgerEntries) {
+          await trx('customers').where({ id: entry.customer_id }).update({
+              current_balance: db.raw('current_balance - ?', [entry.amount])
+          });
+      }
+      await trx('customer_ledger').where({ sale_id: saleId }).del();
+
+      // 4. Process new items
+      let subtotal = 0;
+      const resolvedItems = [];
+
+      for (const item of data.items) {
+        if (item.product_id) {
+          const product = await trx('products').where({ id: item.product_id, shop_id: shopId }).first();
+          if (!product) throw new Error(`Product ${item.product_id} not found`);
+
+          // Stock Validation
+          const recipeLink = await trx('product_recipe_links').where({ product_id: item.product_id, shop_id: shopId }).first();
+          if (recipeLink) {
+             const ingredients = await trx('recipe_ingredients as ri')
+              .select('ri.raw_stock_id', 'ri.quantity as amount_per_unit', 'rs.name as ing_name', 'rs.current_stock', 'rs.conversion_factor')
+              .join('raw_stocks as rs', 'ri.raw_stock_id', 'rs.id')
+              .where('ri.recipe_id', recipeLink.recipe_id);
+
+            for (const ing of ingredients) {
+              const factor = ing.conversion_factor || 1;
+              const totalNeeded = (ing.amount_per_unit * item.quantity) / factor;
+              if (ing.current_stock < totalNeeded) throw new Error(`Insufficient stock of ingredient "${ing.ing_name}" for "${product.name}".`);
+            }
+          } else if (product.stock < item.quantity) {
+            throw new Error(`Insufficient stock for "${product.name}"`);
+          }
+
+          resolvedItems.push({
+            product, quantity: item.quantity, selling_price: item.selling_price, parent_id: item.parent_id,
+            special_instructions: item.special_instructions,
+            variants_json: item.variants ? JSON.stringify(item.variants) : null,
+            addons_json: item.addons ? JSON.stringify(item.addons) : null,
+          });
+        } else {
+          resolvedItems.push({ manual: true, name: item.name, quantity: item.quantity, selling_price: item.selling_price, parent_id: item.parent_id, special_instructions: item.special_instructions });
+        }
+        subtotal += item.selling_price * item.quantity;
+      }
+
+      const taxAmount = (subtotal - data.discount) * (data.tax_percentage / 100);
+      const grandTotal = subtotal - data.discount + taxAmount;
+      const dueAmount = parseFloat((grandTotal - data.amount_received).toFixed(2));
+
+      // 5. Update Sale Record
+      await trx('sales').where({ id: saleId }).update({
+        customer_id: data.customer_id || (sale.customer_id),
+        customer_name: data.customer_name || sale.customer_name,
+        customer_phone: data.customer_phone || sale.customer_phone,
+        total: grandTotal,
+        discount: data.discount,
+        tax_percentage: data.tax_percentage,
+        payment_method: data.payment_method,
+        amount_received: data.amount_received,
+        order_type: data.order_type,
+        table_id: data.table_id || sale.table_id,
+        waiter_id: data.waiter_id || sale.waiter_id,
+        rider_id: data.rider_id || sale.rider_id,
+        kitchen_id: data.kitchen_id || sale.kitchen_id,
+        guest_count: data.guest_count,
+        token_number: data.token_number || sale.token_number,
+        updated_at: trx.fn.now()
+      });
+
+      // 6. Process NEW items and Deduct Stock
+      for (const item of resolvedItems) {
+        let priceAtSale = item.selling_price;
+        let remainingToDeduct = item.quantity;
+
+        if (item.parent_id) {
+          const parent = await trx('products').where({ id: item.parent_id }).first();
+          if (parent) {
+            const compCount = await trx('product_compositions').where({ parent_product_id: item.parent_id }).sum('quantity as total').first();
+            if (compCount && compCount.total > 0) priceAtSale = parent.selling_price / compCount.total;
+          }
+        }
+
+        if (!item.manual) {
+           const variantNames = item.variants_json ? JSON.parse(item.variants_json).map(v => v.name || v) : [];
+           const links = await trx('product_recipe_links').where({ product_id: item.product.id, shop_id: shopId });
+           const activeLinks = links.filter(l => !l.variant_name || variantNames.includes(l.variant_name));
+
+           if (activeLinks.length > 0) {
+             await trx('sale_items').insert({
+               sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
+               quantity: item.quantity, price_at_sale: priceAtSale, buying_price_at_sale: item.product.buying_price || 0,
+               special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+             });
+
+             for (const link of activeLinks) {
+               const ingredients = await trx('recipe_ingredients').where({ recipe_id: link.recipe_id });
+               for (const ing of ingredients) {
+                 const rs = await trx('raw_stocks').where({ id: ing.raw_stock_id }).first();
+                 const factor = rs.conversion_factor || 1;
+                 const totalNeeded = (ing.quantity * item.quantity) / factor;
+                 let remaining = totalNeeded;
+                 const batches = await trx('raw_stock_batches').where({ raw_stock_id: ing.raw_stock_id, shop_id: shopId }).andWhere('quantity', '>', 0).orderBy('created_at', 'asc');
+                 for (const b of batches) {
+                   if (remaining <= 0) break;
+                   const take = Math.min(remaining, b.quantity);
+                   await trx('raw_stock_batches').where({ id: b.id }).update({ quantity: db.raw('quantity - ?', [take]) });
+                   remaining -= take;
+                 }
+                 await trx('raw_stocks').where({ id: ing.raw_stock_id }).update({ current_stock: db.raw('current_stock - ?', [totalNeeded]) });
+               }
+             }
+           } else {
+             const batches = await trx('product_batches').where({ product_id: item.product.id, shop_id: shopId }).andWhere('quantity', '>', 0).orderBy('created_at', 'asc');
+             for (const b of batches) {
+               if (remainingToDeduct <= 0) break;
+               const take = Math.min(remainingToDeduct, b.quantity);
+               await trx('sale_items').insert({
+                 sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
+                 quantity: take, price_at_sale: priceAtSale, buying_price_at_sale: b.buying_price, batch_id: b.id,
+                 special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+               });
+               await trx('product_batches').where({ id: b.id }).update({ quantity: db.raw('quantity - ?', [take]) });
+               remainingToDeduct -= take;
+             }
+             if (remainingToDeduct > 0) {
+               const lastBatch = await trx('product_batches').where({ product_id: item.product.id }).orderBy('created_at', 'desc').first();
+               const cost = lastBatch ? lastBatch.buying_price : (item.product.buying_price || 0);
+               await trx('sale_items').insert({
+                 sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
+                 quantity: remainingToDeduct, price_at_sale: priceAtSale, buying_price_at_sale: cost, batch_id: lastBatch ? lastBatch.id : null,
+                 special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+               });
+               if (lastBatch) await trx('product_batches').where({ id: lastBatch.id }).update({ quantity: db.raw('quantity - ?', [remainingToDeduct]) });
+             }
+             await trx('products').where({ id: item.product.id }).update({ stock: db.raw('stock - ?', [item.quantity]) });
+           }
+        } else {
+           await trx('sale_items').insert({
+             sale_id: saleId, product_id: null, parent_id: item.parent_id || null,
+             custom_name: item.name, quantity: item.quantity, price_at_sale: priceAtSale, 
+             buying_price_at_sale: 0, special_instructions: item.special_instructions
+           });
+        }
+      }
+      // 7. Ledger Update (if customer and due)
+      const customer = await trx('customers').where({ id: data.customer_id || sale.customer_id }).first();
+      if (customer && dueAmount > 0.01) {
+        await customerService.addSaleEntry(trx, {
+          customerId: customer.id, shopId, saleId, dueAmount, grandTotal, amountReceived: data.amount_received, userId
+        });
+      }
+
+      // 8. Automatic Kitchen/Station Printing
+      await this.generatePrintJobs(saleId, resolvedItems, shopId, trx);
+
+      return { saleId, total: grandTotal };
+    });
+  }
+
 
   async getSales(shopId) {
     return await db('sales as s')
