@@ -11,6 +11,7 @@ const userSchema = z.object({
   allowed_panels: z.array(z.string()).nullable().optional(),
   email: z.string().email().nullable().optional(),
   phone: z.string().nullable().optional(),
+  printer_station: z.string().nullable().optional(),
   status: z.enum(['active', 'blocked']).default('active'),
 });
 
@@ -19,7 +20,7 @@ class UserService {
     const isSuper = currentUser.role === 'superadmin';
     
     let query = db('users as u')
-      .select('u.id', 'u.name', 'u.email', 'u.phone', 'u.username', 'u.role', 'u.status', 'u.shop_id', 'u.allowed_panels', 'u.created_at')
+      .select('u.id', 'u.name', 'u.email', 'u.phone', 'u.username', 'u.role', 'u.printer_station', 'u.status', 'u.shop_id', 'u.allowed_panels', 'u.created_at')
       .orderBy('u.created_at', 'desc');
 
     if (isSuper) {
@@ -97,6 +98,7 @@ class UserService {
       email: data.email !== undefined ? data.email : userToEdit.email,
       phone: data.phone !== undefined ? data.phone : userToEdit.phone,
       role: !isSuper ? (data.role || userToEdit.role) : userToEdit.role,
+      printer_station: data.hasOwnProperty('printer_station') ? data.printer_station : userToEdit.printer_station,
       shop_id: data.hasOwnProperty('shop_id') ? data.shop_id : userToEdit.shop_id,
       status: isSuper ? 'active' : (data.status || userToEdit.status),
       allowed_panels: JSON.stringify(data.allowed_panels || JSON.parse(userToEdit.allowed_panels || '[]')),

@@ -6,15 +6,22 @@
  */
 
 const axios = require('axios');
-const { exec } = require('child_process');
+const { exec, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { promisify } = require('util');
+
+const execFileAsync = promisify(execFile);
 
 // --- CONFIGURATION ---
 const CONFIG = {
-    SHOP_ID: 1,                          // Change to your Shop ID if different
-    SERVER_URL: 'http://localhost:4000', // Change to your hosted URL (e.g. https://your-server.com)
-    POLL_INTERVAL_MS: 3000,              // Check for new orders every 3 seconds
+    SHOP_ID: Number(process.env.SHOP_ID || 1),                         // Change to your Shop ID if different
+    SERVER_URL: process.env.SERVER_URL || 'http://localhost:4000',      // Change to your hosted URL (e.g. https://your-server.com)
+    POLL_INTERVAL_MS: Number(process.env.POLL_INTERVAL_MS || 3000),     // Check for new orders every 3 seconds
+    BROWSER_PATH: process.env.PRINT_BROWSER_PATH || '',                // Optional explicit Chrome/Edge/Chromium path
+    SUMATRA_PATH: process.env.SUMATRA_PATH || '',                      // Optional explicit SumatraPDF.exe path (Windows only)
+    PRINT_TIMEOUT_MS: Number(process.env.PRINT_TIMEOUT_MS || 30000),
 };
 
 async function pollJobs() {
@@ -49,7 +56,24 @@ async function processJob(job) {
         return;
     }
 
-    console.log(`Printing Job #${job.id} to printer: ${printerName}`);
+    const itemCount = Array.isArray(content.items) ? content.items.length : 0;
+    const routeLabel = content.route_label || content.printer_label;
+    const targetLabel = routeLabel && routeLabel !== printerName
+        ? `${routeLabel} -> ${printerName}`
+        : printerName;
+    console.log(`Printing Job #${job.id} to printer: ${targetLabel}${itemCount ? ` (${itemCount} item lines)` : ''}`);
+
+    if (content.print_url || content.type === 'PRINT_URL') {
+        try {
+            await printUrlJob(job, content, printerName);
+            console.log(`Print signal sent to ${printerName}.`);
+            await confirmJob(job.id);
+        } catch (error) {
+            console.error(`URL Print Failed: ${error.message}`);
+            console.info(`Check browser path, server URL, and printer "${printerName}".`);
+        }
+        return;
+    }
 
     // Generate a simple text format for thermal printers (80mm)
     let text = `--------------------------------\n`;
@@ -103,6 +127,136 @@ async function processJob(job) {
         });
     } catch (fsError) {
         console.error("File System Error:", fsError.message);
+    }
+}
+
+function resolvePrintUrl(printUrl) {
+    if (!printUrl) throw new Error("Missing print_url in job content.");
+    if (/^https?:\/\//i.test(printUrl)) return printUrl;
+    return new URL(printUrl, CONFIG.SERVER_URL).toString();
+}
+
+function commandExists(command) {
+    try {
+        const lookup = process.platform === 'win32' ? 'where' : 'which';
+        const output = execFileSync(lookup, [command], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        return output.split(/\r?\n/).find(Boolean);
+    } catch (e) {
+        return null;
+    }
+}
+
+function findBrowserExecutable() {
+    if (CONFIG.BROWSER_PATH && fs.existsSync(CONFIG.BROWSER_PATH)) return CONFIG.BROWSER_PATH;
+
+    if (process.platform === 'win32') {
+        const candidates = [
+            process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ].filter(Boolean);
+        return candidates.find((candidate) => fs.existsSync(candidate)) || commandExists('chrome') || commandExists('msedge');
+    }
+
+    if (process.platform === 'darwin') {
+        const candidates = [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        ];
+        return candidates.find((candidate) => fs.existsSync(candidate)) || commandExists('google-chrome') || commandExists('chromium');
+    }
+
+    return commandExists('google-chrome-stable')
+        || commandExists('google-chrome')
+        || commandExists('chromium-browser')
+        || commandExists('chromium')
+        || commandExists('microsoft-edge');
+}
+
+async function renderUrlToPdf(url, outputPdf) {
+    const browser = findBrowserExecutable();
+    if (!browser) {
+        throw new Error("Chrome, Edge, or Chromium was not found. Set PRINT_BROWSER_PATH to your browser executable.");
+    }
+
+    await execFileAsync(browser, [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-sandbox',
+        `--print-to-pdf=${outputPdf}`,
+        url,
+    ], { timeout: CONFIG.PRINT_TIMEOUT_MS });
+
+    const stat = fs.existsSync(outputPdf) ? fs.statSync(outputPdf) : null;
+    if (!stat || stat.size === 0) throw new Error("Browser did not create a printable PDF.");
+}
+
+async function sendPdfToPrinter(pdfPath, printerName) {
+    if (process.platform === 'win32') {
+        let sumatra = null;
+        
+        // 1. Check config and common user-added env variables
+        const possibleEnvVars = [
+            CONFIG.SUMATRA_PATH,
+            process.env.SumatraPDF,
+            process.env.SUMATRAPDF
+        ].filter(Boolean).map(p => p.replace(/(^"|"$)/g, ''));
+
+        for (const p of possibleEnvVars) {
+            if (fs.existsSync(p)) {
+                if (fs.statSync(p).isDirectory() && fs.existsSync(path.join(p, 'SumatraPDF.exe'))) {
+                    sumatra = path.join(p, 'SumatraPDF.exe'); break;
+                } else if (fs.statSync(p).isFile()) {
+                    sumatra = p; break;
+                }
+            } else if (fs.existsSync(p + '.exe')) {
+                sumatra = p + '.exe'; break;
+            }
+        }
+
+        // 2. Check if it's in the deep system PATH
+        if (!sumatra) {
+            sumatra = commandExists('SumatraPDF.exe') || commandExists('SumatraPDF');
+        }
+        
+        // 3. Fallback to check default Windows installation directories
+        if (!sumatra) {
+            const defaultPaths = [
+                process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'SumatraPDF', 'SumatraPDF.exe'),
+                process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'SumatraPDF', 'SumatraPDF.exe'),
+                process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'SumatraPDF', 'SumatraPDF.exe')
+            ].filter(Boolean);
+            sumatra = defaultPaths.find(p => fs.existsSync(p));
+        }
+
+        if (!sumatra) {
+            throw new Error("Windows URL printing needs SumatraPDF in PATH for printer selection, or set SUMATRA_PATH config.");
+        }
+        await execFileAsync(sumatra, ['-print-settings', 'noscale', '-print-to', printerName, '-silent', pdfPath], { timeout: CONFIG.PRINT_TIMEOUT_MS });
+        return;
+    }
+
+    await execFileAsync('lp', ['-d', printerName, pdfPath], { timeout: CONFIG.PRINT_TIMEOUT_MS });
+}
+
+async function printUrlJob(job, content, printerName) {
+    const url = resolvePrintUrl(content.print_url);
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `rms-print-${job.id}-`));
+    const pdfPath = path.join(tempDir, `job_${job.id}.pdf`);
+
+    try {
+        await renderUrlToPdf(url, pdfPath);
+        await sendPdfToPrinter(pdfPath, printerName);
+    } finally {
+        setTimeout(() => {
+            try {
+                if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+                if (fs.existsSync(tempDir)) fs.rmdirSync(tempDir);
+            } catch (e) {}
+        }, 1000);
     }
 }
 

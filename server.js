@@ -41,6 +41,7 @@ app.use("/api/tables", require("./routes/tables"));
 app.use("/api/kds", require("./routes/kds"));
 app.use("/api/print-jobs", require("./routes/print-jobs"));
 app.use("/api/printers", require("./routes/printers"));
+app.use("/print", require("./routes/print"));
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
 app.get("/", (req, res) => {
@@ -55,10 +56,15 @@ app.get("/admin/store-monitoring", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "store-monitoring.html"));
 });
 
+app.get("/api/download-print-agent", (req, res) => {
+  res.download(path.join(__dirname, "print-agent.js"), "print-agent.js");
+});
+
 // Static assets (js, css, etc.) served after named routes
 app.use(express.static(path.join(__dirname, "public")));
 
 const { initPostgres } = require("./db/db-init");
+const { usePostgres } = require("./db/runtime");
 
 const PORT = process.env.PORT || 4000;
 
@@ -86,8 +92,11 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
   (async () => {
-    // Initialize Database for PostgreSQL if needed
-    await initPostgres();
+    if (usePostgres()) {
+      await initPostgres();
+    } else {
+      require("./db/db");
+    }
     startServer();
   })();
 }

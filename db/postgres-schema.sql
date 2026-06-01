@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS shops (
   extended_name_font_size INTEGER DEFAULT 10,
   extended_name_font_weight TEXT DEFAULT 'normal',
   extended_name_spacing INTEGER DEFAULT 2,
-  use_text_on_receipt INTEGER DEFAULT 1
+  use_text_on_receipt INTEGER DEFAULT 1,
+  customer_bill_printer TEXT,
+  unpaid_bill_printer TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
+  printer_station TEXT,
   status TEXT DEFAULT 'active',
   allowed_panels TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -415,4 +418,3 @@ CREATE TABLE IF NOT EXISTS printers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_printers_shop_id ON printers(shop_id);
-

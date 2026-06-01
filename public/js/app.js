@@ -686,6 +686,78 @@ function toggleLobbyCategoryMenu(event) {
   }
 }
 
+async function ensurePrinterRouteChoicesLoaded() {
+  const [printers, users] = await Promise.all([
+    api('/api/printers').catch(() => []),
+    api('/api/users').catch(() => [])
+  ]);
+  _allPrinters = Array.isArray(printers) ? printers : [];
+  _printerRoutingKitchens = Array.isArray(users) ? users.filter(u => u.role === 'kitchen') : [];
+}
+
+function getPrinterRouteLabel(route) {
+  if (!route) return "No Printer";
+
+  if (typeof route === "string" && route.startsWith("KITCHEN:")) {
+    const kitchenId = Number(route.replace("KITCHEN:", ""));
+    const kitchen = _printerRoutingKitchens.find(k => Number(k.id) === kitchenId);
+    if (!kitchen) return "Kitchen route";
+    const printer = getPrinterByRoute(kitchen.printer_station);
+    return `Kitchen: ${kitchen.name || kitchen.username}${printer ? ` (${printer.display_name})` : " (No printer assigned)"}`;
+  }
+
+  const printer = getPrinterByRoute(route);
+  return printer ? `${printer.display_name} (${printer.system_name})` : route;
+}
+
+function getPrinterRouteValue(printer) {
+  return `PRINTER:${printer.id}`;
+}
+
+function getPrinterByRoute(route) {
+  if (!route) return null;
+  if (typeof route === "string" && route.startsWith("PRINTER:")) {
+    const printerId = Number(route.replace("PRINTER:", ""));
+    return _allPrinters.find(p => Number(p.id) === printerId) || null;
+  }
+  return getFirstPrinterBySystemName(route);
+}
+
+function getFirstPrinterBySystemName(systemName) {
+  return _allPrinters
+    .filter(p => p.system_name === systemName)
+    .sort((a, b) => Number(a.id) - Number(b.id))[0] || null;
+}
+
+function printerRouteMatches(route, printer) {
+  if (!route || !printer) return false;
+  if (route === getPrinterRouteValue(printer)) return true;
+  if (route !== printer.system_name) return false;
+
+  const firstPrinterForSystemName = getFirstPrinterBySystemName(route);
+  return Number(firstPrinterForSystemName?.id) === Number(printer.id);
+}
+
+function renderPrinterRouteOptions(selectedRoute = "") {
+  const selected = selectedRoute || "";
+  const kitchenOptions = _printerRoutingKitchens.map(kitchen => {
+    const value = `KITCHEN:${kitchen.id}`;
+    const printer = getPrinterByRoute(kitchen.printer_station);
+    const suffix = printer ? ` - ${printer.display_name}` : " - no printer assigned";
+    return `<option value="${value}" ${selected === value ? "selected" : ""}>Kitchen: ${kitchen.name || kitchen.username}${suffix}</option>`;
+  }).join("");
+  const printerOptions = _allPrinters.map(printer => {
+    const value = getPrinterRouteValue(printer);
+    return `<option value="${value}" ${printerRouteMatches(selected, printer) ? "selected" : ""}>Printer: ${printer.display_name} (${printer.system_name})</option>`;
+  }).join("");
+
+  return `
+    <option value="" ${!selected ? "selected" : ""}>No Printer</option>
+    ${kitchenOptions ? `<optgroup label="Kitchen Terminals">${kitchenOptions}</optgroup>` : ""}
+    ${printerOptions ? `<optgroup label="Direct Printers">${printerOptions}</optgroup>` : ""}
+  `;
+}
+
 async function openAddCategoryPopup(type) {
   // Hide both potential menus
   const menu1 = document.getElementById("add-category-menu");
@@ -695,26 +767,21 @@ async function openAddCategoryPopup(type) {
 
   const isProduct = type === 'product';
   const title = isProduct ? 'Add Product Category' : 'Add Expense Category';
+  if (isProduct) await ensurePrinterRouteChoicesLoaded();
   
-  // Fetch printers if not already loaded or to keep fresh
-  _allPrinters = await api('/api/printers');
-
   const emojiHtml = !isProduct ? `
     <div>
       <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Emoji</label>
       <input id="pop-cat-emoji" value="📦" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-xl text-xl text-center outline-none focus:border-indigo-500 transition-all font-bold" />
     </div>` : '';
 
-  const printerOptions = _allPrinters.map(p => `<option value="${p.system_name}">${p.display_name} (${p.system_name})</option>`).join('');
-
   const extraHtml = isProduct ? `
     <div>
-      <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Printer Station (Routing)</label>
+      <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Print Route</label>
       <select id="pop-cat-printer" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all font-bold cursor-pointer">
-        <option value="">No Routing / Printer</option>
-        ${printerOptions}
+        ${renderPrinterRouteOptions()}
       </select>
-      <p class="text-[9px] text-slate-400 mt-1 px-1 italic">Linked to your registered printers in Settings.</p>
+      <p class="text-[9px] text-slate-400 mt-1 px-1 italic">Choose which kitchen or physical printer this category should print to.</p>
     </div>` : emojiHtml;
 
   openModal(
@@ -761,7 +828,7 @@ async function submitPopCategory(type) {
   if (type === "expense") {
     payload.emoji = document.getElementById("pop-cat-emoji")?.value || "📦";
   } else if (type === "product") {
-    payload.printer_station = document.getElementById("pop-cat-printer")?.value.trim().toUpperCase() || null;
+    payload.printer_station = document.getElementById("pop-cat-printer")?.value || null;
   }
 
   const url = type === "product" ? "/api/product-categories" : "/api/expense-categories";
@@ -797,7 +864,7 @@ function updateCategoryListInPopup(type) {
         ${type === 'expense' && c.emoji ? `<span class="text-lg">${c.emoji}</span>` : `<div class="w-2 h-2 rounded-full bg-indigo-500"></div>`}
         <div>
           <span class="text-sm font-bold text-slate-800 dark:text-slate-200">${c.name}</span>
-          ${type === 'product' ? `<div class="text-[9px] font-black text-indigo-500/60 uppercase tracking-tighter cursor-pointer hover:text-indigo-600" onclick="event.stopPropagation(); updateCategoryPrinter(${c.id}, '${c.printer_station || ''}')">${c.printer_station || 'No Printer'} ✎</div>` : ''}
+          ${type === 'product' ? `<div class="text-[9px] font-black text-indigo-500/60 uppercase tracking-tighter">${getPrinterRouteLabel(c.printer_station)}</div>` : ''}
         </div>
       </div>
       <button onclick="deleteCategoryFromPopup('${type}', ${c.id}, '${c.name.replace(/'/g, "\\'")}')" class="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all">
@@ -808,11 +875,11 @@ function updateCategoryListInPopup(type) {
 }
 
 async function updateCategoryPrinter(id, current) {
-  const newVal = prompt("Enter Printer Station Name (e.g. KITCHEN, BAR, RECEIPT):", current);
+  const newVal = prompt("Enter printer route value:", current);
   if (newVal === null) return;
   
   try {
-    const r = await api(`/api/product-categories/${id}`, "PATCH", { printer_station: newVal.trim().toUpperCase() || null });
+    const r = await api(`/api/product-categories/${id}`, "PATCH", { printer_station: newVal.trim() || null });
     if (r.error) return toast(r.error, "error");
     toast("Station updated!");
     await fetchCategories();
@@ -843,13 +910,12 @@ async function deleteCategoryFromPopup(type, id, name) {
 async function addCategory(type) {
   const name = $c("new-cat-name").value.trim();
   const emoji = type === "expense" ? $c("new-cat-emoji").value.trim() : null;
-  const printer_station = type === "product" ? $c("new-cat-printer")?.value.trim().toUpperCase() : null;
 
   if (!name) return toast("Name label required", "error");
 
   const endpoint =
     type === "product" ? "/api/product-categories" : "/api/expense-categories";
-  const payload = type === "product" ? { name, printer_station } : { name, emoji };
+  const payload = type === "product" ? { name } : { name, emoji };
 
   try {
     const r = await api(endpoint, "POST", payload);
@@ -2281,7 +2347,7 @@ async function renderPOS() {
                 <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Kitchen</label>
                 <select id="pos-kitchen" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
                   <option value="">-- Select Kitchen --</option>
-                  ${kitchenList.map(k => `<option value="${k.id}">${k.username} (${k.name})</option>`).join('')}
+                  ${kitchenList.map(k => `<option value="${k.id}" ${kitchenList.length === 1 ? 'selected' : ''}>${k.username} (${k.name})</option>`).join('')}
                 </select>
               </div>
             </div>
@@ -2609,7 +2675,7 @@ async function showPrintOptionsModal(id) {
     const { sale, items } = data;
     const subtotal = items.reduce((sum, item) => sum + (Number(item.price_at_sale) * Number(item.quantity)), 0);
 
-    openModal('Print Options', `
+    openModal('Unpaid Bill Options', `
       <div class="space-y-4">
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -2756,7 +2822,7 @@ async function updateAndPrintBill(id) {
 
   try {
     await api(`/api/sales/${id}/details`, 'PATCH', data);
-    printBill(id, true);
+    await printUnpaidBill(id);
     closeModal();
     renderPOSOrders();
   } catch (e) {
@@ -2828,7 +2894,7 @@ async function renderPOSOrders() {
               <button onclick="editOrder(${s.id})" class="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase hover:bg-indigo-100 transition-all">
                 Edit
               </button>
-              <button onclick="showPrintOptionsModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
+              <button onclick="showReceiptPrintMenu(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
                 Print
               </button>
               <button onclick="showOrderCompleteModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
@@ -3132,7 +3198,7 @@ async function updateAndCompleteOrder(id) {
   try {
     await api(`/api/sales/${id}/details`, 'PATCH', data);
     await completeOrderFromPOS(id, true);
-    printBill(id);
+    await printCustomerBill(id);
     closeModal();
   } catch (e) {
     toast(e.message, 'error');
@@ -4045,6 +4111,7 @@ async function checkout(status = 'completed') {
       btn.textContent = isEditing ? "Update Order" : "Place Order";
       return;
     }
+    const completedSaleId = r.saleId || _editingOrderId;
     
     if (isEditing) {
       toast("Order updated successfully!");
@@ -4057,7 +4124,11 @@ async function checkout(status = 'completed') {
 
     // AUTO PRINT KITCHEN IF FLAG SET
     if (window._lastOrderAutoPrintKitchen) {
-      printKitchenBill(r.saleId || _editingOrderId);
+      if (Number(r.print_jobs_queued || 0) > 0) {
+        toast("Kitchen print sent to configured printer");
+      } else {
+        printKitchenReceipt(completedSaleId);
+      }
       window._lastOrderAutoPrintKitchen = false;
     }
 
@@ -4066,16 +4137,19 @@ async function checkout(status = 'completed') {
       `
       <div class="text-center space-y-4">
         <div class="text-5xl">${isEditing ? '📝' : '🎉'}</div>
-        <p class="text-slate-300">Order #${r.saleId || _editingOrderId} — <span class="text-emerald-400 font-bold">Rs. ${r.total.toFixed(2)}</span></p>
+        <p class="text-slate-300">Order #${completedSaleId} — <span class="text-emerald-400 font-bold">Rs. ${r.total.toFixed(2)}</span></p>
         ${orderType === 'takeaway' ? `<p class="text-amber-400 font-bold text-lg">Token: ${token_number}</p>` : ''}
         <div class="grid grid-cols-1 gap-2">
-          <div class="flex gap-2">
-            <button onclick="printBill(${r.saleId || _editingOrderId})" class="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+          <div class="grid ${window._posIsRetail ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'} gap-2">
+            <button onclick="printCustomerBill(${completedSaleId})" class="py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-              Print Bill
+              Customer Bill
+            </button>
+            <button onclick="showPrintOptionsModal(${completedSaleId})" class="py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+              Unpaid Bill
             </button>
             ${window._posIsRetail ? '' : `
-            <button onclick="printKitchenBill(${r.saleId || _editingOrderId})" class="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+            <button onclick="printKitchenReceipt(${completedSaleId})" class="py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
               Kitchen Print
             </button>
@@ -4122,6 +4196,8 @@ function silentPrint(html, title = "Print") {
 }
 
 async function printKitchenBill(saleId) {
+  return printSaleReceiptUrl(getReceiptPrintUrl(saleId, RECEIPT_FORMATS.KITCHEN, true));
+
   const data = await api(`/api/sales/${saleId}/bill`);
   if (!data) return;
   const { sale, items } = data;
@@ -4212,13 +4288,144 @@ async function printKitchenBill(saleId) {
 }
 
 window._lastOrderAutoPrintKitchen = false;
+function cartHasItemsWithoutCategoryRoute() {
+  return cart.some((item) => {
+    const category = item.product?.category || productMap[item.product_id]?.category || null;
+    const categoryRoute = category
+      ? _productCategories.find(cat => cat.name === category)?.printer_station
+      : null;
+    return !categoryRoute || categoryRoute === "NONE";
+  });
+}
+
 async function sendToKitchen() {
   if (!cart.length) return toast("Add items to the order first", "error");
+
+  const kitchenSelect = $c('pos-kitchen');
+  if (kitchenSelect && !kitchenSelect.value && cartHasItemsWithoutCategoryRoute()) {
+    const kitchenOptions = Array.from(kitchenSelect.options).filter(option => option.value);
+    if (kitchenOptions.length === 1) {
+      kitchenSelect.value = kitchenOptions[0].value;
+    } else if (kitchenOptions.length > 1) {
+      kitchenSelect.focus();
+      return toast("Select a kitchen before printing", "error");
+    } else {
+      return toast("Create a kitchen terminal before printing", "error");
+    }
+  }
+
   window._lastOrderAutoPrintKitchen = true;
   checkout('pending');
 }
 
+const RECEIPT_FORMATS = Object.freeze({
+  KITCHEN: "kitchen",
+  CUSTOMER: "customer",
+  UNPAID: "unpaid",
+});
+
+function getReceiptPrintUrl(saleId, format = RECEIPT_FORMATS.CUSTOMER, autoPrint = true) {
+  const params = new URLSearchParams({
+    format,
+    autoprint: autoPrint ? "1" : "0",
+  });
+  const shopId = managedShopId || currentUser?.shop_id;
+  if (shopId) params.set("shop_id", shopId);
+  return `/print/sales/${encodeURIComponent(saleId)}?${params.toString()}`;
+}
+
+function printSaleReceiptUrl(url) {
+  let iframe = document.getElementById("silent-print-frame");
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = "silent-print-frame";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    document.body.appendChild(iframe);
+  }
+
+  iframe.src = `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
+}
+
+function canPrintKitchenReceipt() {
+  return currentUser?.shop_type === "restaurant" || window._posIsRetail === false;
+}
+
+async function printReceipt(saleId, format = RECEIPT_FORMATS.CUSTOMER, options = {}) {
+  const { browserFallback = true, missingPrinterMessage = "No configured printer found" } = options;
+  try {
+    const shopId = managedShopId || currentUser?.shop_id;
+    const result = await api("/api/print-jobs/queue", "POST", {
+      sale_id: saleId,
+      format,
+      shop_id: shopId || null,
+    });
+
+    if (Number(result.queued || 0) > 0) {
+      toast("Print sent to configured printer");
+      return;
+    }
+
+    if (browserFallback) {
+      printSaleReceiptUrl(getReceiptPrintUrl(saleId, format, true));
+    } else {
+      toast(missingPrinterMessage, "error");
+    }
+  } catch (err) {
+    console.error("Receipt print error:", err);
+    if (browserFallback) {
+      printSaleReceiptUrl(getReceiptPrintUrl(saleId, format, true));
+    } else {
+      toast(err.message || "Print failed", "error");
+    }
+  }
+}
+
+function printCustomerBill(saleId) {
+  return printReceipt(saleId, RECEIPT_FORMATS.CUSTOMER);
+}
+
+function printUnpaidBill(saleId) {
+  return printReceipt(saleId, RECEIPT_FORMATS.UNPAID);
+}
+
+function printKitchenReceipt(saleId) {
+  return printReceipt(saleId, RECEIPT_FORMATS.KITCHEN, {
+    browserFallback: false,
+    missingPrinterMessage: "No kitchen printer is assigned for this order",
+  });
+}
+
+function showReceiptPrintMenu(saleId, includeKitchen = canPrintKitchenReceipt()) {
+  openModal("Print Receipt", `
+    <div class="space-y-3">
+      ${includeKitchen ? `
+        <button onclick="printKitchenReceipt(${saleId}); closeModal();" class="w-full text-left p-4 rounded-2xl bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20 hover:border-orange-300 dark:hover:border-orange-400 transition-all">
+          <div class="font-black text-orange-700 dark:text-orange-300 text-sm uppercase tracking-wide">Kitchen Order</div>
+          <p class="text-xs text-orange-700/70 dark:text-orange-300/70 mt-1">Preparation ticket with quantities, notes, table/token, and no prices.</p>
+        </button>
+      ` : ""}
+
+      <button onclick="printReceipt(${saleId}, 'customer'); closeModal();" class="w-full text-left p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 hover:border-indigo-300 dark:hover:border-indigo-400 transition-all">
+        <div class="font-black text-indigo-700 dark:text-indigo-300 text-sm uppercase tracking-wide">Customer Bill</div>
+        <p class="text-xs text-indigo-700/70 dark:text-indigo-300/70 mt-1">Customer copy with items, totals, received amount, due, and change.</p>
+      </button>
+
+      <button onclick="showPrintOptionsModal(${saleId})" class="w-full text-left p-4 rounded-2xl bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 hover:border-rose-300 dark:hover:border-rose-400 transition-all">
+        <div class="font-black text-rose-700 dark:text-rose-300 text-sm uppercase tracking-wide">Unpaid Bill</div>
+        <p class="text-xs text-rose-700/70 dark:text-rose-300/70 mt-1">Pending-payment copy with editable tax/discount before printing.</p>
+      </button>
+    </div>
+  `, "max-w-md");
+}
+
 async function printBill(saleId, isUnpaid = false) {
+  return printSaleReceiptUrl(getReceiptPrintUrl(saleId, isUnpaid ? RECEIPT_FORMATS.UNPAID : RECEIPT_FORMATS.CUSTOMER, true));
+
   const data = await api(`/api/sales/${saleId}/bill`);
   const { sale, items, seller, shop } = data;
 
@@ -4233,6 +4440,8 @@ async function printBill(saleId, isUnpaid = false) {
   const method = methodMap[sale.payment_method] || sale.payment_method?.toUpperCase() || "Cash";
   const received = Number(sale.amount_received || 0);
   const remaining = grandTotal - received;
+  const balanceDue = Math.max(remaining, 0);
+  const receiptTitle = isUnpaid ? "Unpaid Bill" : "Customer Bill";
 
   const subtotal = items.reduce((s, i) => s + i.quantity * i.price_at_sale, 0);
   const taxAmt = (subtotal - discount) * (taxPct / 100);
@@ -4301,14 +4510,14 @@ async function printBill(saleId, isUnpaid = false) {
     const policies = shop.receipt_policies.replace(/\n/g, "<br>");
     footerHtml += `<div style="font-size: ${footerFontSize}px; font-style: ${footerFontStyle}; margin: ${footerMargin}px 0; white-space: pre-wrap;">${policies}</div>`;
   }
-  footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px; margin-top: ${footerMargin}px;">Thank you for your purchase!</div>`;
+  footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px; margin-top: ${footerMargin}px;">${isUnpaid ? "Payment pending. Please keep this bill for counter settlement." : "Thank you for your purchase!"}</div>`;
   if (shop?.name && !useLogo) {
     footerHtml += `<div style="font-size: ${parseInt(footerFontSize) + 1}px;">${shop.name}</div>`;
   }
   footerHtml += `<div style="font-size: ${footerFontSize}px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE - 03226155209</div>`;
   footerHtml += `</div>`;
 
-  const html = `<!DOCTYPE html><html><head><title>Bill #${sale.id}</title>
+  const html = `<!DOCTYPE html><html><head><title>${receiptTitle} #${sale.id}</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     @font-face {
@@ -4357,7 +4566,7 @@ async function printBill(saleId, isUnpaid = false) {
   <div class="receipt">
     <div class="text-center">
       ${headerHtml}
-      <div class="bold">${isUnpaid ? 'Unpaid Bill' : 'Sales Receipt'}</div>
+      <div class="bold">${receiptTitle}</div>
       ${contactHtml}
     </div>
 
@@ -4415,7 +4624,9 @@ async function printBill(saleId, isUnpaid = false) {
       ${isUnpaid ? `
         <div style="text-align: center; border: 1px dashed #111827; padding: 5px; margin-top: 5px; font-weight: bold;">
           *** UNPAID BILL ***<br>
-          Please pay PKR ${grandTotal.toFixed(0)} at the counter.
+          Total: Rs. ${grandTotal.toFixed(0)}<br>
+          ${received > 0 ? `Paid: Rs. ${received.toFixed(0)}<br>` : ""}
+          Balance Due: Rs. ${balanceDue.toFixed(0)}
         </div>
       ` : `
         <div><strong>Method:</strong> ${method}</div>
@@ -4432,7 +4643,7 @@ async function printBill(saleId, isUnpaid = false) {
   </div>
   </body></html>`;
 
-  silentPrint(html, `Bill #${sale.id}`);
+  silentPrint(html, `${receiptTitle} #${sale.id}`);
 }
 
 async function returnSaleItems(saleId) {
@@ -4952,7 +5163,7 @@ function _renderSalesTable() {
               <button onclick="returnSaleItems(${s.id})" class="p-1.5 rounded bg-rose-100 dark:bg-rose-500/10 hover:bg-rose-200 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors" title="Return Items">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 15L12 19M12 19L8 15M12 19V9C12 5.68629 14.6863 3 18 3" /></svg>
               </button>
-              <button onclick="printBill(${s.id})" class="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-400 transition-colors" title="Print Bill">
+              <button onclick="showReceiptPrintMenu(${s.id})" class="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-400 transition-colors" title="Print Receipt">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
               </button>
             </div>
@@ -5972,7 +6183,7 @@ async function viewCustomerLedger(customerId) {
           <td class="px-4 py-2.5 text-sm text-emerald-600 dark:text-emerald-400">Rs. ${fmt(s.amount_received)}</td>
           <td class="px-4 py-2.5 text-sm font-bold ${due > 0.01 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}">Rs. ${fmt(due)}</td>
           <td class="px-4 py-2.5 text-right">
-            <button onclick="printBill(${s.id})" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Print</button>
+            <button onclick="showReceiptPrintMenu(${s.id})" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Print</button>
           </td>
         </tr>`;
         })
@@ -6928,20 +7139,35 @@ function renderQuickSidebar() {
 
 // --- Printer & Routing Logic ---
 let _allPrinters = [];
+let _printerRoutingKitchens = [];
+let _printerRouteSettings = {};
 
 async function renderPrinterRouting() {
   const container = document.getElementById("page-content");
   if (!container) return;
 
   // Initial load
-  _allPrinters = await api('/api/printers');
-  await fetchCategories(); // Refresh categories to get latest station mappings
+  const [printers, users, settings] = await Promise.all([
+    api('/api/printers'),
+    api('/api/users').catch(() => []),
+    fetchReceiptSettings()
+  ]);
+  _allPrinters = Array.isArray(printers) ? printers : [];
+  _printerRoutingKitchens = Array.isArray(users) ? users.filter(u => u.role === 'kitchen') : [];
+  _printerRouteSettings = settings || {};
+  await fetchCategories();
 
   const contentHtml = `
     <div class="animate-in fade-in slide-in-from-right-4 duration-500 max-w-6xl mx-auto pb-20">
-      <header class="mb-12">
-        <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-2 tracking-tight">Printers & Routing</h3>
-        <p class="text-slate-500 dark:text-slate-400 text-sm italic">Define your physical printers and link them to product categories for automatic ticket routing.</p>
+      <header class="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h3 class="text-3xl font-black text-slate-950 dark:text-white mb-2 tracking-tight">Printers & Routing</h3>
+          <p class="text-slate-500 dark:text-slate-400 text-sm italic">Define physical printers and assign them to kitchens, customer bills, and unpaid bills.</p>
+        </div>
+        <a href="/api/download-print-agent" download class="inline-flex shrink-0 items-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+          Download Print Agent
+        </a>
       </header>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -6957,15 +7183,53 @@ async function renderPrinterRouting() {
           </div>
         </div>
 
-        <!-- Right: Category Routing -->
+        <!-- Right: Kitchen and Bill Routing -->
         <div class="lg:col-span-12 xl:col-span-7 space-y-6">
-          <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest">2. Category Routing</h4>
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest">2. Kitchen Printer Routing</h4>
+          <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-black tracking-widest text-slate-400">
+                <tr>
+                  <th class="px-6 py-4">Kitchen Terminal</th>
+                  <th class="px-6 py-4">Assigned Printer</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50 dark:divide-slate-800">
+                ${renderKitchenRoutingRowsHtml()}
+              </tbody>
+            </table>
+          </div>
+
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">3. Bill Printer Routing</h4>
+          <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Customer Bill Printer</label>
+              <select id="customer-bill-printer" onchange="saveDefaultPrinters()" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all font-bold cursor-pointer">
+                <option value="">Browser Default / Print Dialog</option>
+                ${_allPrinters.map(p => `
+                  <option value="${getPrinterRouteValue(p)}" ${printerRouteMatches(settings?.customer_bill_printer, p) ? 'selected' : ''}>${p.display_name} (${p.system_name})</option>
+                `).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Unpaid Bill Printer</label>
+              <select id="unpaid-bill-printer" onchange="saveDefaultPrinters()" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all font-bold cursor-pointer">
+                <option value="">Browser Default / Print Dialog</option>
+                ${_allPrinters.map(p => `
+                  <option value="${getPrinterRouteValue(p)}" ${printerRouteMatches(settings?.unpaid_bill_printer, p) ? 'selected' : ''}>${p.display_name} (${p.system_name})</option>
+                `).join('')}
+              </select>
+            </div>
+          </div>
+          <p class="text-[10px] text-slate-400 italic px-4">A printer can be selected for more than one route, for example Kitchen A and Customer Bill.</p>
+
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">4. Product Category Routing</h4>
           <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
             <table class="w-full text-left text-sm">
               <thead class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-black tracking-widest text-slate-400">
                 <tr>
                   <th class="px-6 py-4">Category</th>
-                  <th class="px-6 py-4">Assigned Printer</th>
+                  <th class="px-6 py-4">Kitchen / Printer</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50 dark:divide-slate-800">
@@ -6973,7 +7237,7 @@ async function renderPrinterRouting() {
               </tbody>
             </table>
           </div>
-          <p class="text-[10px] text-slate-400 italic px-4">Note: Items in categories with "No Printer" will not generate kitchen/bar tickets.</p>
+          <p class="text-[10px] text-slate-400 italic px-4">Category routes are used first. Categories without a route use the selected kitchen on checkout.</p>
         </div>
       </div>
     </div>
@@ -6992,25 +7256,82 @@ function renderPrintersListHtml() {
     `;
   }
 
-  return _allPrinters.map(p => `
-    <div class="group flex items-center justify-between p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 transition-all shadow-sm">
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-indigo-500 shadow-inner">
-           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+  return _allPrinters.map(p => {
+    const kitchenRoutes = _printerRoutingKitchens
+      .filter(k => printerRouteMatches(k.printer_station, p))
+      .map(k => `Kitchen: ${k.name || k.username}`);
+    const billRoutes = [];
+    if (printerRouteMatches(_printerRouteSettings?.customer_bill_printer, p)) billRoutes.push("Customer Bill");
+    if (printerRouteMatches(_printerRouteSettings?.unpaid_bill_printer, p)) billRoutes.push("Unpaid Bill");
+    const badges = [...kitchenRoutes, ...billRoutes].map(label => `
+      <span class="inline-flex px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 text-[9px] font-black uppercase tracking-tighter text-indigo-600 dark:text-indigo-300">${label}</span>
+    `).join('');
+
+    return `
+      <div class="group flex items-start justify-between gap-4 p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 transition-all shadow-sm">
+        <div class="flex items-start gap-4 min-w-0">
+          <div class="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-indigo-500 shadow-inner shrink-0">
+             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-black text-slate-800 dark:text-slate-100">${p.display_name}</p>
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-tighter break-all">System ID: ${p.system_name}</p>
+            ${badges ? `<div class="flex flex-wrap gap-1.5 mt-3">${badges}</div>` : `<p class="text-[10px] text-slate-400 italic mt-2">No routes assigned</p>`}
+          </div>
         </div>
-        <div>
-          <p class="text-sm font-black text-slate-800 dark:text-slate-100">${p.display_name}</p>
-          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">System ID: ${p.system_name}</p>
-        </div>
+        <button onclick="deletePrinter(${p.id})" class="p-2.5 rounded-xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all opacity-0 group-hover:opacity-100 shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
       </div>
-      <button onclick="deletePrinter(${p.id})" class="p-2.5 rounded-xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all opacity-0 group-hover:opacity-100">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-      </button>
-    </div>
+    `;
+  }).join('');
+}
+
+function renderKitchenRoutingRowsHtml() {
+  if (_printerRoutingKitchens.length === 0) {
+    return `
+      <tr>
+        <td colspan="2" class="px-6 py-10 text-center text-xs text-slate-400 italic">
+          No kitchen terminals found. Create kitchen users first, then assign each one a printer here.
+        </td>
+      </tr>
+    `;
+  }
+
+  return _printerRoutingKitchens.map(kitchen => `
+    <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
+      <td class="px-6 py-5">
+        <div class="flex items-center gap-3">
+          <div class="w-2 h-2 rounded-full bg-orange-500"></div>
+          <div>
+            <span class="block font-bold text-slate-700 dark:text-slate-300">${kitchen.name || kitchen.username}</span>
+            <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-tighter">${kitchen.username}</span>
+          </div>
+        </div>
+      </td>
+      <td class="px-6 py-5">
+        <select onchange="updateKitchenPrinterStation(${kitchen.id}, this.value)" class="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 focus:outline-none focus:border-indigo-500 transition-all cursor-pointer">
+          <option value="">No Printer</option>
+          ${_allPrinters.map(p => `
+            <option value="${getPrinterRouteValue(p)}" ${printerRouteMatches(kitchen.printer_station, p) ? 'selected' : ''}>${p.display_name} (${p.system_name})</option>
+          `).join('')}
+        </select>
+      </td>
+    </tr>
   `).join('');
 }
 
 function renderCategoryRoutingRowsHtml() {
+  if (!_productCategories.length) {
+    return `
+      <tr>
+        <td colspan="2" class="px-6 py-10 text-center text-xs text-slate-400 italic">
+          No product categories found.
+        </td>
+      </tr>
+    `;
+  }
+
   return _productCategories.map(cat => `
     <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
       <td class="px-6 py-5">
@@ -7021,10 +7342,7 @@ function renderCategoryRoutingRowsHtml() {
       </td>
       <td class="px-6 py-5">
         <select onchange="updateCategoryPrinterStation(${cat.id}, this.value)" class="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 focus:outline-none focus:border-indigo-500 transition-all cursor-pointer">
-          <option value="">No Printer</option>
-          ${_allPrinters.map(p => `
-            <option value="${p.system_name}" ${cat.printer_station === p.system_name ? 'selected' : ''}>${p.display_name} (${p.system_name})</option>
-          `).join('')}
+          ${renderPrinterRouteOptions(cat.printer_station)}
         </select>
       </td>
     </tr>
@@ -7074,13 +7392,27 @@ async function savePrinter() {
 }
 
 async function deletePrinter(id) {
-  if (!confirm("Remove this printer registration? Existing routing links will be broken.")) return;
+  if (!confirm("Remove this printer registration? Kitchen and bill routes using it will be cleared.")) return;
   try {
     await api(`/api/printers/${id}`, "DELETE");
     toast("Printer removed");
     renderSettings('printer-routing');
   } catch (err) {
     toast("Delete failed", "error");
+  }
+}
+
+async function updateKitchenPrinterStation(kitchenId, stationName) {
+  try {
+    const r = await api(`/api/printers/kitchen-routes/${kitchenId}`, "PATCH", { printer_station: stationName || null });
+    if (r.error) return toast(r.error, "error");
+    toast("Kitchen routing updated!");
+    const kitchen = _printerRoutingKitchens.find(k => Number(k.id) === Number(kitchenId));
+    if (kitchen) kitchen.printer_station = stationName || null;
+    const list = document.getElementById("printers-list");
+    if (list) list.innerHTML = renderPrintersListHtml();
+  } catch (err) {
+    toast("Update failed", "error");
   }
 }
 
@@ -7092,6 +7424,32 @@ async function updateCategoryPrinterStation(catId, stationName) {
     await fetchCategories(); // Refresh local state
   } catch (err) {
     toast("Update failed", "error");
+  }
+}
+
+async function saveDefaultPrinters() {
+  try {
+    const customer = document.getElementById('customer-bill-printer').value;
+    const unpaid = document.getElementById('unpaid-bill-printer').value;
+    
+    const formData = new FormData();
+    formData.append("customer_bill_printer", customer);
+    formData.append("unpaid_bill_printer", unpaid);
+    
+    const res = await fetch("/api/shop-settings", {
+      method: "POST",
+      body: formData,
+    });
+    
+    const data = await res.json();
+    if (data.error) return toast(data.error, "error");
+    
+    toast("Bill printers saved!");
+    _printerRouteSettings = await fetchReceiptSettings() || {};
+    const list = document.getElementById("printers-list");
+    if (list) list.innerHTML = renderPrintersListHtml();
+  } catch(e) {
+    toast("Failed to save default printers", "error");
   }
 }
 

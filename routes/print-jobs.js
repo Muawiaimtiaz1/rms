@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/knex');
-const { protect } = require('../middleware/auth');
+const salesService = require('../services/SalesService');
+const { requireAuth } = require('../middleware/auth');
 
 /**
  * Poll for pending print jobs (Used by Local Print Agent)
@@ -26,6 +27,25 @@ router.get('/poll', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * Queue a receipt print from the browser UI.
+ * If no matching printer is configured, the browser should fall back to its own print dialog.
+ */
+router.post('/queue', requireAuth, async (req, res) => {
+  const shopId = req.session.user.shop_id || req.body.shop_id;
+  const { sale_id, format } = req.body;
+
+  if (!shopId) return res.status(400).json({ error: "shop_id required" });
+  if (!sale_id) return res.status(400).json({ error: "sale_id required" });
+
+  const result = await salesService.queueReceiptPrint(sale_id, shopId, format);
+  res.json({
+    ok: true,
+    queued: result.queued,
+    printer_configured: result.printer_configured
+  });
 });
 
 /**

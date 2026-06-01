@@ -244,7 +244,7 @@ async function renderDeliveryOrders() {
                       <option value="completed">✅ Delivered</option>
                     </select>
                   ` : '<div class="text-emerald-600 dark:text-emerald-400 text-xs font-black">✅ Delivered</div>'}
-                  <button onclick="printBill(${o.id})" class="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition-all">🖨 Print</button>
+                  <button onclick="printReceipt(${o.id}, 'kitchen')" class="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 transition-all">🖨 Print</button>
                 </div>
               </div>
             </div>
@@ -773,4 +773,3 @@ async function viewRawStockHistory(id) {
   // Simple history alert for now
   toast("Stock history feature coming soon in audit logs", "success");
 }
-

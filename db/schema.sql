@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS shops (
   auto_calculate_damage_to_loss INTEGER DEFAULT 1,
   use_logo_on_receipt INTEGER DEFAULT 1,
   use_text_on_receipt INTEGER DEFAULT 1,
+  customer_bill_printer TEXT,
+  unpaid_bill_printer TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user', -- superadmin, admin, user
+  printer_station TEXT,
   status TEXT DEFAULT 'active', -- active, blocked
   allowed_panels TEXT, -- JSON array of panel IDs (subset of shop's allowed_panels)
   created_at TEXT DEFAULT (datetime('now')),
@@ -157,9 +160,34 @@ CREATE TABLE IF NOT EXISTS product_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   shop_id INTEGER NOT NULL,
   name TEXT NOT NULL,
+  printer_station TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS print_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  station_name TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_print_queue_shop_id ON print_queue(shop_id);
+CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status);
+
+CREATE TABLE IF NOT EXISTS printers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  display_name TEXT NOT NULL,
+  system_name TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_printers_shop_id ON printers(shop_id);
 
 CREATE TABLE IF NOT EXISTS expense_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

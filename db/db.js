@@ -249,6 +249,7 @@ if (!tableExists) {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 shop_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
+                printer_station TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
             );
@@ -274,6 +275,45 @@ if (!tableExists) {
     });
     transaction();
     console.log("✅ product_categories table added and migrated.");
+  }
+
+  try {
+    const prodCatCols = db.prepare("PRAGMA table_info(product_categories)").all();
+    if (!prodCatCols.some((col) => col.name === "printer_station")) {
+      console.log("🔧 Updating database: Adding printer_station to product_categories...");
+      db.exec("ALTER TABLE product_categories ADD COLUMN printer_station TEXT;");
+      console.log("✅ product_categories.printer_station column added.");
+    }
+  } catch (e) {
+    console.error("Failed to check product category printer_station column:", e.message);
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS print_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shop_id INTEGER NOT NULL,
+        station_name TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_print_queue_shop_id ON print_queue(shop_id);
+      CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status);
+
+      CREATE TABLE IF NOT EXISTS printers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shop_id INTEGER NOT NULL,
+        display_name TEXT NOT NULL,
+        system_name TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_printers_shop_id ON printers(shop_id);
+    `);
+  } catch (e) {
+    console.error("Failed to ensure print queue/printers tables:", e.message);
   }
 
   // Migration for Products table (is_component flag)
@@ -737,6 +777,8 @@ if (!tableExists) {
       { name: "divider_width", type: "INTEGER DEFAULT 1" },
       { name: "section_gap", type: "INTEGER DEFAULT 10" },
       { name: "auto_calculate_damage_to_loss", type: "INTEGER DEFAULT 1" },
+      { name: "customer_bill_printer", type: "TEXT" },
+      { name: "unpaid_bill_printer", type: "TEXT" },
     ];
 
     receiptColumns.forEach((col) => {
@@ -751,6 +793,14 @@ if (!tableExists) {
       console.log("🔧 Updating database: Adding shop_type to shops...");
       db.exec("ALTER TABLE shops ADD COLUMN shop_type TEXT DEFAULT 'retail';");
       console.log("✅ shop_type column added to shops.");
+    }
+
+    // Migration: Add kitchen printer assignment to users
+    const userCols = db.prepare("PRAGMA table_info(users)").all();
+    if (!userCols.some((col) => col.name === "printer_station")) {
+      console.log("🔧 Updating database: Adding printer_station to users...");
+      db.exec("ALTER TABLE users ADD COLUMN printer_station TEXT;");
+      console.log("✅ users.printer_station column added.");
     }
 
     // Migration: add user_id to brand_expense_payments

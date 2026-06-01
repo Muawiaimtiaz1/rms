@@ -33,49 +33,234 @@ const checkoutSchema = z.object({
 });
 
 class SalesService {
+  async getPrinterRouting(dbInstance, shopId) {
+    const printers = await dbInstance('printers')
+      .where({ shop_id: shopId })
+      .select('id', 'display_name', 'system_name')
+      .orderBy('id', 'asc');
+
+    const noneRoute = {
+      key: 'NONE',
+      station: 'NONE',
+      systemName: 'NONE',
+      label: 'No Printer'
+    };
+    const byRouteKey = new Map();
+    const bySystemName = new Map();
+    const makePrinterRoute = (printer) => {
+      if (!printer) return noneRoute;
+      const key = `PRINTER:${printer.id}`;
+      return {
+        key,
+        station: printer.system_name,
+        systemName: printer.system_name,
+        label: printer.display_name || printer.system_name,
+        printerId: printer.id,
+        printerLabel: printer.display_name || printer.system_name
+      };
+    };
+
+    printers.forEach((printer) => {
+      const route = makePrinterRoute(printer);
+      byRouteKey.set(route.key, route);
+      if (!bySystemName.has(printer.system_name)) {
+        bySystemName.set(printer.system_name, route);
+      }
+    });
+
+    const defaultRoute = printers[0] ? makePrinterRoute(printers[0]) : noneRoute;
+    const resolvePrinterRoute = (routeValue) => {
+      if (!routeValue) return noneRoute;
+      const value = String(routeValue).trim();
+      if (!value || value === 'NONE') return noneRoute;
+      if (value === 'DEFAULT') return defaultRoute;
+      if (value.startsWith('PRINTER:')) return byRouteKey.get(value) || noneRoute;
+      return bySystemName.get(value) || noneRoute;
+    };
+
+    const resolveStation = (station) => resolvePrinterRoute(station).station;
+
+    return { printers, resolvePrinterRoute, resolveStation };
+  }
+
+  async resolveKitchenRoute(dbInstance, sale, shopId, resolvePrinterRoute) {
+    if (!sale?.kitchen_id) return resolvePrinterRoute('NONE');
+
+    const kitchen = await dbInstance('users')
+      .where({ id: sale.kitchen_id, shop_id: shopId, role: 'kitchen' })
+      .select('id', 'name', 'username', 'printer_station')
+      .first();
+
+    if (!kitchen) return resolvePrinterRoute('NONE');
+
+    const printerRoute = resolvePrinterRoute(kitchen.printer_station);
+    if (printerRoute.station === 'NONE') return printerRoute;
+
+    const kitchenLabel = kitchen.name || kitchen.username || `Kitchen ${kitchen.id}`;
+    return {
+      ...printerRoute,
+      key: `KITCHEN:${kitchen.id}`,
+      label: `Kitchen: ${kitchenLabel}`,
+      kitchenId: kitchen.id,
+      kitchenLabel
+    };
+  }
+
+  async resolveKitchenStation(dbInstance, sale, shopId, resolvePrinterRoute) {
+    const route = await this.resolveKitchenRoute(dbInstance, sale, shopId, resolvePrinterRoute);
+    return route.station;
+  }
+
+  async getKitchenRouteMap(dbInstance, shopId, resolvePrinterRoute) {
+    const kitchens = await dbInstance('users')
+      .where({ shop_id: shopId, role: 'kitchen' })
+      .select('id', 'name', 'username', 'printer_station');
+
+    const map = {};
+    kitchens.forEach((kitchen) => {
+      const printerRoute = resolvePrinterRoute(kitchen.printer_station);
+      if (printerRoute.station === 'NONE') {
+        map[`KITCHEN:${kitchen.id}`] = printerRoute;
+        return;
+      }
+
+      const kitchenLabel = kitchen.name || kitchen.username || `Kitchen ${kitchen.id}`;
+      map[`KITCHEN:${kitchen.id}`] = {
+        ...printerRoute,
+        key: `KITCHEN:${kitchen.id}`,
+        label: `Kitchen: ${kitchenLabel}`,
+        kitchenId: kitchen.id,
+        kitchenLabel
+      };
+    });
+    return map;
+  }
+
+  async getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute) {
+    const [categories, kitchenRouteMap] = await Promise.all([
+      dbInstance('product_categories')
+        .where({ shop_id: shopId })
+        .select('name', 'printer_station'),
+      this.getKitchenRouteMap(dbInstance, shopId, resolvePrinterRoute)
+    ]);
+
+    const resolveRoute = (route) => {
+      if (!route) return resolvePrinterRoute('NONE');
+      if (typeof route === 'string' && route.startsWith('KITCHEN:')) {
+        return kitchenRouteMap[route] || resolvePrinterRoute('NONE');
+      }
+      return resolvePrinterRoute(route);
+    };
+
+    const routeMap = {};
+    categories.forEach((category) => {
+      routeMap[category.name] = {
+        raw: category.printer_station || null,
+        route: resolveRoute(category.printer_station)
+      };
+    });
+    return routeMap;
+  }
+
+  getItemCategory(item) {
+    return item.product?.category || item.product_category || item.category || null;
+  }
+
+  getItemPrintRoute(item, categoryRouteMap, fallbackRoute) {
+    const category = this.getItemCategory(item);
+    const categoryRoute = category ? categoryRouteMap[category] : null;
+    if (categoryRoute?.raw) return categoryRoute.route;
+    return fallbackRoute || {
+      key: 'NONE',
+      station: 'NONE',
+      systemName: 'NONE',
+      label: 'No Printer'
+    };
+  }
+
+  getItemPrintStation(item, categoryRouteMap, fallbackRoute) {
+    return this.getItemPrintRoute(item, categoryRouteMap, fallbackRoute).station;
+  }
+
+  buildPrintJobItem(item) {
+    const parseList = (value, fallback = []) => {
+      if (!value) return fallback;
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed : fallback;
+        } catch (e) {
+          return fallback;
+        }
+      }
+      return fallback;
+    };
+
+    return {
+      name: item.product ? item.product.name : (item.product_name || item.name || item.custom_name),
+      quantity: item.quantity,
+      special_instructions: item.special_instructions,
+      variants: parseList(item.variants_json, item.variants || []),
+      addons: parseList(item.addons_json, item.addons || [])
+    };
+  }
+
   /**
    * Generates automatic print jobs based on item categories and stations
+   * Creates separate print jobs per category even if they route to the same printer
    */
   async generatePrintJobs(saleId, items, shopId, trx) {
     const dbInstance = trx || db;
-    
-    // 1. Fetch category-to-station mapping for this shop
-    const categories = await dbInstance('product_categories')
-      .where({ shop_id: shopId })
-      .select('name', 'printer_station');
-    
-    const stationMap = {};
-    categories.forEach(c => {
-      stationMap[c.name] = c.printer_station || 'DEFAULT';
-    });
 
-    // 2. Group items by station
-    const jobs = {};
-    for (const item of items) {
-      let station = 'DEFAULT';
-      if (item.product && item.product.category) {
-        station = stationMap[item.product.category] || 'DEFAULT';
-      } else if (item.category) {
-        station = stationMap[item.category] || 'DEFAULT';
-      }
-      
-      if (!jobs[station]) jobs[station] = [];
-      jobs[station].push({
-        name: item.product ? item.product.name : (item.name || item.custom_name),
-        quantity: item.quantity,
-        special_instructions: item.special_instructions,
-        variants: item.variants_json ? JSON.parse(item.variants_json) : (item.variants || []),
-        addons: item.addons_json ? JSON.parse(item.addons_json) : (item.addons || [])
-      });
+    const { printers, resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
+    if (!printers.length) {
+      return { queued: 0, printer_configured: false };
     }
 
-    // 3. Create jobs in print_queue
-    const sale = await dbInstance('sales').where({ id: saleId }).first();
-    for (const [station, stationItems] of Object.entries(jobs)) {
-      if (station === 'NONE') continue; // Skip if explicitly disabled
+    const sale = await dbInstance('sales').where({ id: saleId, shop_id: shopId }).first();
+    if (!sale) return { queued: 0, printer_configured: true };
+
+    const jobs = {};
+    const addItemToRoute = (route, item, category) => {
+      if (!route || route.station === 'NONE') return;
       
+      // Create unique key combining category and route to enable split printing
+      // This ensures separate print jobs even if categories route to the same printer
+      let routeKey = route.key || route.station;
+      if (category) {
+        routeKey = `${category}::${routeKey}`;
+      }
+      
+      if (!jobs[routeKey]) {
+        jobs[routeKey] = { route, items: [], category };
+      }
+      jobs[routeKey].items.push(this.buildPrintJobItem(item));
+    };
+
+    const [categoryRouteMap, kitchenRoute] = await Promise.all([
+      this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute),
+      this.resolveKitchenRoute(dbInstance, sale, shopId, resolvePrinterRoute)
+    ]);
+
+    for (const item of items) {
+      const category = this.getItemCategory(item);
+      const route = this.getItemPrintRoute(item, categoryRouteMap, kitchenRoute);
+      addItemToRoute(route, item, category);
+    }
+
+    let queuedCount = 0;
+    for (const { route, items: stationItems } of Object.values(jobs)) {
+      const station = route.station;
       const content = {
+        type: 'PRINT_URL',
+        format: 'kitchen',
         sale_id: saleId,
+        station_name: station,
+        route_key: route.key,
+        route_label: route.label,
+        printer_label: route.printerLabel || route.label,
+        print_url: `/print/sales/${saleId}?format=kitchen&station=${encodeURIComponent(route.key)}&shop_id=${shopId}&autoprint=0`,
         order_type: sale.order_type,
         table_number: sale.table_id ? (await dbInstance('tables').where({id: sale.table_id}).first())?.table_number : null,
         token_number: sale.token_number,
@@ -83,13 +268,149 @@ class SalesService {
         created_at: new Date().toISOString()
       };
 
-      await dbInstance('print_queue').insert({
+      const [jobIdResult] = await dbInstance('print_queue').insert({
         shop_id: shopId,
         station_name: station,
         content_json: JSON.stringify(content),
         status: 'pending'
-      });
+      }).returning('id');
+
+      const jobId = typeof jobIdResult === 'object' ? jobIdResult.id : jobIdResult;
+      if (jobId) {
+        content.job_id = jobId;
+        content.print_url = `/print/jobs/${jobId}?shop_id=${shopId}&autoprint=0`;
+        await dbInstance('print_queue')
+          .where({ id: jobId, shop_id: shopId })
+          .update({ content_json: JSON.stringify(content) });
+      }
+      queuedCount += 1;
     }
+
+    return { queued: queuedCount, printer_configured: true };
+  }
+
+  async queueReceiptPrint(saleId, shopId, format = 'customer', trx) {
+    const dbInstance = trx || db;
+    const normalizedFormat = ['kitchen', 'customer', 'unpaid'].includes(format) ? format : 'customer';
+    const bill = await this.getBill(saleId, shopId);
+    if (!bill) return { queued: 0, printer_configured: false };
+
+    if (normalizedFormat === 'kitchen') {
+      return this.generatePrintJobs(saleId, bill.items, shopId, dbInstance);
+    }
+
+    // For customer and unpaid bills, check if category-based routing is configured
+    // If yes, use split printing by category. If no, use the default bill printer setting.
+    const { printers, resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
+    const categoryRouteMap = await this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute);
+    
+    // Check if any categories have routing configured
+    const hasCategoryRouting = Object.values(categoryRouteMap).some(cat => cat.raw);
+    
+    if (hasCategoryRouting && printers.length > 0) {
+      // Use split printing by category for bills
+      return this.generateBillPrintJobs(saleId, bill.items, shopId, normalizedFormat, dbInstance);
+    }
+
+    // Fallback to default bill printer setting (not split)
+    const shopSettings = await dbInstance('shops').where({ id: shopId }).select('customer_bill_printer', 'unpaid_bill_printer').first();
+    let targetPrinterRouteValue = null;
+
+    if (normalizedFormat === 'customer' && shopSettings?.customer_bill_printer) {
+      targetPrinterRouteValue = shopSettings.customer_bill_printer;
+    } else if (normalizedFormat === 'unpaid' && shopSettings?.unpaid_bill_printer) {
+      targetPrinterRouteValue = shopSettings.unpaid_bill_printer;
+    }
+
+    if (!targetPrinterRouteValue) {
+      return { queued: 0, printer_configured: false };
+    }
+
+    const printerRoute = resolvePrinterRoute(targetPrinterRouteValue);
+    if (printerRoute.station === 'NONE') {
+      return { queued: 0, printer_configured: false };
+    }
+
+    await dbInstance('print_queue').insert({
+      shop_id: shopId,
+      station_name: printerRoute.station,
+      content_json: JSON.stringify({
+        type: 'PRINT_URL',
+        format: normalizedFormat,
+        sale_id: saleId,
+        station_name: printerRoute.station,
+        route_key: printerRoute.key,
+        route_label: printerRoute.label,
+        printer_label: printerRoute.printerLabel || printerRoute.label,
+        print_url: `/print/sales/${saleId}?format=${normalizedFormat}&shop_id=${shopId}&autoprint=0`
+      }),
+      status: 'pending'
+    });
+
+    return { queued: 1, printer_configured: true };
+  }
+
+  /**
+   * Generate split bill print jobs by category (for customer/unpaid bills)
+   */
+  async generateBillPrintJobs(saleId, items, shopId, format, trx) {
+    const dbInstance = trx || db;
+    const { printers, resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
+    
+    if (!printers.length) {
+      return { queued: 0, printer_configured: false };
+    }
+
+    const sale = await dbInstance('sales').where({ id: saleId, shop_id: shopId }).first();
+    if (!sale) return { queued: 0, printer_configured: true };
+
+    const jobs = {};
+    const [categoryRouteMap, kitchenRoute] = await Promise.all([
+      this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute),
+      this.resolveKitchenRoute(dbInstance, sale, shopId, resolvePrinterRoute)
+    ]);
+
+    // Group items by category
+    for (const item of items) {
+      const category = this.getItemCategory(item);
+      const route = this.getItemPrintRoute(item, categoryRouteMap, kitchenRoute);
+      
+      if (!route || route.station === 'NONE') continue;
+      
+      let routeKey = route.key || route.station;
+      if (category) {
+        routeKey = `${category}::${routeKey}`;
+      }
+      
+      if (!jobs[routeKey]) {
+        jobs[routeKey] = { route, items: [], category };
+      }
+      jobs[routeKey].items.push(this.buildPrintJobItem(item));
+    }
+
+    let queuedCount = 0;
+    for (const { route, items: categoryItems } of Object.values(jobs)) {
+      const station = route.station;
+      await dbInstance('print_queue').insert({
+        shop_id: shopId,
+        station_name: station,
+        content_json: JSON.stringify({
+          type: 'PRINT_URL',
+          format: format,
+          sale_id: saleId,
+          station_name: station,
+          route_key: route.key,
+          route_label: route.label,
+          printer_label: route.printerLabel || route.label,
+          print_url: `/print/sales/${saleId}?format=${format}&station=${encodeURIComponent(route.key)}&shop_id=${shopId}&autoprint=0`,
+          items: categoryItems
+        }),
+        status: 'pending'
+      });
+      queuedCount += 1;
+    }
+
+    return { queued: queuedCount, printer_configured: true };
   }
 
   /**
@@ -313,9 +634,17 @@ class SalesService {
       }
 
       // 7. Automatic Kitchen/Station Printing
-      await this.generatePrintJobs(saleId, resolvedItems, shopId, trx);
+      const printResult = await this.generatePrintJobs(saleId, resolvedItems, shopId, trx);
 
-      return { saleId, total: grandTotal, customer_id: customer?.id, customer_name: data.customer_name, customer_phone: data.customer_phone };
+      return {
+        saleId,
+        total: grandTotal,
+        customer_id: customer?.id,
+        customer_name: data.customer_name,
+        customer_phone: data.customer_phone,
+        print_jobs_queued: printResult.queued,
+        printer_configured: printResult.printer_configured
+      };
     });
   }
 
@@ -527,9 +856,14 @@ class SalesService {
       }
 
       // 8. Automatic Kitchen/Station Printing
-      await this.generatePrintJobs(saleId, resolvedItems, shopId, trx);
+      const printResult = await this.generatePrintJobs(saleId, resolvedItems, shopId, trx);
 
-      return { saleId, total: grandTotal };
+      return {
+        saleId,
+        total: grandTotal,
+        print_jobs_queued: printResult.queued,
+        printer_configured: printResult.printer_configured
+      };
     });
   }
 
@@ -619,7 +953,7 @@ class SalesService {
     if (!sale) return null;
 
     const items = await db('sale_items as si')
-      .select('si.*', db.raw('COALESCE(p.name, si.custom_name) as product_name'), 'b.name as brand_name')
+      .select('si.*', db.raw('COALESCE(p.name, si.custom_name) as product_name'), 'p.category as product_category', 'b.name as brand_name')
       .select(db.raw(`(
         SELECT COALESCE(SUM(ri.quantity), 0)
         FROM return_items ri

@@ -66,6 +66,34 @@ async function initPostgres() {
       console.log("✅ users.updated_at added.");
     }
 
+    // Check for printer_station in users for kitchen terminal routing
+    const userPrinterStationCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'users' AND column_name = 'printer_station'
+    `);
+    if (userPrinterStationCheck.rows.length === 0) {
+      console.log("🔧 Migrating users table: Adding printer_station column...");
+      await query("ALTER TABLE users ADD COLUMN printer_station TEXT");
+      console.log("✅ users.printer_station added.");
+    }
+
+    // Check for bill-printer routing columns in shops
+    const shopPrinterColumns = [
+      ["customer_bill_printer", "TEXT"],
+      ["unpaid_bill_printer", "TEXT"]
+    ];
+    for (const [columnName, columnType] of shopPrinterColumns) {
+      const columnCheck = await query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'shops' AND column_name = $1
+      `, [columnName]);
+      if (columnCheck.rows.length === 0) {
+        console.log(`🔧 Migrating shops table: Adding ${columnName} column...`);
+        await query(`ALTER TABLE shops ADD COLUMN ${columnName} ${columnType}`);
+        console.log(`✅ shops.${columnName} added.`);
+      }
+    }
+
     // Check for updated_at in sales
     const salesUpdateCheck = await query(`
       SELECT column_name FROM information_schema.columns 

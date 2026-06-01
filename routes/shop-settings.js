@@ -43,7 +43,8 @@ router.get("/", requireAuth, async (req, res) => {
                 extended_name_font_size, extended_name_font_weight, extended_name_spacing,
                 contact_font_size, contact_align, contact_padding,
                 footer_font_size, footer_font_style, footer_margin,
-                divider_style, divider_width, section_gap, auto_calculate_damage_to_loss
+                divider_style, divider_width, section_gap, auto_calculate_damage_to_loss,
+                customer_bill_printer, unpaid_bill_printer
          FROM shops WHERE id = ${isPostgres ? '$1' : '?'}`;
 
     let shop;
@@ -82,7 +83,8 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), async (req, r
       "use_logo_on_receipt", "use_text_on_receipt", "receipt_font_family", "header_font_size", "header_font_weight",
       "header_spacing", "extended_name_font_size", "extended_name_font_weight", "extended_name_spacing",
       "contact_font_size", "contact_align", "contact_padding", "footer_font_size", "footer_font_style",
-      "footer_margin", "divider_style", "divider_width", "section_gap", "auto_calculate_damage_to_loss"
+      "footer_margin", "divider_style", "divider_width", "section_gap", "auto_calculate_damage_to_loss",
+      "customer_bill_printer", "unpaid_bill_printer"
     ];
 
     const updates = [];
