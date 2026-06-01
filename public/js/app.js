@@ -4438,9 +4438,9 @@ async function printBill(saleId, isUnpaid = false) {
     'online': 'Online Transfer'
   };
   const method = methodMap[sale.payment_method] || sale.payment_method?.toUpperCase() || "Cash";
-  const received = Number(sale.amount_received || 0);
-  const remaining = grandTotal - received;
-  const balanceDue = Math.max(remaining, 0);
+  const received = isUnpaid ? 0 : Number(sale.amount_received || 0);
+  const remaining = isUnpaid ? grandTotal : grandTotal - received;
+  const balanceDue = isUnpaid ? grandTotal : Math.max(remaining, 0);
   const receiptTitle = isUnpaid ? "Unpaid Bill" : "Customer Bill";
 
   const subtotal = items.reduce((s, i) => s + i.quantity * i.price_at_sale, 0);
@@ -4625,7 +4625,6 @@ async function printBill(saleId, isUnpaid = false) {
         <div style="text-align: center; border: 1px dashed #111827; padding: 5px; margin-top: 5px; font-weight: bold;">
           *** UNPAID BILL ***<br>
           Total: Rs. ${grandTotal.toFixed(0)}<br>
-          ${received > 0 ? `Paid: Rs. ${received.toFixed(0)}<br>` : ""}
           Balance Due: Rs. ${balanceDue.toFixed(0)}
         </div>
       ` : `
