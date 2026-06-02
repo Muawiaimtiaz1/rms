@@ -21,6 +21,7 @@ router.post('/logout', (req, res) => {
 
 // GET /api/auth/me
 router.get('/me', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
     
     const freshUser = await authService.getProfile(req.session.user.id);

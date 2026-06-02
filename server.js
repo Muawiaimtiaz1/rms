@@ -4,18 +4,113 @@ const express = require("express");
 const session = require("express-session");
 const path = require("path");
 const fs = require('fs');
+const db = require("./db/knex");
 
 const app = express();
+
+class KnexSessionStore extends session.Store {
+  constructor(knex, options = {}) {
+    super();
+    this.knex = knex;
+    this.tableName = options.tableName || "sessions";
+    this.ready = null;
+  }
+
+  ensureReady() {
+    if (!this.ready) this.ready = this.ensureTable();
+    return this.ready;
+  }
+
+  async ensureTable() {
+    const exists = await this.knex.schema.hasTable(this.tableName);
+    if (!exists) {
+      await this.knex.schema.createTable(this.tableName, (table) => {
+        table.string("sid").primary();
+        table.text("sess").notNullable();
+        table.dateTime("expires").index();
+      });
+    }
+  }
+
+  getExpiry(sess) {
+    return sess?.cookie?.expires
+      ? new Date(sess.cookie.expires)
+      : new Date(Date.now() + Number(process.env.SESSION_MAX_AGE_MS || 24 * 60 * 60 * 1000));
+  }
+
+  async get(sid, callback) {
+    callback = callback || (() => {});
+    try {
+      await this.ensureReady();
+      const row = await this.knex(this.tableName).where({ sid }).first();
+      if (!row) return callback(null, null);
+
+      if (row.expires && new Date(row.expires) <= new Date()) {
+        await this.destroy(sid, () => {});
+        return callback(null, null);
+      }
+
+      return callback(null, JSON.parse(row.sess));
+    } catch (err) {
+      return callback(err);
+    }
+  }
+
+  async set(sid, sess, callback) {
+    callback = callback || (() => {});
+    try {
+      await this.ensureReady();
+      const expires = this.getExpiry(sess).toISOString();
+      await this.knex(this.tableName)
+        .insert({ sid, sess: JSON.stringify(sess), expires })
+        .onConflict("sid")
+        .merge({ sess: JSON.stringify(sess), expires });
+      return callback(null);
+    } catch (err) {
+      return callback(err);
+    }
+  }
+
+  async touch(sid, sess, callback) {
+    callback = callback || (() => {});
+    try {
+      await this.ensureReady();
+      await this.knex(this.tableName)
+        .where({ sid })
+        .update({ sess: JSON.stringify(sess), expires: this.getExpiry(sess).toISOString() });
+      return callback(null);
+    } catch (err) {
+      return callback(err);
+    }
+  }
+
+  async destroy(sid, callback) {
+    callback = callback || (() => {});
+    try {
+      await this.ensureReady();
+      await this.knex(this.tableName).where({ sid }).del();
+      return callback(null);
+    } catch (err) {
+      return callback(err);
+    }
+  }
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use(
   session({
-    secret: "pos-super-secret-key-2024",
+    store: new KnexSessionStore(db),
+    secret: process.env.SESSION_SECRET || "pos-super-secret-key-2024",
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8 hours
+    rolling: true,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: Number(process.env.SESSION_MAX_AGE_MS || 24 * 60 * 60 * 1000),
+    },
   }),
 );
 
@@ -44,12 +139,21 @@ app.use("/api/printers", require("./routes/printers"));
 app.use("/print", require("./routes/print"));
 
 // Named page routes — MUST be before express.static to avoid index.html conflict
+function sendNoStorePage(res, fileName) {
+  res.set({
+    "Cache-Control": "no-store, no-cache, must-revalidate, private",
+    Pragma: "no-cache",
+    Expires: "0",
+  });
+  res.sendFile(path.join(__dirname, "public", fileName));
+}
+
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "login.html"));
+  sendNoStorePage(res, "login.html");
 });
 
 app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+  sendNoStorePage(res, "dashboard.html");
 });
 
 app.get("/admin/store-monitoring", (req, res) => {

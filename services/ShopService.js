@@ -114,6 +114,7 @@ class ShopService {
   }
 
   async deleteShop(id) {
+    if (Number(id) === 1) throw new Error("Cannot delete main shop");
     await db('shops').where({ id }).delete();
   }
 }

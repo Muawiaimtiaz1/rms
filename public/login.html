@@ -232,6 +232,26 @@
   </div>
 
   <script>
+    let loginRedirectInProgress = false;
+
+    async function redirectIfAlreadyAuthenticated() {
+      if (loginRedirectInProgress) return;
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' });
+        if (res.ok) {
+          loginRedirectInProgress = true;
+          window.location.replace('/dashboard');
+        }
+      } catch {
+        // Stay on login if the session check cannot reach the server.
+      }
+    }
+
+    redirectIfAlreadyAuthenticated();
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) redirectIfAlreadyAuthenticated();
+    });
+
     // Theme Toggle Logic
     function toggleTheme() {
       const isDark = document.documentElement.classList.contains('dark');
@@ -279,11 +299,12 @@
         }
         else {
           // Success flourish before redirecting
+          loginRedirectInProgress = true;
           btn.innerHTML = `<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Success! Redirecting...`;
           btn.classList.replace('from-indigo-600', 'from-emerald-500');
           btn.classList.replace('to-blue-600', 'to-emerald-600');
           setTimeout(() => {
-            window.location.href = '/dashboard';
+            window.location.replace('/dashboard');
           }, 500);
           return; // Prevent resetting the button state
         }

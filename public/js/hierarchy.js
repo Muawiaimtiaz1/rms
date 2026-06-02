@@ -178,7 +178,10 @@ function renderHierarchyBlock(
         </span>
         
         <div class="flex items-center gap-2">
-          <button onclick="event.preventDefault(); event.stopPropagation(); deleteShop(${shop.id}, '${name.replace(/'/g, "\\'")}')" class="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-xl transition-all border border-transparent hover:border-rose-200 dark:hover:border-rose-800" title="Delete Shop">
+          <button onclick="event.preventDefault(); event.stopPropagation(); openRenameShop(${shop.id})" class="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-white dark:hover:text-white bg-white dark:bg-slate-800 hover:bg-slate-700 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all shadow-sm" title="Rename Shop">
+            Rename
+          </button>
+          <button onclick="event.preventDefault(); event.stopPropagation(); deleteShop(${shop.id}, '${name.replace(/'/g, "\\'")}')" class="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-xl transition-all border border-transparent hover:border-rose-200 dark:hover:border-rose-800" title="Remove Shop">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
           </button>
           <button onclick="event.preventDefault(); event.stopPropagation(); openEditShop(${shop.id})" class="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-white dark:hover:text-white bg-white dark:bg-slate-800 hover:bg-indigo-600 dark:hover:bg-indigo-600 border border-slate-200 dark:border-slate-700 hover:border-indigo-600 dark:hover:border-indigo-600 rounded-xl transition-all shadow-sm flex items-center gap-1.5" title="Manage Shop">
@@ -190,17 +193,6 @@ function renderHierarchyBlock(
 
     </div>
   `;
-}
-
-async function deleteShop(id, name) {
-  if (id === 1) return toast("Cannot delete main shop", "warning");
-  if (!confirm(`CAUTION: You are about to PERMANENTLY DELETE "${name}".\n\nThis will remove all associated data, users, products, and sales permanently. This action cannot be undone.\n\nAre you sure you want to proceed?`)) return;
-
-  const r = await api(`/api/shops/${id}`, "DELETE");
-  if (r.error) return toast(r.error, "error");
-  toast("Shop Deleted Successfully");
-  _managedShopId = null;
-  renderHierarchy();
 }
 
 async function toggleShopStatus(id, current) {
@@ -797,6 +789,40 @@ function openEditShop(id) {
   renderShopManagement(id);
 }
 
+function openRenameShop(id) {
+  const shop = hierarchyData.shops.find((s) => Number(s.id) === Number(id));
+  if (!shop) return toast("Shop not found", "error");
+  const currentName = shop.name || shop.store_name || "";
+
+  openModal("Rename Shop", `
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">New Shop Name</label>
+        <input id="rename-shop-name" type="text" value="${currentName.replace(/"/g, "&quot;")}" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 font-bold">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <button onclick="closeModal()" class="py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">Cancel</button>
+        <button onclick="renameShop(${id})" class="py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/20">Save Name</button>
+      </div>
+    </div>
+  `, "max-w-sm");
+}
+
+async function renameShop(id) {
+  const name = $c("rename-shop-name")?.value.trim();
+  if (!name) return toast("Shop name is required", "error");
+
+  const r = await api(`/api/shops/${id}`, "PATCH", { name });
+  if (r.error) return toast(r.error, "error");
+  toast("Shop renamed");
+  closeModal();
+  if (typeof _managedShopId !== "undefined" && _managedShopId !== null) {
+    renderShopManagement(_managedShopId);
+  } else {
+    renderHierarchy();
+  }
+}
+
 function shopFormHtml(shop = null) {
   const shopPanels =
     shop && shop.allowed_panels
@@ -809,7 +835,7 @@ function shopFormHtml(shop = null) {
       <div class="space-y-4">
       <div>
         <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Shop Name</label>
-        <input id="shop-name" type="text" value="${shop ? shop.name : ""}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-indigo-500 transition-all">
+        <input id="shop-name" type="text" value="${shop ? (shop.name || shop.store_name || "").replace(/"/g, "&quot;") : ""}" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-indigo-500 transition-all">
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Launch Panels (Master Control)</label>
@@ -884,9 +910,11 @@ async function saveShop(id) {
   }
 }
 
-async function deleteShop(id) {
+async function deleteShop(id, name = "this shop") {
   if (id === 1) return toast("Cannot delete main shop", "warning");
-  if (!confirm("Delete shop and all its data? This cannot be undone.")) return;
+  if (!confirm(`Remove "${name}" and all of its data?\n\nThis will delete users, products, sales, customers, and settings for this shop. This cannot be undone.`)) return;
+  const typed = prompt(`Type DELETE to permanently remove "${name}".`);
+  if (typed !== "DELETE") return toast("Shop removal cancelled", "warning");
   await api(`/api/shops/${id}`, "DELETE");
   toast("Shop deleted");
   _managedShopId = null;
@@ -928,6 +956,14 @@ async function renderShopManagement(shopId) {
             </h3>
             <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Full management suite for this tenant.</p>
           </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="openRenameShop(${shop.id})" class="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-black hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+            Rename Shop
+          </button>
+          <button onclick="deleteShop(${shop.id}, '${(shop.store_name || shop.name || "Shop").replace(/'/g, "\\'")}')" class="px-4 py-2 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs font-black hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-all">
+            Remove Shop
+          </button>
         </div>
       </div>
       

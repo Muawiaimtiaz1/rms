@@ -1,6 +1,17 @@
 // ─── Helpers ─────────────────────────────────────────────────────────
 const $c = document.getElementById.bind(document);
 
+function redirectToLoginForSession() {
+  if (window._sessionRedirectInProgress) return;
+  window._sessionRedirectInProgress = true;
+  try {
+    sessionStorage.removeItem("lobby_selected");
+  } catch (e) {}
+  setTimeout(() => {
+    window.location.replace("/");
+  }, 600);
+}
+
 async function api(url, method = "GET", body) {
   const res = await fetch(url, {
     method,
@@ -11,10 +22,20 @@ async function api(url, method = "GET", body) {
   const contentType = res.headers.get("content-type");
   if (contentType && contentType.includes("application/json")) {
     const data = await res.json();
+    if (res.status === 401) {
+      toast("Session expired. Please login again.", "error");
+      redirectToLoginForSession();
+      throw new Error(data.error || "Session expired");
+    }
     if (!res.ok) throw new Error(data.error || `API Error: ${res.status}`);
     return data;
   } else {
     const text = await res.text();
+    if (res.status === 401) {
+      toast("Session expired. Please login again.", "error");
+      redirectToLoginForSession();
+      throw new Error("Session expired");
+    }
     if (!res.ok) throw new Error(`Server Error (${res.status}): ${text.substring(0, 100)}...`);
     return text;
   }
@@ -276,9 +297,9 @@ const MODULE_GROUPS = [
 // ─── Init ────────────────────────────────────────────────────────────
 async function init() {
   try {
-    const res = await fetch("/api/auth/me");
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
     if (!res.ok) {
-      window.location.href = "/";
+      window.location.replace("/");
       return;
     }
     const data = await res.json();
@@ -334,9 +355,22 @@ async function init() {
     navigate(startPage);
   } catch (e) {
     console.error("Init Error:", e);
-    window.location.href = "/";
+    window.location.replace("/");
   }
 }
+
+async function revalidateDashboardSessionOnRestore() {
+  try {
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
+    if (!res.ok) redirectToLoginForSession();
+  } catch (e) {
+    redirectToLoginForSession();
+  }
+}
+
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) revalidateDashboardSessionOnRestore();
+});
 
 // ─── Router ──────────────────────────────────────────────────────────
 function navigate(page) {
@@ -474,7 +508,7 @@ function navigate(page) {
 
 async function logout() {
   await fetch("/api/auth/logout", { method: "POST" });
-  window.location.href = "/";
+  window.location.replace("/");
 }
 
 async function fetchCategories() {
@@ -2343,13 +2377,6 @@ async function renderPOS() {
                   ${waiterList.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
                 </select>
               </div>
-              <div>
-                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Kitchen</label>
-                <select id="pos-kitchen" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
-                  <option value="">-- Select Kitchen --</option>
-                  ${kitchenList.map(k => `<option value="${k.id}" ${kitchenList.length === 1 ? 'selected' : ''}>${k.username} (${k.name})</option>`).join('')}
-                </select>
-              </div>
             </div>
 
             <!-- Delivery specific: Customer details + address -->
@@ -2388,6 +2415,16 @@ async function renderPOS() {
                   <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer</label>
                   <input id="pos-takeaway-name" type="text" placeholder="Optional" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold" />
                 </div>
+              </div>
+            </div>
+
+            <div id="pos-kitchen-fields" class="mb-2 space-y-2">
+              <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Kitchen</label>
+                <select id="pos-kitchen" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-sm font-bold">
+                  <option value="">-- Select Kitchen --</option>
+                  ${kitchenList.map(k => `<option value="${k.id}" ${kitchenList.length === 1 ? 'selected' : ''}>${k.username} (${k.name})</option>`).join('')}
+                </select>
               </div>
             </div>
           </div>
@@ -2648,7 +2685,7 @@ function switchOrderType(type) {
 
   const kitchenBtn = $c('kitchen-btn');
   if (kitchenBtn) {
-    kitchenBtn.classList.toggle('hidden', type !== 'dine_in' && type !== 'takeaway' || isRetail);
+    kitchenBtn.classList.toggle('hidden', type === 'orders' || isRetail);
   }
 
   if (type === 'orders') {
@@ -4913,8 +4950,10 @@ const _salesPageSize = 25;
 
 async function renderSalesHistory(onlyPendingDues = false) {
   try {
-    _allSalesCache = await api("/api/sales");
-    if (!Array.isArray(_allSalesCache)) _allSalesCache = [];
+    const sales = await api("/api/sales");
+    _allSalesCache = Array.isArray(sales)
+      ? sales.filter((s) => s.order_status === "completed")
+      : [];
     updatePendingDuesBadge(_allSalesCache);
     _salesPendingFilter = onlyPendingDues;
     _salesPage = 1;

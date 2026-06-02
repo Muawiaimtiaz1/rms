@@ -1523,14 +1523,68 @@ async function renderShops() {
 }
 
 // ─── Subscriptions ──────────────────────────────────────────────
+let _subscriptionShopsCache = [];
+let _subscriptionLogsCache = [];
+let _subscriptionSelectedShopId = null;
+
+function subscriptionTypeLabel(type) {
+  const typeLabel = {
+    "1_month": "1 Month",
+    "3_months": "3 Months",
+    "6_months": "6 Months",
+    "1_year": "1 Year",
+    "2_years": "2 Years",
+    lifetime: "Lifetime",
+  };
+  return typeLabel[type] || type || "-";
+}
+
+function subscriptionEscapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  }[char]));
+}
+
+function formatSubscriptionDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).split("T")[0];
+  return date.toLocaleDateString("en-GB");
+}
+
+function latestSubscriptionForShop(shopId) {
+  const logs = _subscriptionLogsCache
+    .filter((s) => Number(s.shop_id) === Number(shopId))
+    .sort((a, b) => new Date(b.end_date || b.paid_at || 0) - new Date(a.end_date || a.paid_at || 0));
+  return logs[0] || null;
+}
+
+async function loadSubscriptionData() {
+  const [shopsData, subsData] = await Promise.all([
+    api("/api/shops"),
+    api("/api/subscriptions"),
+  ]);
+  _subscriptionShopsCache = Array.isArray(shopsData) ? shopsData : [];
+  _subscriptionLogsCache = Array.isArray(subsData) ? subsData : [];
+}
+
 async function renderSubscriptions() {
-  const subs = await api("/api/subscriptions");
+  _subscriptionSelectedShopId = null;
+  await loadSubscriptionData();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   $c("page-content").innerHTML = `
     <div class="space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h3 class="text-xl font-bold text-slate-800 dark:text-white">Subscription Management</h3>
-          <p class="text-sm text-slate-500 dark:text-slate-400">Track monthly payments and shop access</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Select a shop to view all subscription payment logs</p>
         </div>
         <button onclick="openRecordPayment()" class="flex items-center justify-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium transition-all shadow-lg active:scale-95">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -1538,12 +1592,124 @@ async function renderSubscriptions() {
         </button>
       </div>
 
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        ${_subscriptionShopsCache.map((shop) => {
+          const shopId = Number(shop.id);
+          if (!Number.isFinite(shopId)) return "";
+          const shopName = subscriptionEscapeHtml(shop.name || `Shop #${shopId}`);
+          const logs = _subscriptionLogsCache.filter((s) => Number(s.shop_id) === shopId);
+          const latest = latestSubscriptionForShop(shopId);
+          const totalPaid = logs.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+          const endDate = latest?.end_date ? new Date(latest.end_date) : null;
+          const isValid = latest?.type === "lifetime" || (endDate && endDate >= today);
+          const statusClass = isValid
+            ? "bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20"
+            : "bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20";
+          const latestPlan = latest ? subscriptionEscapeHtml(subscriptionTypeLabel(latest.type)) : "No Payment";
+          const validityText = latest
+            ? `${formatSubscriptionDate(latest.start_date)} to ${formatSubscriptionDate(latest.end_date)}`
+            : "No subscription record yet";
+
+          return `
+            <button onclick="renderSubscriptionShop(${shopId})" class="text-left p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-500 transition-all shadow-sm hover:shadow-lg group">
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="text-lg font-black text-slate-900 dark:text-white truncate">${shopName}</div>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Shop #${shopId}</div>
+                </div>
+                <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${statusClass}">
+                  ${isValid ? "Active" : "Due"}
+                </span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3 mt-5">
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                  <div class="text-[10px] uppercase font-black tracking-widest text-slate-400">Latest Plan</div>
+                  <div class="text-sm font-black text-slate-800 dark:text-slate-100 mt-1">${latestPlan}</div>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                  <div class="text-[10px] uppercase font-black tracking-widest text-slate-400">Total Paid</div>
+                  <div class="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-1">Rs. ${totalPaid.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div class="mt-4 flex items-center justify-between gap-3 text-xs">
+                <span class="text-slate-500 dark:text-slate-400 font-medium">
+                  ${subscriptionEscapeHtml(validityText)}
+                </span>
+                <span class="font-black text-emerald-600 dark:text-emerald-400 group-hover:translate-x-1 transition-transform">
+                  View Logs
+                </span>
+              </div>
+            </button>
+          `;
+        }).join("")}
+        ${_subscriptionShopsCache.length === 0 ? `
+          <div class="col-span-full p-10 text-center rounded-2xl bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 text-slate-400 font-medium">
+            No shops found
+          </div>
+        ` : ""}
+      </div>
+    </div>`;
+}
+
+async function renderSubscriptionShop(shopId) {
+  const selectedShopId = Number(shopId);
+  if (!Number.isFinite(selectedShopId)) return renderSubscriptions();
+
+  _subscriptionSelectedShopId = selectedShopId;
+  await loadSubscriptionData();
+
+  const shop = _subscriptionShopsCache.find((s) => Number(s.id) === selectedShopId);
+  if (!shop) return renderSubscriptions();
+
+  const logs = _subscriptionLogsCache
+    .filter((s) => Number(s.shop_id) === selectedShopId)
+    .sort((a, b) => new Date(b.paid_at || 0) - new Date(a.paid_at || 0));
+  const totalPaid = logs.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+  const latest = latestSubscriptionForShop(selectedShopId);
+  const safeShopName = subscriptionEscapeHtml(shop.name || `Shop #${selectedShopId}`);
+  const latestValidity = latest
+    ? `${formatSubscriptionDate(latest.start_date)} to ${formatSubscriptionDate(latest.end_date)}`
+    : "No payment yet";
+
+  $c("page-content").innerHTML = `
+    <div class="space-y-6">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <button onclick="renderSubscriptions()" class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center transition-all" title="Back">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div>
+            <h3 class="text-xl font-black text-slate-900 dark:text-white">${safeShopName}</h3>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Subscription payment logs and validity history</p>
+          </div>
+        </div>
+        <button onclick="openRecordPayment(${selectedShopId})" class="flex items-center justify-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95">
+          Record Payment
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Paid</div>
+          <div class="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">Rs. ${totalPaid.toLocaleString()}</div>
+        </div>
+        <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Payments</div>
+          <div class="text-2xl font-black text-slate-900 dark:text-white mt-1">${logs.length}</div>
+        </div>
+        <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Latest Validity</div>
+          <div class="text-sm font-black text-slate-900 dark:text-white mt-2">${subscriptionEscapeHtml(latestValidity)}</div>
+        </div>
+      </div>
+
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
-              <tr class="bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Shop</th>
+              <tr class="bg-slate-50/50 dark:bg-slate-950/50 border-b border-slate-200 dark:border-slate-800">
                 <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Type</th>
                 <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Month</th>
                 <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Validity</th>
@@ -1551,29 +1717,22 @@ async function renderSubscriptions() {
                 <th class="px-5 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 text-right">Paid At</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
-              ${subs
-      .map((s) => {
-        const typeLabel = {
-          "1_month": "1 Month",
-          "3_months": "3 Months",
-          "6_months": "6 Months",
-          "1_year": "1 Year",
-          "2_years": "2 Years",
-          lifetime: "Lifetime",
-        };
-        return `
-              <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
-                <td class="px-5 py-4 text-sm font-semibold text-slate-800 dark:text-white">${s.shop_name}</td>
-                <td class="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">${typeLabel[s.type] || s.type}</td>
-                <td class="px-5 py-4 text-sm text-slate-500 dark:text-slate-400 tabular-nums">${s.month}</td>
-                <td class="px-5 py-4 text-xs text-slate-500 dark:text-slate-400 tabular-nums">${s.start_date} to ${s.end_date}</td>
-                <td class="px-5 py-4 text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">Rs. ${s.amount.toLocaleString()}</td>
-                <td class="px-5 py-4 text-right text-xs text-slate-400 tabular-nums">${new Date(s.paid_at).toLocaleString()}</td>
-              </tr>`;
-      })
-      .join("")}
-              ${subs.length === 0 ? '<tr><td colspan="6" class="px-5 py-8 text-center text-slate-400 italic font-medium">No payment records found</td></tr>' : ""}
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+              ${logs.map((s) => {
+                const paidDate = new Date(s.paid_at);
+                const paidAt = Number.isNaN(paidDate.getTime()) ? "-" : paidDate.toLocaleString();
+                const validity = `${formatSubscriptionDate(s.start_date)} to ${formatSubscriptionDate(s.end_date)}`;
+                return `
+                  <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-950/50 transition-colors">
+                    <td class="px-5 py-4 text-sm font-bold text-slate-800 dark:text-white">${subscriptionEscapeHtml(subscriptionTypeLabel(s.type))}</td>
+                    <td class="px-5 py-4 text-sm text-slate-500 dark:text-slate-400 tabular-nums">${subscriptionEscapeHtml(s.month || "-")}</td>
+                    <td class="px-5 py-4 text-xs text-slate-500 dark:text-slate-400 tabular-nums">${subscriptionEscapeHtml(validity)}</td>
+                    <td class="px-5 py-4 text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">Rs. ${Number(s.amount || 0).toLocaleString()}</td>
+                    <td class="px-5 py-4 text-right text-xs text-slate-400 tabular-nums">${subscriptionEscapeHtml(paidAt)}</td>
+                  </tr>
+                `;
+              }).join("")}
+              ${logs.length === 0 ? '<tr><td colspan="5" class="px-5 py-10 text-center text-slate-400 italic font-medium">No payment records for this shop yet</td></tr>' : ""}
             </tbody>
           </table>
         </div>
@@ -1581,8 +1740,8 @@ async function renderSubscriptions() {
     </div>`;
 }
 
-async function openRecordPayment() {
-  const shops = await api("/api/shops");
+async function openRecordPayment(selectedShopId = null) {
+  const shops = _subscriptionShopsCache.length ? _subscriptionShopsCache : await api("/api/shops");
   openModal(
     "Record Subscription Payment",
     `
@@ -1590,7 +1749,11 @@ async function openRecordPayment() {
       <div>
         <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Select Shop</label>
         <select id="pay-shop-id" class="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:border-indigo-500 transition-all">
-          ${shops.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}
+          ${shops.map((s) => {
+            const shopId = Number(s.id);
+            if (!Number.isFinite(shopId)) return "";
+            return `<option value="${shopId}" ${Number(selectedShopId) === shopId ? "selected" : ""}>${subscriptionEscapeHtml(s.name || `Shop #${shopId}`)}</option>`;
+          }).join("")}
         </select>
       </div>
       <div>
@@ -1641,7 +1804,11 @@ async function saveSubscriptionPayment() {
 
   toast("Payment recorded");
   closeModal();
-  renderSubscriptions();
+  if (_subscriptionSelectedShopId) {
+    renderSubscriptionShop(_subscriptionSelectedShopId);
+  } else {
+    renderSubscriptions();
+  }
 }
 
 function toggleUserAccessMenu() {
@@ -1830,6 +1997,3 @@ async function deleteTaxPreset(id) {
     toast("Failed to delete", "error");
   }
 }
-
-
-
