@@ -7,8 +7,13 @@ function renderSpecificSubTab(tabId, data) {
   const k = data.kpi;
   const s = data.summary;
 
-  const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
+  const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(val);
   const formatNum = (val) => new Intl.NumberFormat('en-IN').format(val);
+  const renderMetricLabel = (label, info) => `
+    <div class="text-[10px] font-black uppercase text-slate-400">
+      ${analyticsLabelWithInfo(label, info)}
+    </div>
+  `;
 
   let tabHtml = "";
 
@@ -18,29 +23,31 @@ function renderSpecificSubTab(tabId, data) {
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Total Net Revenue</span>
+            ${renderMetricLabel("Total Net Revenue", "Completed sales only. Revenue = bill subtotal - discount + tax - refunds. Includes both received and pending money.")}
             <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(k.totalSales)}</h4>
             <span class="text-[10px] font-bold text-emerald-500 block mt-1">Adjusted after returns & refunds</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Total Orders volume</span>
+            ${renderMetricLabel("Total Orders volume", "Count of completed orders in the selected period. Pending, preparing, and ready orders are excluded.")}
             <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatNum(k.totalOrders)}</h4>
             <span class="text-[10px] font-bold text-slate-500 block mt-1">Average: ${formatNum(k.totalOrders > 0 ? (k.totalOrders / 30) : 0)} orders/day</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Average Cart Total</span>
+            ${renderMetricLabel("Average Cart Total", "Average completed bill total before subtracting refunds. Bill total = bill subtotal - discount + tax.")}
             <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(k.avgOrderValue)}</h4>
             <span class="text-[10px] font-bold text-slate-500 block mt-1">Per unique transaction</span>
           </div>
         </div>
 
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
-          <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-4">Payment Methods Allocation</h5>
+          <div class="mb-4">
+            ${analyticsPanelTitle("Payment Methods Allocation", "Net completed-order revenue grouped by payment method. Revenue = bill subtotal - discount + tax - refunds, grouped by the original sale payment method.")}
+          </div>
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             ${data.paymentBreakdown.map((p, idx) => `
               <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
                 <div>
-                  <span class="text-[10px] font-black uppercase text-slate-400">${p.label || 'Other'}</span>
+                  ${renderMetricLabel(p.label || 'Other', "This payment bucket is net revenue for completed orders using this payment method, after refunds are subtracted.")}
                   <h6 class="text-base font-black text-slate-800 dark:text-white mt-1">${formatCurrency(p.sales)}</h6>
                 </div>
                 <span class="text-lg">${idx === 0 ? '💵' : idx === 1 ? '📱' : '💳'}</span>
@@ -57,7 +64,9 @@ function renderSpecificSubTab(tabId, data) {
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
-          <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-4">Top Volume Performers</h5>
+          <div class="mb-4">
+            ${analyticsPanelTitle("Top Volume Performers", "Products ranked by sold quantity after returned quantities are deducted. Product revenue is allocated from bill subtotal - discount + tax, then product refunds are subtracted.")}
+          </div>
           <div class="overflow-x-auto">
             <table class="w-full text-xs text-left">
               <thead>
@@ -96,19 +105,26 @@ function renderSpecificSubTab(tabId, data) {
     // ─── CUSTOMER ANALYTICS ───
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm flex items-center gap-4">
             <span class="text-3xl">👥</span>
             <div>
-              <span class="text-[10px] font-black uppercase text-slate-400">Total Registered Customers</span>
+              ${renderMetricLabel("Total Registered Customers", "All customer records currently saved for the shop, regardless of whether they purchased in the selected period.")}
               <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatNum(k.totalCustomers)}</h4>
             </div>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm flex items-center gap-4">
             <span class="text-3xl">✨</span>
             <div>
-              <span class="text-[10px] font-black uppercase text-slate-400">Active Shoppers (This Period)</span>
+              ${renderMetricLabel("Active Shoppers (This Period)", "Distinct linked customer records plus completed walk-in/unlinked orders in the selected period.")}
               <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatNum(k.activeCustomers)}</h4>
+            </div>
+          </div>
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm flex items-center gap-4">
+            <span class="text-3xl">🚶</span>
+            <div>
+              ${renderMetricLabel("Walk-in Shoppers (This Period)", "Completed sales in the selected period that were not linked to a saved customer account. Each unlinked completed sale is counted as one walk-in shopper.")}
+              <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatNum(k.walkInCustomers || 0)}</h4>
             </div>
           </div>
         </div>
@@ -121,13 +137,13 @@ function renderSpecificSubTab(tabId, data) {
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Total Asset Stock Valuation</span>
+            ${renderMetricLabel("Total Asset Stock Valuation", "Current active product stock multiplied by product buying price. This is live inventory value, not limited to the selected sales period.")}
             <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(s.stockValue)}</h4>
             <span class="text-[10px] font-bold text-slate-400 block mt-1">Based on standard buying costs</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm flex flex-col justify-between">
             <div>
-              <span class="text-[10px] font-black uppercase text-slate-400">Active Inventory Valuation Category Count</span>
+              ${renderMetricLabel("Active Inventory Valuation Category Count", "Number of categories currently represented in the selected period's category revenue breakdown.")}
               <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${data.categoryBreakdown.length} active</h4>
             </div>
           </div>
@@ -141,17 +157,17 @@ function renderSpecificSubTab(tabId, data) {
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Adjusted Gross Profit</span>
+            ${renderMetricLabel("Adjusted Gross Profit", "Gross Profit = revenue - COGS. Revenue = bill subtotal - discount + tax - refunds; returns reduce both revenue and COGS.")}
             <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(s.grossProfit)}</h4>
             <span class="text-[10px] font-bold text-emerald-500 block mt-1">Revenue minus total buying cost (COGS)</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Net Profit Margin</span>
+            ${renderMetricLabel("Net Profit Margin", "Gross profit divided by net revenue for the selected period.")}
             <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${s.profitMargin.toFixed(2)}%</h4>
             <span class="text-[10px] font-bold text-slate-500 block mt-1">Percentage of retainable gross yield</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            <span class="text-[10px] font-black uppercase text-slate-400">Refund Deficit Deducted</span>
+            ${renderMetricLabel("Refund Deficit Deducted", "Total refund amount from return invoices created in the selected period. This is deducted from revenue.")}
             <h4 class="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">${formatCurrency(s.totalRefunds)}</h4>
             <span class="text-[10px] font-bold text-rose-500 block mt-1">Over ${s.totalReturns} total return invoices</span>
           </div>
@@ -164,7 +180,9 @@ function renderSpecificSubTab(tabId, data) {
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
-          <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-4">Cashier & Server Contribution</h5>
+          <div class="mb-4">
+            ${analyticsPanelTitle("Cashier & Server Contribution", "This panel is reserved for future staff-level order counts and revenue totals once cashier/server attribution is enabled in analytics.")}
+          </div>
           <p class="text-slate-400 text-xs italic text-center py-6">Order processing logs are active. Individual server breakdowns will appear here on customer checkout.</p>
         </div>
       </div>
@@ -175,7 +193,9 @@ function renderSpecificSubTab(tabId, data) {
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
-          <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-4">Revenue Stream Breakdown</h5>
+          <div class="mb-4">
+            ${analyticsPanelTitle("Revenue Stream Breakdown", "Net completed-order revenue by order type or channel. Revenue = bill subtotal - discount + tax - refunds.")}
+          </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             ${data.channelBreakdown.map((c, idx) => {
               let lbl = c.label || "dine_in";
@@ -187,7 +207,7 @@ function renderSpecificSubTab(tabId, data) {
               return `
                 <div class="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
                   <div>
-                    <span class="text-[10px] font-black uppercase text-slate-400">${lbl}</span>
+                    ${renderMetricLabel(lbl, "This channel bucket includes completed orders of this type. Revenue = bill subtotal - discount + tax - refunds.")}
                     <h6 class="text-lg font-black text-slate-800 dark:text-white mt-1">${formatCurrency(c.sales)}</h6>
                   </div>
                   <span class="text-2xl">${idx === 0 ? '🛍️' : idx === 1 ? '🍽️' : '🛵'}</span>
@@ -241,6 +261,7 @@ function renderSpecificSubTab(tabId, data) {
                 <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-6 flex items-center gap-2">
                    <svg class="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg> 
                    Automated Insights
+                   ${analyticsInfoIcon("AI-generated observations based on the same selected-period analytics data, including revenue, orders, margins, refunds, and inventory signals where available.")}
                 </h5>
                 <div class="space-y-4">
                    ${aiData.insights.map(ins => `
@@ -258,6 +279,7 @@ function renderSpecificSubTab(tabId, data) {
                 <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-6 flex items-center gap-2">
                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                    AI Recommendations
+                   ${analyticsInfoIcon("Suggested actions generated from the selected-period metrics and anomaly checks. These are advisory and do not change sales or inventory records.")}
                 </h5>
                 <div class="space-y-6">
                    ${aiData.recommendations.map(rec => `
@@ -287,7 +309,7 @@ function renderSpecificSubTab(tabId, data) {
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
           <div class="flex items-center justify-between mb-6">
-            <h5 class="text-xs font-black uppercase text-slate-400 tracking-wider">Transactional Ledger Statement</h5>
+            ${analyticsPanelTitle("Transactional Ledger Statement", "Report/export area for transaction registers. Uses the selected analytics period when report generation is connected.")}
             <button onclick="window.print()" class="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition-all shadow-sm">
               Print Statement
             </button>

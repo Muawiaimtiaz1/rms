@@ -241,7 +241,7 @@ function renderDonutChart(containerId, slices, totalValue) {
     accumulatedPercent += pct;
     const color = colors[idx % colors.length];
  
-    const formattedSales = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(s.sales);  
+    const formattedSales = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(s.sales);  
     const displayPct = (pct * 100).toFixed(1);
 
     // Build the accompanying HTML tooltip to prevent SVG clipping
@@ -286,7 +286,7 @@ function renderDonutChart(containerId, slices, totalValue) {
   }).join('');
  
   // Format central inner sum
-  const formattedTotal = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(totalValue);
+  const formattedTotal = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(totalValue);
 
   // Generate responsive legend
   const legendHtml = slices.map((s, idx) => {

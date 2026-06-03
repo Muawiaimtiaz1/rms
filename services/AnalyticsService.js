@@ -6,7 +6,21 @@ class AnalyticsService {
    */
   getPeriodBounds(period, fromDate, toDate) {
     const now = new Date();
-    const format = (d) => d.toISOString().split('T')[0];
+    const format = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const shiftMonths = (date, monthDelta) => {
+      const shifted = new Date(date);
+      const targetDay = shifted.getDate();
+      shifted.setDate(1);
+      shifted.setMonth(shifted.getMonth() + monthDelta);
+      const lastDayOfTargetMonth = new Date(shifted.getFullYear(), shifted.getMonth() + 1, 0).getDate();
+      shifted.setDate(Math.min(targetDay, lastDayOfTargetMonth));
+      return shifted;
+    };
 
     let startStr = "";
     let endStr = format(now);
@@ -41,25 +55,16 @@ class AnalyticsService {
         startStr = "2000-01-01"; // effectively all time
         break;
       case '1m':
-        const d_1m = new Date();
-        d_1m.setDate(d_1m.getDate() - 29);
-        startStr = format(d_1m);
+        startStr = format(shiftMonths(now, -1));
         break;
       case '2m':
-        const d_2m = new Date();
-        d_2m.setDate(d_2m.getDate() - 59);
-        startStr = format(d_2m);
+        startStr = format(shiftMonths(now, -2));
         break;
       case '6m':
-        const d_6m = new Date();
-        d_6m.setMonth(d_6m.getMonth() - 5);
-        d_6m.setDate(1);
-        startStr = format(d_6m);
+        startStr = format(shiftMonths(now, -6));
         break;
       case '1y':
-        const d_1y = new Date();
-        d_1y.setFullYear(d_1y.getFullYear() - 1);
-        startStr = format(d_1y);
+        startStr = format(shiftMonths(now, -12));
         break;
       default:
         // Default to all time if not specified, to match legacy behavior
@@ -111,15 +116,24 @@ class AnalyticsService {
         .select(
           db.raw('COALESCE(SUM(total), 0) as total_sales'),
           db.raw('COUNT(id) as total_orders'),
-          db.raw('COALESCE(AVG(total), 0) as avg_order_value')
+          db.raw('COALESCE(AVG(total), 0) as avg_order_value'),
+          db.raw('COALESCE(SUM(CASE WHEN (COALESCE(total, 0) - COALESCE(amount_received, 0)) > 0.01 THEN (COALESCE(total, 0) - COALESCE(amount_received, 0)) ELSE 0 END), 0) as total_pending_dues'),
+          db.raw('COALESCE(SUM(CASE WHEN (COALESCE(total, 0) - COALESCE(amount_received, 0)) > 0.01 THEN 1 ELSE 0 END), 0) as pending_dues_count')
         ).first();
 
-      const customersCount = await db('sales')
+      const linkedCustomersCount = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
         .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .whereNotNull('customer_id')
         .countDistinct('customer_id as val').first();
+
+      const walkInCustomersCount = await db('sales')
+        .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
+        .whereBetween('created_at', [bounds.start, bounds.end])
+        .whereNull('customer_id')
+        .count('id as val').first();
 
       const totalCustomersInDb = await db('customers')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
@@ -177,6 +191,20 @@ class AnalyticsService {
         .whereBetween('created_at', [prevBounds.start, prevBounds.end])
         .select(db.raw('COALESCE(SUM(total), 0) as total_sales'), db.raw('COUNT(id) as total_orders')).first();
 
+      const prevLinkedCustomersCount = await db('sales')
+        .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
+        .whereBetween('created_at', [prevBounds.start, prevBounds.end])
+        .whereNotNull('customer_id')
+        .countDistinct('customer_id as val').first();
+
+      const prevWalkInCustomersCount = await db('sales')
+        .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
+        .where({ order_status: 'completed' })
+        .whereBetween('created_at', [prevBounds.start, prevBounds.end])
+        .whereNull('customer_id')
+        .count('id as val').first();
+
       const prevReturns = await db('returns')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
         .whereBetween('created_at', [prevBounds.start, prevBounds.end])
@@ -190,6 +218,12 @@ class AnalyticsService {
 
       const salesGrowth = getChange(adjustedRevenue, adjustedPrevRevenue);
       const ordersGrowth = getChange(parseInt(kpi.total_orders || 0), parseInt(prevKpi.total_orders || 0));
+      const linkedCustomerCountVal = parseInt(linkedCustomersCount ? linkedCustomersCount.val : 0, 10) || 0;
+      const walkInCustomerCountVal = parseInt(walkInCustomersCount ? walkInCustomersCount.val : 0, 10) || 0;
+      const activeCustomerCountVal = linkedCustomerCountVal + walkInCustomerCountVal;
+      const prevLinkedCustomerCountVal = parseInt(prevLinkedCustomersCount ? prevLinkedCustomersCount.val : 0, 10) || 0;
+      const prevWalkInCustomerCountVal = parseInt(prevWalkInCustomersCount ? prevWalkInCustomersCount.val : 0, 10) || 0;
+      const customersGrowth = getChange(activeCustomerCountVal, prevLinkedCustomerCountVal + prevWalkInCustomerCountVal);
 
       // 4. Trends & Breakdowns
       const getTrendData = async (lblExpr) => {
@@ -212,32 +246,90 @@ class AnalyticsService {
         trendSeries = await getTrendData(isSqlite ? "date(created_at)" : "TO_CHAR(created_at, 'YYYY-MM-DD')");
       }
 
-      const paymentBreakdownRaw = await db('sales')
+      const mergeNetBreakdown = (grossRows, refundRows) => {
+        const rowsByLabel = new Map();
+        const getRow = (label) => {
+          const key = label || 'Other';
+          if (!rowsByLabel.has(key)) rowsByLabel.set(key, { label: key, sales: 0, orders: 0 });
+          return rowsByLabel.get(key);
+        };
+
+        grossRows.forEach((row) => {
+          const target = getRow(row.label);
+          target.sales += Number(row.sales || 0);
+          target.orders += Number(row.orders || 0);
+        });
+
+        refundRows.forEach((row) => {
+          const target = getRow(row.label);
+          target.sales -= Number(row.refunds || 0);
+        });
+
+        return Array.from(rowsByLabel.values())
+          .filter((row) => Math.abs(row.sales) > 0.005 || row.orders > 0)
+          .map((row) => ({ ...row, sales: Number(row.sales.toFixed(2)) }))
+          .sort((a, b) => b.sales - a.sales);
+      };
+
+      const paymentBreakdownGross = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
         .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .select('payment_method as label')
-        .sum('total as sales').groupBy('label').orderBy('sales', 'desc');
-      const paymentBreakdown = paymentBreakdownRaw.map(r => ({ ...r, sales: Number(r.sales || 0) }));
+        .sum('total as sales')
+        .count('id as orders')
+        .groupBy('label');
+      const paymentRefunds = await db('returns as r')
+        .join('sales as s', 'r.sale_id', 's.id')
+        .modify(qb => shopId ? qb.where('r.shop_id', shopId) : qb)
+        .whereBetween('r.created_at', [bounds.start, bounds.end])
+        .select('s.payment_method as label')
+        .sum('r.total_refund as refunds')
+        .groupBy('label');
+      const paymentBreakdown = mergeNetBreakdown(paymentBreakdownGross, paymentRefunds);
 
-      const channelBreakdownRaw = await db('sales')
+      const channelBreakdownGross = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
         .where({ order_status: 'completed' })
         .whereBetween('created_at', [bounds.start, bounds.end])
         .select('order_type as label')
-        .sum('total as sales').groupBy('label').orderBy('sales', 'desc');
-      const channelBreakdown = channelBreakdownRaw.map(r => ({ ...r, sales: Number(r.sales || 0) }));
+        .sum('total as sales')
+        .count('id as orders')
+        .groupBy('label');
+      const channelRefunds = await db('returns as r')
+        .join('sales as s', 'r.sale_id', 's.id')
+        .modify(qb => shopId ? qb.where('r.shop_id', shopId) : qb)
+        .whereBetween('r.created_at', [bounds.start, bounds.end])
+        .select('s.order_type as label')
+        .sum('r.total_refund as refunds')
+        .groupBy('label');
+      const channelBreakdown = mergeNetBreakdown(channelBreakdownGross, channelRefunds);
 
-      const categoryBreakdownRaw = await db('sale_items as si')
+      const itemTotals = db('sale_items')
+        .select('sale_id')
+        .select(db.raw('SUM(quantity * price_at_sale) as item_subtotal'))
+        .groupBy('sale_id')
+        .as('item_totals');
+
+      const categoryBreakdownGross = await db('sale_items as si')
         .join('sales as s', 'si.sale_id', 's.id')
-        .join('products as p', 'si.product_id', 'p.id')
+        .leftJoin('products as p', 'si.product_id', 'p.id')
+        .leftJoin(itemTotals, 'si.sale_id', 'item_totals.sale_id')
         .modify(qb => shopId ? qb.where('s.shop_id', shopId) : qb)
         .where('s.order_status', 'completed')
         .whereBetween('s.created_at', [bounds.start, bounds.end])
         .select(db.raw("COALESCE(p.category, 'General') as label"))
-        .select(db.raw('SUM(si.quantity * si.price_at_sale) as sales'))
-        .groupBy('label').orderBy('sales', 'desc');
-      const categoryBreakdown = categoryBreakdownRaw.map(r => ({ ...r, sales: Number(r.sales || 0) }));
+        .select(db.raw('SUM(CASE WHEN COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * s.total / item_totals.item_subtotal ELSE 0 END) as sales'))
+        .groupBy('label');
+      const categoryRefunds = await db('return_items as ri')
+        .join('returns as r', 'ri.return_id', 'r.id')
+        .leftJoin('products as p', 'ri.product_id', 'p.id')
+        .modify(qb => shopId ? qb.where('r.shop_id', shopId) : qb)
+        .whereBetween('r.created_at', [bounds.start, bounds.end])
+        .select(db.raw("COALESCE(p.category, 'General') as label"))
+        .select(db.raw('SUM(ri.quantity * ri.refund_price) as refunds'))
+        .groupBy('label');
+      const categoryBreakdown = mergeNetBreakdown(categoryBreakdownGross, categoryRefunds);
 
       const hourQ = await db('sales')
         .modify(qb => shopId ? qb.where({ shop_id: shopId }) : qb)
@@ -306,7 +398,9 @@ class AnalyticsService {
           totalSales: adjustedRevenue, 
           totalOrders: parseInt(kpi.total_orders || 0), 
           avgOrderValue: parseFloat(kpi.avg_order_value || 0), 
-          activeCustomers: parseInt(customersCount ? customersCount.val : 0), 
+          activeCustomers: activeCustomerCountVal,
+          linkedCustomers: linkedCustomerCountVal,
+          walkInCustomers: walkInCustomerCountVal,
           totalCustomers: parseInt(totalCustomersInDb ? totalCustomersInDb.val : 0),
           totalInvoices: parseInt(kpi.total_orders || 0),
           conversionRate: kpi.total_orders > 0 ? 100 : 0
@@ -314,7 +408,7 @@ class AnalyticsService {
         growth: {
           sales: salesGrowth,
           orders: ordersGrowth,
-          customers: 0,
+          customers: customersGrowth,
           invoices: ordersGrowth
         },
         summary: {
@@ -335,6 +429,8 @@ class AnalyticsService {
         recentSales,
         totalProducts: parseInt(totalProductsCount ? totalProductsCount.val : 0),
         totalRevenue: adjustedRevenue,
+        totalPendingDues: Number(kpi.total_pending_dues || 0),
+        pendingDuesCount: parseInt(kpi.pending_dues_count || 0),
         totalCOGS: adjustedCOGS,
         netProfit: grossProfit,
         totalSales: parseInt(kpi.total_orders || 0),

@@ -1,7 +1,25 @@
 const express = require('express');
 const userService = require('../services/UserService');
-const { requireAdmin, requireSuperAdmin } = require('../middleware/auth');
+const db = require('../db/knex');
+const { requireAuth, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 const router = express.Router();
+
+// GET /api/users/assignable — minimal same-shop users for order assignment
+router.get('/assignable', requireAuth, async (req, res) => {
+    const shopId = req.session.user.shop_id;
+    if (!shopId) return res.json([]);
+
+    const users = await db('users')
+        .select('id', 'name', 'role', 'phone')
+        .where({ shop_id: shopId })
+        .whereNot('role', 'superadmin')
+        .where(function () {
+            this.whereNull('status').orWhere('status', 'active');
+        })
+        .orderBy('name', 'asc');
+
+    res.json(users);
+});
 
 // GET /api/users
 router.get('/', requireAdmin, async (req, res) => {

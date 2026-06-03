@@ -905,7 +905,7 @@ class SalesService {
     });
   }
 
-  async updateDetails(saleId, shopId, { customer_name, customer_phone, payment_method, amount_received, discount, tax_percentage }) {
+  async updateDetails(saleId, shopId, { customer_name, customer_phone, delivery_address, rider_id, payment_method, amount_received, discount, tax_percentage }) {
     return await db.transaction(async (trx) => {
       const sale = await trx('sales').where({ id: saleId, shop_id: shopId }).first();
       if (!sale) throw new Error("Sale not found");
@@ -916,6 +916,8 @@ class SalesService {
 
       if (customer_name !== undefined) updateData.customer_name = customer_name;
       if (customer_phone !== undefined) updateData.customer_phone = customer_phone;
+      if (delivery_address !== undefined) updateData.delivery_address = delivery_address;
+      if (rider_id !== undefined) updateData.rider_id = rider_id ? parseInt(rider_id, 10) : null;
       if (payment_method !== undefined) updateData.payment_method = payment_method;
       if (amount_received !== undefined) updateData.amount_received = amount_received;
 

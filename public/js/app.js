@@ -246,12 +246,6 @@ const AVAILABLE_PANELS = [
     desc: "Real-time order queue for the kitchen. Mark orders as ready."
   },
   {
-    id: "delivery",
-    icon: `<path d="M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3" fill="none" stroke="#3B82F6" stroke-width="2"/><rect x="9" y="11" width="14" height="10" rx="2" fill="#3B82F6"/><circle cx="12" cy="23" r="1" fill="#3B82F6"/><circle cx="20" cy="23" r="1" fill="#3B82F6"/>`,
-    label: "Delivery Orders",
-    desc: "Track and manage delivery orders, assign riders, update status."
-  },
-  {
     id: "raw-stock",
     icon: `<path d="M12 2L2 7l10 5 10-5-10-5z" fill="#F97316"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="#F97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
     label: "Raw Ingredients",
@@ -269,8 +263,8 @@ const MODULE_GROUPS = [
   },
   {
     title: "Sales",
-    desc: "Checkout, order history, customers, and delivery workflows.",
-    panels: ["pos", "sales-history", "customers", "delivery"],
+    desc: "Checkout, active orders, customer records, and sales history.",
+    panels: ["pos", "sales-history", "customers"],
   },
   {
     title: "Inventory",
@@ -430,7 +424,6 @@ function navigate(page) {
     hierarchy: "Master Platform Hierarchy",
     tables: "Table Management",
     kds: "Kitchen Display System",
-    delivery: "Delivery Orders",
     "raw-stock": "Raw Ingredients",
     recipes: "Manage Recipes",
     "pending-dues": "Pending Dues Ledger",
@@ -471,7 +464,6 @@ function navigate(page) {
     hierarchy: renderHierarchy,
     tables: renderTables,
     kds: renderKDS,
-    delivery: renderDeliveryOrders,
     "raw-stock": renderRawStock,
     recipes: renderRecipes,
     "pending-dues": () => renderSalesHistory(true),
@@ -1002,6 +994,44 @@ let _dashBrandId = "";
 let _dashFrom = "";
 let _dashTo = "";
 
+function getDashboardLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function setDefaultDashboardCustomDates() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 29);
+  _dashFrom = getDashboardLocalDateStr(start);
+  _dashTo = getDashboardLocalDateStr(end);
+}
+
+function handleDashboardPeriodChange() {
+  const periodEl = document.getElementById("dash-period-filter");
+  const period = periodEl?.value || "today";
+  if (period === "custom") {
+    if (!_dashFrom || !_dashTo) setDefaultDashboardCustomDates();
+    renderDashboard("custom", document.getElementById("dash-brand-filter")?.value, _dashFrom, _dashTo);
+    return;
+  }
+
+  _dashFrom = "";
+  _dashTo = "";
+  renderDashboard(period, document.getElementById("dash-brand-filter")?.value, "", "");
+}
+
+function applyDashboardCustomDates() {
+  const fromVal = document.getElementById("dash-from-filter")?.value || "";
+  const toVal = document.getElementById("dash-to-filter")?.value || "";
+  if (!fromVal || !toVal) return;
+
+  _dashPeriod = "custom";
+  renderDashboard("custom", document.getElementById("dash-brand-filter")?.value, fromVal, toVal);
+}
+
 async function renderDashboard(period, brandId, from, to) {
   if (period !== undefined) _dashPeriod = period;
   if (brandId !== undefined) _dashBrandId = brandId;
@@ -1010,7 +1040,8 @@ async function renderDashboard(period, brandId, from, to) {
 
   // Build query string
   const qs = new URLSearchParams();
-  if (_dashFrom || _dashTo) {
+  if (_dashPeriod === "custom" && (_dashFrom || _dashTo)) {
+    qs.set("period", "custom");
     if (_dashFrom) qs.set("from", _dashFrom);
     if (_dashTo) qs.set("to", _dashTo);
   } else if (_dashPeriod && _dashPeriod !== "all") {
@@ -1032,21 +1063,23 @@ async function renderDashboard(period, brandId, from, to) {
     { val: "2m", label: "Last 2 Months" },
     { val: "6m", label: "Last 6 Months" },
     { val: "1y", label: "Last Year" },
+    { val: "custom", label: "Custom Range" },
   ];
 
   const periodSelect = `
-    <select id="dash-period-filter" onchange="renderDashboard(this.value, document.getElementById('dash-brand-filter')?.value)"
-      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">
+    <select id="dash-period-filter" onchange="handleDashboardPeriodChange()"
+      class="bg-transparent text-xs font-bold text-indigo-600 dark:text-indigo-400 outline-none cursor-pointer">
       ${PERIOD_OPTS.map((o) => `<option value="${o.val}" ${_dashPeriod === o.val ? "selected" : ""}>${o.label}</option>`).join("")}
     </select>`;
 
-  const fromInput = `
-    <input type="date" id="dash-from-filter" value="${_dashFrom || ""}" onchange="renderDashboard(undefined, undefined, this.value, undefined)"
-      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-2 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">`;
-
-  const toInput = `
-    <input type="date" id="dash-to-filter" value="${_dashTo || ""}" onchange="renderDashboard(undefined, undefined, undefined, this.value)"
-      class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-2 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">`;
+  const customDateInputs = `
+    <div id="dash-custom-dates" class="${_dashPeriod === "custom" ? "flex" : "hidden"} items-center gap-2 bg-slate-50 dark:bg-slate-800/40 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800">
+      <input type="date" id="dash-from-filter" value="${_dashFrom || ""}" onchange="applyDashboardCustomDates()"
+        class="bg-transparent text-[11px] font-bold text-slate-700 dark:text-slate-200 outline-none px-2 py-1 max-w-[120px] cursor-pointer">
+      <span class="text-slate-400 text-xs">to</span>
+      <input type="date" id="dash-to-filter" value="${_dashTo || ""}" onchange="applyDashboardCustomDates()"
+        class="bg-transparent text-[11px] font-bold text-slate-700 dark:text-slate-200 outline-none px-2 py-1 max-w-[120px] cursor-pointer">
+    </div>`;
 
   const brandSelect =
     brands.length > 1
@@ -1062,8 +1095,7 @@ async function renderDashboard(period, brandId, from, to) {
   const isFiltered =
     _dashPeriod !== "all" ||
     (_dashBrandId !== "" && _dashBrandId !== null) ||
-    _dashFrom !== "" ||
-    _dashTo !== "";
+    (_dashPeriod === "custom" && (_dashFrom !== "" || _dashTo !== ""));
 
   $c("page-content").innerHTML = `
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -1082,17 +1114,10 @@ async function renderDashboard(period, brandId, from, to) {
         ${isFiltered ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800">ACTIVE</span>' : ""}
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Time Period</span>
+        ${customDateInputs}
+        <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/40 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800">
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Period:</span>
           ${periodSelect}
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">From</span>
-          ${fromInput}
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">To</span>
-          ${toInput}
         </div>
         ${brandSelect
       ? `<div class="flex items-center gap-2">
@@ -1106,12 +1131,13 @@ async function renderDashboard(period, brandId, from, to) {
     </div>
 
     <!-- Metric Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-5 mb-8">
-      ${statCard("Total Revenue", "Rs. " + Number(data.totalRevenue).toLocaleString(), `${data.totalSales} transaction${data.totalSales !== 1 ? "s" : ""}`, "blue")}
-      ${statCard("Cost of Goods Sold", "Rs. " + Number(data.totalCOGS).toLocaleString(), "Sum of buying prices", "purple")}
-      ${statCard("Gross Profit", "Rs. " + Number(data.netProfit).toLocaleString(), "Revenue − COGS", "emerald")}
-      ${statCard("Damage Value", "Rs. " + Number(data.damageTotal || 0).toLocaleString(), "Inventory & Returns", "rose")}
-      ${statCard("Products", data.totalProducts, "in catalog", "amber")}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-5 mb-8">
+      ${statCard("Total Revenue", "Rs. " + Number(data.totalRevenue).toLocaleString(), `${data.totalSales} transaction${data.totalSales !== 1 ? "s" : ""}`, "blue", "Completed orders only. Revenue = bill subtotal - discount + tax - refunds. Includes both received money and pending dues.")}
+      ${statCard("Pending Dues", "Rs. " + Number(data.totalPendingDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), `${data.pendingDuesCount || 0} bill${Number(data.pendingDuesCount || 0) !== 1 ? "s" : ""} pending`, "amber", "Completed bills where final total minus amount received is still greater than zero. Shows only the unpaid balance.")}
+      ${statCard("Cost of Goods Sold", "Rs. " + Number(data.totalCOGS).toLocaleString(), "Sum of buying prices", "purple", "Buying cost of sold items from completed orders, reduced by the buying cost of returned items.")}
+      ${statCard("Gross Profit", "Rs. " + Number(data.netProfit).toLocaleString(), "Revenue − COGS", "emerald", "Gross Profit = revenue - COGS. Revenue = bill subtotal - discount + tax - refunds.")}
+      ${statCard("Damage Value", "Rs. " + Number(data.damageTotal || 0).toLocaleString(), "Inventory & Returns", "rose", "Current product damage/loss value tracked in inventory. This is separate from normal sales COGS.")}
+      ${statCard("Products", data.totalProducts, "in catalog", "amber", "Count of active catalog products for this shop, excluding deleted products.")}
     </div>
 
     <!-- Tables -->
@@ -1121,6 +1147,7 @@ async function renderDashboard(period, brandId, from, to) {
         <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
           <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
           <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Top Products by Sales</h3>
+          ${statInfoIcon("Ranked by sold quantity after returns. Product revenue is allocated from bill subtotal - discount + tax, then product refunds are subtracted.")}
         </div>
         <div class="p-4">
           ${data.topProducts.length
@@ -1156,6 +1183,7 @@ async function renderDashboard(period, brandId, from, to) {
         <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
           <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
           <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Recent Sales</h3>
+          ${statInfoIcon("Latest sales records for this shop. Amount shown is each sale's bill total: bill subtotal - discount + tax.")}
         </div>
         <div class="p-4">
           ${data.recentSales.length
@@ -1399,6 +1427,40 @@ async function submitBrandExpensePayment(brandId, month) {
 }
 
 // ─── Products ────────────────────────────────────────────────────────
+const INVENTORY_STOCK_FILTER_LABELS = {
+  all: "product(s)",
+  low: "low stock product(s)",
+  out: "out of stock product(s)",
+};
+
+function inventoryNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function inventoryIsRecipeProduct(product) {
+  return Array.isArray(product.ingredients) && product.ingredients.length > 0;
+}
+
+function getInventoryStockStatus(product) {
+  if (inventoryIsRecipeProduct(product)) return "recipe";
+  const stock = inventoryNumber(product.stock);
+  const minStock = inventoryNumber(product.min_stock_level);
+  if (stock <= 0) return "out";
+  if (stock <= minStock) return "low";
+  return "ok";
+}
+
+function inventoryMatchesStockFilter(status, filter) {
+  if (filter === "low") return status === "low" || status === "out";
+  if (filter === "out") return status === "out";
+  return true;
+}
+
+function inventoryStockFilterLabel(filter) {
+  return INVENTORY_STOCK_FILTER_LABELS[filter] || INVENTORY_STOCK_FILTER_LABELS.all;
+}
+
 async function renderProducts(onlyLowStock = false) {
   const [products, brands] = await Promise.all([
     api("/api/products"),
@@ -1410,14 +1472,11 @@ async function renderProducts(onlyLowStock = false) {
   const mainProducts = products.filter((p) => p.is_component !== 1);
   updateLowStockBadge(mainProducts);
 
-  const displayList = onlyLowStock
-    ? mainProducts.filter((p) => p.stock <= p.min_stock_level)
-    : mainProducts;
-  const listTitle = onlyLowStock ? "low stock product(s)" : "product(s)";
+  const selectedStockFilter = onlyLowStock ? "low" : "all";
 
   $c("page-content").innerHTML = `
-    <div class="flex items-center gap-4 mb-8">
-      <div class="flex-1 relative group">
+    <div class="flex flex-col xl:flex-row xl:items-center gap-4 mb-8">
+      <div class="flex-1 relative group w-full">
         <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         </div>
@@ -1426,7 +1485,19 @@ async function renderProducts(onlyLowStock = false) {
                class="w-full pl-11 pr-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm" />
       </div>
 
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="relative shrink-0 w-full sm:w-[180px]">
+        <label for="inventory-stock-filter" class="sr-only">Stock filter</label>
+        <select id="inventory-stock-filter" onchange="filterInventory()" class="appearance-none w-full pl-4 pr-10 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm">
+          <option value="all" ${selectedStockFilter === "all" ? "selected" : ""}>All Stock</option>
+          <option value="low" ${selectedStockFilter === "low" ? "selected" : ""}>Low Stock</option>
+          <option value="out" ${selectedStockFilter === "out" ? "selected" : ""}>Out of Stock</option>
+        </select>
+        <div class="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 shrink-0">
         <button onclick="openAddCategoryPopup('product')" class="px-5 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
             Add Category
@@ -1439,8 +1510,8 @@ async function renderProducts(onlyLowStock = false) {
     </div>
 
     <div class="flex items-center gap-3 mb-4 px-2">
-      <p class="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]"><span id="product-count">${displayList.length}</span> ${listTitle}</p>
-      ${onlyLowStock ? `<button onclick="navigate('products')" class="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 transition-colors uppercase tracking-widest">Clear Filter</button>` : ""}
+      <p class="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]"><span id="product-count">${mainProducts.length}</span> <span id="product-count-label">${inventoryStockFilterLabel(selectedStockFilter)}</span></p>
+      <button id="inventory-clear-filter" onclick="resetInventoryFilters()" class="hidden text-[10px] font-bold text-indigo-500 hover:text-indigo-600 transition-colors uppercase tracking-widest">Clear Filter</button>
     </div>
     <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
       <table class="w-full text-sm" id="inventory-table">
@@ -1455,11 +1526,11 @@ async function renderProducts(onlyLowStock = false) {
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase text-right">Actions</th>
         </tr></thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800" id="inventory-table-body">
-          ${displayList.length
-      ? displayList
+          ${mainProducts.length
+      ? mainProducts
         .map(
           (p) => `
-            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group inventory-row">
+            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group inventory-row" data-stock-status="${getInventoryStockStatus(p)}">
               <td class="px-5 py-4 text-slate-500 dark:text-slate-400 font-mono text-xs">${p.sku}</td>
               <td class="px-5 py-4">
                 <div class="font-bold text-slate-800 dark:text-slate-200 product-name">${p.name}</div>
@@ -1495,7 +1566,7 @@ async function renderProducts(onlyLowStock = false) {
                         🍳 Recipe-Based
                        </span>`
               : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${p.stock > p.min_stock_level ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300" : p.stock > 0 ? "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300" : "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"}">
-                        ${p.stock} Full Kits
+                        ${p.stock}${p.components && p.components.length > 0 ? " Full Kits" : ""}
                        </span>`
             }
                   ${(() => {
@@ -1534,19 +1605,26 @@ async function renderProducts(onlyLowStock = false) {
       </table>
     </div>`;
   window._productBrands = brands;
+  filterInventory();
 }
 
 
 function filterInventory() {
-  const q = document.getElementById("inventory-search").value.toLowerCase().trim();
+  const searchEl = document.getElementById("inventory-search");
+  const stockFilterEl = document.getElementById("inventory-stock-filter");
+  const q = searchEl ? searchEl.value.toLowerCase().trim() : "";
+  const stockFilter = stockFilterEl ? stockFilterEl.value : "all";
   const rows = document.querySelectorAll(".inventory-row");
   let visibleCount = 0;
 
   rows.forEach(row => {
     const name = row.querySelector(".product-name").textContent.toLowerCase();
     const cat = row.querySelector(".product-category").textContent.toLowerCase();
+    const status = row.dataset.stockStatus || "ok";
+    const matchesText = name.includes(q) || cat.includes(q);
+    const matchesStock = inventoryMatchesStockFilter(status, stockFilter);
 
-    if (name.includes(q) || cat.includes(q)) {
+    if (matchesText && matchesStock) {
       row.classList.remove("hidden");
       visibleCount++;
     } else {
@@ -1556,6 +1634,22 @@ function filterInventory() {
 
   const countEl = document.getElementById("product-count");
   if (countEl) countEl.textContent = visibleCount;
+  const countLabelEl = document.getElementById("product-count-label");
+  if (countLabelEl) countLabelEl.textContent = inventoryStockFilterLabel(stockFilter);
+  const clearFilterBtn = document.getElementById("inventory-clear-filter");
+  if (clearFilterBtn) clearFilterBtn.classList.toggle("hidden", !q && stockFilter === "all");
+}
+
+function resetInventoryFilters() {
+  if (_currentPage === "products-low-stock") {
+    navigate("products");
+    return;
+  }
+  const searchEl = document.getElementById("inventory-search");
+  const stockFilterEl = document.getElementById("inventory-stock-filter");
+  if (searchEl) searchEl.value = "";
+  if (stockFilterEl) stockFilterEl.value = "all";
+  filterInventory();
 }
 
 
@@ -2867,6 +2961,38 @@ async function updateAndPrintBill(id) {
   }
 }
 
+function escapeOrderValue(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderOrderVariants(variantsJson) {
+  if (!variantsJson) return "";
+
+  try {
+    const parsed = JSON.parse(variantsJson);
+    const values = Array.isArray(parsed) ? parsed : Object.values(parsed || {});
+    const text = values
+      .map((variant) => {
+        if (variant && typeof variant === "object") {
+          return variant.name || variant.label || variant.value || "";
+        }
+        return variant;
+      })
+      .filter(Boolean)
+      .map(escapeOrderValue)
+      .join(", ");
+
+    return text ? `<div class="text-[10px] text-slate-400">${text}</div>` : "";
+  } catch (e) {
+    return "";
+  }
+}
+
 async function renderPOSOrders() {
   const tbody = $c('pos-orders-table-body');
   if (!tbody) return;
@@ -2899,12 +3025,23 @@ async function renderPOSOrders() {
     tbody.innerHTML = filteredOrders.map(s => {
       const date = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const typeLabel = s.order_type === 'dine_in' ? '🍽️ Dine-in' : s.order_type === 'takeaway' ? '🛍️ Takeaway' : '🚚 Delivery';
-      const detail = s.order_type === 'dine_in' ? `Table: ${s.table_number || 'N/A'}` : s.customer_name || 'Walk-in';
+      const detail = s.order_type === 'dine_in'
+        ? `Table: ${s.table_number || 'N/A'}`
+        : s.order_type === 'delivery'
+          ? `
+            <div>${escapeOrderValue(s.customer_name || 'Walk-in')}</div>
+            <div class="text-[10px] font-bold text-slate-400 mt-0.5">${escapeOrderValue(s.customer_phone || 'No phone')}</div>
+            ${s.delivery_address ? `<div class="text-[10px] font-medium text-slate-400 truncate max-w-[180px]" title="${escapeOrderValue(s.delivery_address)}">${escapeOrderValue(s.delivery_address)}</div>` : ""}
+          `
+          : escapeOrderValue(s.customer_name || 'Walk-in');
 
       let statusColor = 'bg-slate-100 text-slate-600';
       if (s.order_status === 'pending') statusColor = 'bg-amber-100 text-amber-600';
       if (s.order_status === 'preparing') statusColor = 'bg-blue-100 text-blue-600';
       if (s.order_status === 'ready') statusColor = 'bg-emerald-100 text-emerald-600';
+      const primaryAction = s.order_type === 'delivery' && s.order_status !== 'ready'
+        ? `<button onclick="viewOrderItems(${s.id})" class="px-3 py-1.5 rounded-lg bg-blue-500 text-white font-bold text-[10px] uppercase hover:bg-blue-600 transition-all shadow-sm">Out</button>`
+        : `<button onclick="showOrderCompleteModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">${s.order_type === 'delivery' ? 'Delivered' : 'Complete'}</button>`;
 
       return `
         <tr class="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-all">
@@ -2931,14 +3068,12 @@ async function renderPOSOrders() {
               <button onclick="editOrder(${s.id})" class="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase hover:bg-indigo-100 transition-all">
                 Edit
               </button>
-              <button onclick="showReceiptPrintMenu(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
-                Print
-              </button>
-              <button onclick="showOrderCompleteModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">
-                Complete
-              </button>
-            </div>
-          </td>
+	              <button onclick="showReceiptPrintMenu(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
+	                Print
+	              </button>
+	              ${primaryAction}
+	            </div>
+	          </td>
         </tr>
       `;
     }).join('');
@@ -2949,8 +3084,28 @@ async function renderPOSOrders() {
 
 async function viewOrderItems(id) {
   try {
-    const data = await api(`/api/sales/${id}/bill`);
+    const [data, assignableUsers] = await Promise.all([
+      api(`/api/sales/${id}/bill`),
+      api('/api/users/assignable').catch(() => [])
+    ]);
     if (!data || !data.sale) return toast("Order not found", "error");
+    const sale = data.sale;
+    const isDelivery = sale.order_type === 'delivery';
+    const canEditDelivery = isDelivery && !['ready', 'completed'].includes(sale.order_status);
+    const serviceLabel = sale.order_type === 'dine_in' ? 'Dine-in' : sale.order_type === 'takeaway' ? 'Takeaway' : 'Delivery';
+    const currentRiderId = Number(sale.rider_id || 0);
+    const riderList = Array.isArray(assignableUsers) ? [...assignableUsers] : [];
+    if (currentRiderId && !riderList.some(u => Number(u.id) === currentRiderId)) {
+      riderList.push({
+        id: sale.rider_id,
+        name: sale.rider_name || `Rider #${sale.rider_id}`,
+        role: 'assigned'
+      });
+    }
+    const riderOptions = [
+      `<option value="">No rider assigned</option>`,
+      ...riderList.map(u => `<option value="${Number(u.id)}" ${currentRiderId === Number(u.id) ? 'selected' : ''}>${escapeOrderValue(u.name)}${u.role ? ` (${escapeOrderValue(u.role)})` : ''}</option>`)
+    ].join('');
 
     const itemsHtml = data.items.map(item => `
         <div class="flex items-center justify-between py-3 border-b border-slate-50 dark:border-slate-800/50 last:border-0">
@@ -2959,9 +3114,9 @@ async function viewOrderItems(id) {
               ${item.quantity}x
             </div>
             <div>
-              <div class="text-sm font-bold text-slate-800 dark:text-slate-200">${item.product_name}</div>
-              ${item.variants_json ? `<div class="text-[10px] text-slate-400">${JSON.parse(item.variants_json).map(v => v.name || v).join(', ')}</div>` : ''}
-              ${item.special_instructions ? `<div class="text-[10px] italic text-amber-500">${item.special_instructions}</div>` : ''}
+              <div class="text-sm font-bold text-slate-800 dark:text-slate-200">${escapeOrderValue(item.product_name)}</div>
+              ${renderOrderVariants(item.variants_json)}
+              ${item.special_instructions ? `<div class="text-[10px] italic text-amber-500">${escapeOrderValue(item.special_instructions)}</div>` : ''}
             </div>
           </div>
           <div class="text-sm font-black text-slate-700 dark:text-slate-300">
@@ -2970,8 +3125,55 @@ async function viewOrderItems(id) {
         </div>
     `).join('');
 
-    openModal(`Order #${id} - Items`, `
+    const orderInfoHtml = isDelivery ? `
+      <div class="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/40 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h4 class="text-xs font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">Delivery Info</h4>
+            <p class="text-[10px] font-bold text-slate-500 mt-0.5">Edit before marking out for delivery</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-[10px] font-black uppercase text-slate-500 border border-blue-100 dark:border-blue-900/40">${escapeOrderValue(sale.order_status || 'pending')}</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer Name</label>
+            <input id="order-info-name" value="${escapeOrderValue(sale.customer_name || '')}" ${canEditDelivery ? '' : 'disabled'} class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40 text-sm font-bold text-slate-900 dark:text-white disabled:opacity-60 focus:outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Phone Number</label>
+            <input id="order-info-phone" value="${escapeOrderValue(sale.customer_phone || '')}" ${canEditDelivery ? '' : 'disabled'} class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40 text-sm font-bold text-slate-900 dark:text-white disabled:opacity-60 focus:outline-none focus:border-blue-500" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Delivery Address</label>
+            <input id="order-info-address" value="${escapeOrderValue(sale.delivery_address || '')}" ${canEditDelivery ? '' : 'disabled'} class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40 text-sm font-bold text-slate-900 dark:text-white disabled:opacity-60 focus:outline-none focus:border-blue-500" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Rider</label>
+            ${canEditDelivery
+              ? `<select id="order-info-rider" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500">${riderOptions}</select>`
+              : `<div class="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40 text-sm font-bold text-slate-600 dark:text-slate-300">${escapeOrderValue(sale.rider_name || 'No rider assigned')}</div>`
+            }
+          </div>
+        </div>
+        ${canEditDelivery ? `
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            <button onclick="saveDeliveryOrderInfo(${id})" class="py-2.5 rounded-xl bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-black text-xs uppercase tracking-widest hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all">Save Info</button>
+            <button onclick="saveDeliveryOrderInfo(${id}, 'ready')" class="py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all">Mark Out for Delivery</button>
+          </div>
+        ` : `<p class="text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/40 rounded-xl px-3 py-2">Delivery info is locked after the order is out for delivery.</p>`}
+      </div>
+    ` : `
+      <div class="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-3 text-xs">
+        <div><span class="block text-slate-400 font-black uppercase tracking-widest text-[9px]">Service</span><span class="font-bold text-slate-700 dark:text-slate-200">${serviceLabel}</span></div>
+        <div><span class="block text-slate-400 font-black uppercase tracking-widest text-[9px]">Status</span><span class="font-bold text-slate-700 dark:text-slate-200">${escapeOrderValue(sale.order_status || 'pending')}</span></div>
+        <div><span class="block text-slate-400 font-black uppercase tracking-widest text-[9px]">Customer</span><span class="font-bold text-slate-700 dark:text-slate-200">${escapeOrderValue(sale.customer_name || 'Walk-in')}</span></div>
+        <div><span class="block text-slate-400 font-black uppercase tracking-widest text-[9px]">Phone</span><span class="font-bold text-slate-700 dark:text-slate-200">${escapeOrderValue(sale.customer_phone || 'No phone')}</span></div>
+      </div>
+    `;
+
+    openModal(`Order #${id} - Details`, `
       <div class="space-y-4">
+        ${orderInfoHtml}
         <div class="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 max-h-[60vh] overflow-y-auto">
           ${itemsHtml}
         </div>
@@ -2984,9 +3186,38 @@ async function viewOrderItems(id) {
           <button onclick="closeModal(); editOrder(${id})" class="py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20">Edit Order</button>
         </div>
       </div>
-    `);
+    `, "max-w-2xl");
   } catch (e) {
     toast("Failed to load items: " + e.message, "error");
+  }
+}
+
+async function saveDeliveryOrderInfo(id, nextStatus = null) {
+  const payload = {
+    customer_name: $c('order-info-name')?.value.trim() || '',
+    customer_phone: $c('order-info-phone')?.value.trim() || '',
+    delivery_address: $c('order-info-address')?.value.trim() || '',
+    rider_id: $c('order-info-rider')?.value ? parseInt($c('order-info-rider').value, 10) : null,
+  };
+
+  if (nextStatus === 'ready') {
+    if (!payload.customer_name) return toast("Customer name is required", "error");
+    if (!payload.customer_phone) return toast("Phone number is required", "error");
+    if (!payload.delivery_address) return toast("Delivery address is required", "error");
+  }
+
+  try {
+    await api(`/api/sales/${id}/details`, 'PATCH', payload);
+    if (nextStatus) {
+      await api(`/api/kds/${id}/status`, 'PATCH', { status: nextStatus });
+      toast("Order marked out for delivery");
+    } else {
+      toast("Delivery info updated");
+    }
+    closeModal();
+    renderPOSOrders();
+  } catch (e) {
+    toast(e.message, 'error');
   }
 }
 
@@ -3330,7 +3561,7 @@ function renderPOSProducts(products) {
         </div>
 
         <!-- Description (Optional Fallback) -->
-        ${p.description ? `<p class="text-xs font-medium text-slate-500 dark:text-slate-400 line-clamp-2 leading-snug mb-1.5">\${p.description}</p>` : ''}
+        ${p.description ? `<p class="text-xs font-medium text-slate-500 dark:text-slate-400 line-clamp-2 leading-snug mb-1.5">${p.description}</p>` : ''}
         
         <div>
           <!-- Divider -->
@@ -5439,8 +5670,8 @@ async function renderExpenses() {
            </div>
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-100 dark:border-gray-800">
-          ${statCard("Total Month Expenses", "Rs. " + Number(sharesRes.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), "Operating costs", "rose")}
-          ${statCard("Split Per Brand", "Rs. " + (sharesRes.brandCount > 0 ? Number(sharesRes.totalExpenses / sharesRes.brandCount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"), `${sharesRes.brandCount} brands total`, "blue")}
+          ${statCard("Total Month Expenses", "Rs. " + Number(sharesRes.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), "Operating costs", "rose", "All expense records dated inside the selected month, before brand payment settlement.")}
+          ${statCard("Split Per Brand", "Rs. " + (sharesRes.brandCount > 0 ? Number(sharesRes.totalExpenses / sharesRes.brandCount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"), `${sharesRes.brandCount} brands total`, "blue", "Selected month's total expenses divided evenly by the number of brands included in the split.")}
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
