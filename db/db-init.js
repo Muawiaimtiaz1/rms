@@ -80,7 +80,8 @@ async function initPostgres() {
     // Check for bill-printer routing columns in shops
     const shopPrinterColumns = [
       ["customer_bill_printer", "TEXT"],
-      ["unpaid_bill_printer", "TEXT"]
+      ["unpaid_bill_printer", "TEXT"],
+      ["logo_data", "TEXT"]
     ];
     for (const [columnName, columnType] of shopPrinterColumns) {
       const columnCheck = await query(`
@@ -219,6 +220,219 @@ async function initPostgres() {
         CREATE INDEX IF NOT EXISTS idx_printers_shop_id ON printers(shop_id);
       `);
       console.log("✅ printers table added.");
+    }
+    
+    // Check for shifts table
+    const shiftsTableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'shifts'
+      );
+    `);
+    if (!shiftsTableCheck.rows[0].exists) {
+      console.log("🔧 Migrating database: Adding shifts table...");
+      await query(`
+        CREATE TABLE IF NOT EXISTS shifts (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id),
+          start_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          end_time TIMESTAMPTZ,
+          opening_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+          closing_balance DOUBLE PRECISION,
+          expected_balance DOUBLE PRECISION,
+          net_cash_sales DOUBLE PRECISION DEFAULT 0,
+          net_card_sales DOUBLE PRECISION DEFAULT 0,
+          total_expenses DOUBLE PRECISION DEFAULT 0,
+          cash_drops DOUBLE PRECISION DEFAULT 0,
+          cash_handovers DOUBLE PRECISION DEFAULT 0,
+          status TEXT DEFAULT 'open',
+          note TEXT,
+          closed_by_user_id INTEGER REFERENCES users(id),
+          terminal_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_shifts_shop_id ON shifts(shop_id);
+      `);
+      console.log("✅ shifts table added.");
+    }
+
+    // Check for cash_handovers table
+    const handoversTableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'cash_handovers'
+      );
+    `);
+    if (!handoversTableCheck.rows[0].exists) {
+      console.log("🔧 Migrating database: Adding cash_handovers table...");
+      await query(`
+        CREATE TABLE IF NOT EXISTS cash_handovers (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+          sender_id INTEGER NOT NULL REFERENCES users(id),
+          receiver_id INTEGER NOT NULL REFERENCES users(id),
+          amount DOUBLE PRECISION NOT NULL,
+          status TEXT DEFAULT 'pending',
+          note TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          verified_at TIMESTAMPTZ
+        );
+      `);
+      console.log("✅ cash_handovers table added.");
+    }
+
+    // Check for cash_drops table
+    const cashDropsTableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'cash_drops'
+      );
+    `);
+    if (!cashDropsTableCheck.rows[0].exists) {
+      console.log("🔧 Migrating database: Adding cash_drops table...");
+      await query(`
+        CREATE TABLE IF NOT EXISTS cash_drops (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+          requested_by_user_id INTEGER NOT NULL REFERENCES users(id),
+          amount DOUBLE PRECISION NOT NULL,
+          status TEXT DEFAULT 'pending',
+          note TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          verified_by_user_id INTEGER REFERENCES users(id),
+          verified_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_cash_drops_shift_id ON cash_drops(shift_id);
+        CREATE INDEX IF NOT EXISTS idx_cash_drops_status ON cash_drops(status);
+      `);
+      console.log("✅ cash_drops table added.");
+    }
+
+    await query(`
+      INSERT INTO cash_drops (shop_id, shift_id, requested_by_user_id, amount, status, note, created_at)
+      SELECT s.shop_id, s.id, s.user_id, s.cash_drops, 'pending',
+             'Imported from previous cash drop total before verification was enabled.',
+             NOW()
+      FROM shifts s
+      WHERE s.status = 'open'
+        AND COALESCE(s.cash_drops, 0) > 0
+        AND NOT EXISTS (SELECT 1 FROM cash_drops cd WHERE cd.shift_id = s.id);
+
+      UPDATE shifts s
+      SET cash_drops = 0,
+          note = COALESCE(s.note, '') || E'\n[Legacy cash drops moved to pending verification]'
+      WHERE s.status = 'open'
+        AND COALESCE(s.cash_drops, 0) > 0
+        AND EXISTS (
+          SELECT 1 FROM cash_drops cd
+          WHERE cd.shift_id = s.id
+            AND cd.status = 'pending'
+            AND cd.note = 'Imported from previous cash drop total before verification was enabled.'
+        );
+
+      INSERT INTO cash_drops (shop_id, shift_id, requested_by_user_id, amount, status, note, created_at, verified_by_user_id, verified_at)
+      SELECT s.shop_id, s.id, s.user_id, s.cash_drops, 'verified',
+             'Imported from previous closed-shift cash drop total.',
+             COALESCE(s.end_time, s.start_time, NOW()),
+             s.closed_by_user_id,
+             COALESCE(s.end_time, NOW())
+      FROM shifts s
+      WHERE s.status = 'closed'
+        AND COALESCE(s.cash_drops, 0) > 0
+        AND NOT EXISTS (SELECT 1 FROM cash_drops cd WHERE cd.shift_id = s.id);
+    `);
+
+    // Add shift_id to various tables
+    const tablesToUpdate = ['sales', 'expenses', 'returns', 'customer_ledger'];
+    for (const tableName of tablesToUpdate) {
+      const columnCheck = await query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = $1 AND column_name = 'shift_id'
+      `, [tableName]);
+      if (columnCheck.rows.length === 0) {
+        console.log(`🔧 Migrating ${tableName} table: Adding shift_id column...`);
+        await query(`ALTER TABLE ${tableName} ADD COLUMN shift_id INTEGER`);
+        console.log(`✅ ${tableName}.shift_id added.`);
+      }
+    }
+
+    // Add can_manage_register to users
+    const userRegCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'users' AND column_name = 'can_manage_register'
+    `);
+    if (userRegCheck.rows.length === 0) {
+      console.log("🔧 Migrating users table: Adding can_manage_register column...");
+      await query("ALTER TABLE users ADD COLUMN can_manage_register BOOLEAN DEFAULT FALSE");
+      console.log("✅ users.can_manage_register added.");
+    }
+    
+    // Check for activity_logs table
+    const activityLogsTableCheck = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'activity_logs'
+      );
+    `);
+    if (!activityLogsTableCheck.rows[0].exists) {
+      console.log("🔧 Migrating database: Adding activity_logs table...");
+      await query(`
+        CREATE TABLE IF NOT EXISTS activity_logs (
+          id SERIAL PRIMARY KEY,
+          shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          action TEXT NOT NULL,
+          details TEXT,
+          reference_id INTEGER,
+          reference_type TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_activity_logs_shop_id ON activity_logs(shop_id);
+        CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_activity_logs_reference ON activity_logs(reference_id, reference_type);
+      `);
+      console.log("✅ activity_logs table added.");
+    } else {
+      // Check for user_id in activity_logs
+      const activityLogUserCheck = await query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'activity_logs' AND column_name = 'user_id'
+      `);
+      if (activityLogUserCheck.rows.length === 0) {
+        console.log("🔧 Migrating activity_logs table: Adding user_id column...");
+        await query("ALTER TABLE activity_logs ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL");
+        await query("CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id)");
+        console.log("✅ activity_logs.user_id added.");
+      }
+      
+      const referenceIdCheck = await query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'activity_logs' AND column_name = 'reference_id'
+      `);
+      if (referenceIdCheck.rows.length === 0) {
+        console.log("🔧 Migrating activity_logs table: Adding reference columns...");
+        await query("ALTER TABLE activity_logs ADD COLUMN reference_id INTEGER");
+        await query("ALTER TABLE activity_logs ADD COLUMN reference_type TEXT");
+        await query("CREATE INDEX IF NOT EXISTS idx_activity_logs_reference ON activity_logs(reference_id, reference_type)");
+        console.log("✅ activity_logs reference columns added.");
+      }
+    }
+
+    // Check for shortage_reason in shifts
+    const shiftShortageCheck = await query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'shifts' AND column_name = 'shortage_reason'
+    `);
+    if (shiftShortageCheck.rows.length === 0) {
+      console.log("🔧 Migrating shifts table: Adding shortage_reason column...");
+      await query("ALTER TABLE shifts ADD COLUMN shortage_reason TEXT");
+      console.log("✅ shifts.shortage_reason added.");
     }
 
   } catch (err) {

@@ -136,6 +136,8 @@ app.use("/api/tables", require("./routes/tables"));
 app.use("/api/kds", require("./routes/kds"));
 app.use("/api/print-jobs", require("./routes/print-jobs"));
 app.use("/api/printers", require("./routes/printers"));
+app.use("/api/shifts", require("./routes/shifts"));
+app.use("/api/activity-logs", require("./routes/activity-logs"));
 app.use("/print", require("./routes/print"));
 
 // Named page routes — MUST be before express.static to avoid index.html conflict

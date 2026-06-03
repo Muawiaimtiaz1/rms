@@ -2,6 +2,7 @@ const express = require("express");
 const { getSqlite, getPostgres, usePostgres } = require("../db/runtime");
 const { requireAuth } = require("../middleware/auth");
 const PDFDocument = require("pdfkit");
+const db = require("../db/knex");
 
 const router = express.Router();
 
@@ -414,6 +415,11 @@ router.post("/:id/payment", requireAuth, async (req, res) => {
     if (!customer) return res.status(404).json({ error: "Customer not found" });
     if (Number(customer.current_balance || 0) <= 0.01) return res.status(400).json({ error: "No outstanding balance to clear" });
 
+    const activeShift = await db("shifts")
+      .where({ shop_id: shopId, user_id: req.session.user.id, status: "open" })
+      .first();
+    if (!activeShift) return res.status(400).json({ error: "Open a register shift before recording customer payments." });
+
     const paymentAmount = Math.min(parseFloat(amount), Number(customer.current_balance || 0));
     const newBalance = parseFloat((Number(customer.current_balance || 0) - paymentAmount).toFixed(2));
 
@@ -422,18 +428,18 @@ router.post("/:id/payment", requireAuth, async (req, res) => {
       await pg.withTransaction(async (client) => {
         await client.query(`UPDATE customers SET current_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [newBalance, customerId]);
         await client.query(
-          `INSERT INTO customer_ledger (customer_id, shop_id, type, amount, balance_after, note, created_by)
-           VALUES ($1, $2, 'payment', $3, $4, $5, $6)`,
-          [customerId, shopId, paymentAmount, newBalance, note || "Payment received", req.session.user.id]
+          `INSERT INTO customer_ledger (customer_id, shop_id, type, amount, balance_after, note, created_by, shift_id)
+           VALUES ($1, $2, 'payment', $3, $4, $5, $6, $7)`,
+          [customerId, shopId, paymentAmount, newBalance, note || "Payment received", req.session.user.id, activeShift.id]
         );
       });
     } else {
       getSqlite().transaction(() => {
         getSqlite().prepare(`UPDATE customers SET current_balance = ?, updated_at = datetime('now') WHERE id = ?`).run(newBalance, customerId);
         getSqlite().prepare(
-          `INSERT INTO customer_ledger (customer_id, shop_id, type, amount, balance_after, note, created_by)
-           VALUES (?, ?, 'payment', ?, ?, ?, ?)`
-        ).run(customerId, shopId, paymentAmount, newBalance, note || "Payment received", req.session.user.id);
+          `INSERT INTO customer_ledger (customer_id, shop_id, type, amount, balance_after, note, created_by, shift_id)
+           VALUES (?, ?, 'payment', ?, ?, ?, ?, ?)`
+        ).run(customerId, shopId, paymentAmount, newBalance, note || "Payment received", req.session.user.id, activeShift.id);
       })();
     }
     res.json({ ok: true, payment_amount: paymentAmount, new_balance: newBalance });

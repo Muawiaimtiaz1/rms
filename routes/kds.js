@@ -14,7 +14,7 @@ router.get("/", requireAuth, async (req, res) => {
 // PATCH /api/kds/:id/status — Updates an order status
 router.patch("/:id/status", requireAuth, async (req, res) => {
   const shopId = req.session.user.shop_id;
-  await infraService.updateOrderStatus(req.params.id, req.body.status, shopId);
+  await infraService.updateOrderStatus(req.params.id, req.body.status, shopId, req.session.user.id);
   res.json({ success: true, status: req.body.status });
 });
 

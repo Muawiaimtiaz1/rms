@@ -174,6 +174,34 @@ if (!tableExists) {
     console.log("✅ activity_logs table added.");
   }
 
+  // Activity Logs: add user_id, reference_id, reference_type columns
+  const activityLogCols = db.prepare("PRAGMA table_info(activity_logs)").all();
+  if (!activityLogCols.some((col) => col.name === "user_id")) {
+    console.log("🔧 Updating database: Adding user_id to activity_logs...");
+    db.exec("ALTER TABLE activity_logs ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;");
+  }
+  if (!activityLogCols.some((col) => col.name === "reference_id")) {
+    console.log("🔧 Updating database: Adding reference_id to activity_logs...");
+    db.exec("ALTER TABLE activity_logs ADD COLUMN reference_id INTEGER;");
+  }
+  if (!activityLogCols.some((col) => col.name === "reference_type")) {
+    console.log("🔧 Updating database: Adding reference_type to activity_logs...");
+    db.exec("ALTER TABLE activity_logs ADD COLUMN reference_type TEXT;");
+  }
+
+  // Shops: add shortage_reason, logo_data columns
+  const shiftColsShortage = db.prepare("PRAGMA table_info(shifts)").all();
+  if (shiftColsShortage.length > 0 && !shiftColsShortage.some((col) => col.name === "shortage_reason")) {
+    console.log("🔧 Updating database: Adding shortage_reason to shifts...");
+    db.exec("ALTER TABLE shifts ADD COLUMN shortage_reason TEXT;");
+  }
+
+  const shopColsLogo = db.prepare("PRAGMA table_info(shops)").all();
+  if (shopColsLogo.length > 0 && !shopColsLogo.some((col) => col.name === "logo_data")) {
+    console.log("🔧 Updating database: Adding logo_data to shops...");
+    db.exec("ALTER TABLE shops ADD COLUMN logo_data TEXT;"); // Using TEXT to store Base64/Compressed string
+  }
+
   // Check for is_deleted in products (soft delete migration)
   const productCols = db.prepare("PRAGMA table_info(products)").all();
   const isDeletedExists = productCols.some((col) => col.name === "is_deleted");
@@ -919,6 +947,129 @@ if (!tableExists) {
   }
 }
 
+// Shift management tables and columns
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shifts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      start_time TEXT NOT NULL DEFAULT (datetime('now')),
+      end_time TEXT,
+      opening_balance REAL NOT NULL DEFAULT 0,
+      closing_balance REAL,
+      expected_balance REAL,
+      net_cash_sales REAL DEFAULT 0,
+      net_card_sales REAL DEFAULT 0,
+      total_expenses REAL DEFAULT 0,
+      cash_drops REAL DEFAULT 0,
+      cash_handovers REAL DEFAULT 0,
+      status TEXT DEFAULT 'open',
+      note TEXT,
+      closed_by_user_id INTEGER,
+      terminal_id TEXT,
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (closed_by_user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cash_handovers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop_id INTEGER NOT NULL,
+      shift_id INTEGER NOT NULL,
+      sender_id INTEGER NOT NULL,
+      receiver_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      status TEXT DEFAULT 'pending',
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      verified_at TEXT,
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+      FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users(id),
+      FOREIGN KEY (receiver_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cash_drops (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop_id INTEGER NOT NULL,
+      shift_id INTEGER NOT NULL,
+      requested_by_user_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      status TEXT DEFAULT 'pending',
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      verified_by_user_id INTEGER,
+      verified_at TEXT,
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+      FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+      FOREIGN KEY (requested_by_user_id) REFERENCES users(id),
+      FOREIGN KEY (verified_by_user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shifts_shop_id ON shifts(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_shifts_user_id ON shifts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
+    CREATE INDEX IF NOT EXISTS idx_cash_handovers_shift_id ON cash_handovers(shift_id);
+    CREATE INDEX IF NOT EXISTS idx_cash_drops_shift_id ON cash_drops(shift_id);
+    CREATE INDEX IF NOT EXISTS idx_cash_drops_status ON cash_drops(status);
+  `);
+
+  const ensureColumn = (table, column, definition) => {
+    const exists = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+      .get(table);
+    if (!exists) return;
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.some((col) => col.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+      console.log(`✅ ${table}.${column} column added.`);
+    }
+  };
+
+  ensureColumn("sales", "shift_id", "INTEGER");
+  ensureColumn("expenses", "shift_id", "INTEGER");
+  ensureColumn("returns", "shift_id", "INTEGER");
+  ensureColumn("customer_ledger", "shift_id", "INTEGER");
+  ensureColumn("users", "can_manage_register", "INTEGER DEFAULT 0");
+
+  db.exec(`
+    INSERT INTO cash_drops (shop_id, shift_id, requested_by_user_id, amount, status, note, created_at)
+    SELECT s.shop_id, s.id, s.user_id, s.cash_drops, 'pending',
+           'Imported from previous cash drop total before verification was enabled.',
+           datetime('now')
+    FROM shifts s
+    WHERE s.status = 'open'
+      AND COALESCE(s.cash_drops, 0) > 0
+      AND NOT EXISTS (SELECT 1 FROM cash_drops cd WHERE cd.shift_id = s.id);
+
+    UPDATE shifts
+    SET cash_drops = 0,
+        note = COALESCE(note, '') || char(10) || '[Legacy cash drops moved to pending verification]'
+    WHERE status = 'open'
+      AND COALESCE(cash_drops, 0) > 0
+      AND EXISTS (
+        SELECT 1 FROM cash_drops cd
+        WHERE cd.shift_id = shifts.id
+          AND cd.status = 'pending'
+          AND cd.note = 'Imported from previous cash drop total before verification was enabled.'
+      );
+
+    INSERT INTO cash_drops (shop_id, shift_id, requested_by_user_id, amount, status, note, created_at, verified_by_user_id, verified_at)
+    SELECT s.shop_id, s.id, s.user_id, s.cash_drops, 'verified',
+           'Imported from previous closed-shift cash drop total.',
+           COALESCE(s.end_time, s.start_time, datetime('now')),
+           s.closed_by_user_id,
+           COALESCE(s.end_time, datetime('now'))
+    FROM shifts s
+    WHERE s.status = 'closed'
+      AND COALESCE(s.cash_drops, 0) > 0
+      AND NOT EXISTS (SELECT 1 FROM cash_drops cd WHERE cd.shift_id = s.id);
+  `);
+} catch (e) {
+  console.error("⚠️ Failed to ensure shift management tables:", e.message);
+}
+
 // -----------------------------------------------------------------------------
 // PERFORMANCE MIGRATION: Ensure all necessary secondary indices exist.
 // Running CREATE INDEX IF NOT EXISTS is very fast if they already exist,
@@ -938,6 +1089,7 @@ try {
     CREATE INDEX IF NOT EXISTS idx_returns_shop_id ON returns(shop_id);
     CREATE INDEX IF NOT EXISTS idx_product_batches_shop_id ON product_batches(shop_id);
     CREATE INDEX IF NOT EXISTS idx_activity_logs_shop_id ON activity_logs(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
     
     -- Foreign Keys & Relationships
     CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);

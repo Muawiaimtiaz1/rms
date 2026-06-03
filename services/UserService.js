@@ -13,6 +13,7 @@ const userSchema = z.object({
   phone: z.string().nullable().optional(),
   printer_station: z.string().nullable().optional(),
   status: z.enum(['active', 'blocked']).default('active'),
+  can_manage_register: z.boolean().default(false).optional(),
 });
 
 class UserService {
@@ -20,7 +21,7 @@ class UserService {
     const isSuper = currentUser.role === 'superadmin';
     
     let query = db('users as u')
-      .select('u.id', 'u.name', 'u.email', 'u.phone', 'u.username', 'u.role', 'u.printer_station', 'u.status', 'u.shop_id', 'u.allowed_panels', 'u.created_at')
+      .select('u.id', 'u.name', 'u.email', 'u.phone', 'u.username', 'u.role', 'u.printer_station', 'u.status', 'u.shop_id', 'u.allowed_panels', 'u.can_manage_register', 'u.created_at')
       .orderBy('u.created_at', 'desc');
 
     if (isSuper) {
@@ -57,7 +58,8 @@ class UserService {
       role: data.role,
       status: data.status,
       allowed_panels: JSON.stringify(data.allowed_panels || []),
-      shop_id: targetShopId
+      shop_id: targetShopId,
+      can_manage_register: data.can_manage_register || false
     }).returning('id');
 
     return typeof idObj === 'object' ? idObj.id : idObj;
@@ -70,16 +72,18 @@ class UserService {
     if (currentUser.role !== 'superadmin') {
       if (userToEdit.shop_id !== currentUser.shop_id) throw new Error('Access denied');
       
-      // Shop admin can ONLY edit password
-      if (payload.password) {
-        await db('users').where({ id: userId }).update({
-          password_hash: bcrypt.hashSync(payload.password, 10),
-          updated_at: db.fn.now()
-        });
-        return;
+      // Update logic for Shop Admins
+      const updatable = {};
+      if (payload.password) updatable.password_hash = bcrypt.hashSync(payload.password, 10);
+      if (payload.hasOwnProperty('can_manage_register')) updatable.can_manage_register = !!payload.can_manage_register;
+      
+      if (Object.keys(updatable).length > 0) {
+        updatable.updated_at = db.fn.now();
+        await db('users').where({ id: userId }).update(updatable);
       } else {
-        throw new Error('You are only allowed to update passwords for users in your shop.');
+        throw new Error('No valid fields provided for update.');
       }
+      return;
     }
 
     // Superadmin logic
@@ -102,6 +106,7 @@ class UserService {
       shop_id: data.hasOwnProperty('shop_id') ? data.shop_id : userToEdit.shop_id,
       status: isSuper ? 'active' : (data.status || userToEdit.status),
       allowed_panels: JSON.stringify(data.allowed_panels || JSON.parse(userToEdit.allowed_panels || '[]')),
+      can_manage_register: data.hasOwnProperty('can_manage_register') ? data.can_manage_register : userToEdit.can_manage_register,
       updated_at: db.fn.now()
     };
 

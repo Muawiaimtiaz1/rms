@@ -26,6 +26,7 @@ class ExpenseService {
 
   async createExpense(payload, shopId, userId) {
     const data = expenseSchema.parse(payload);
+
     const [idObj] = await db('expenses').insert({
       user_id: userId,
       shop_id: shopId,
@@ -34,6 +35,7 @@ class ExpenseService {
       amount: data.amount,
       note: data.note || null,
       date: data.date || new Date().toISOString().slice(0, 10),
+      shift_id: null
     }).returning('id');
 
     return typeof idObj === 'object' ? idObj.id : idObj;

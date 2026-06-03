@@ -34,7 +34,8 @@ router.get('/me', async (req, res) => {
         shop_name: freshUser.shop_name,
         shop_type: freshUser.shop_type,
         name: freshUser.name,
-        role: freshUser.role
+        role: freshUser.role,
+        can_manage_register: freshUser.can_manage_register
     };
 
     // Statistical counts for dashboard

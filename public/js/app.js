@@ -159,7 +159,74 @@ let _posCheckoutCloseTimer = null;
 let _editingOrderId = null; // ID of the sale being edited in the POS
 let _tempEditCart = []; // Temporary cart for the edit modal
 let _tempEditSaleDetails = null; // Temporary sale details for the edit modal
-let _currentPage = "dashboard"; // ─── Setup ────────────────────────────────────────────────────────
+let _currentPage = "dashboard";
+let currentShift = null;
+
+/**
+ * ─── Shift Management ──────────────────────────────────────────────────
+ */
+async function fetchActiveShift() {
+  try {
+    const shift = await api("/api/shifts/active");
+    currentShift = shift && shift.status === 'open' ? shift : null;
+    updateShiftStatusUI();
+  } catch (err) {
+    console.error("Shift fetch error:", err);
+  }
+}
+
+function updateShiftStatusUI() {
+  const badge = document.getElementById("shift-status-badge");
+  if (!badge) return;
+
+  if (currentShift) {
+    badge.className = "header-status-badge !bg-emerald-500 !text-white !shadow-emerald-500/20";
+    badge.innerHTML = `
+      <div class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
+      Register Open
+    `;
+    badge.title = `Shift started at ${new Date(currentShift.start_time).toLocaleTimeString()}`;
+  } else {
+    const canManage = currentUser && (currentUser.can_manage_register || currentUser.role === 'admin' || currentUser.role === 'superadmin');
+    
+    if (canManage) {
+        badge.className = "header-status-badge !bg-rose-500 !text-white !shadow-rose-500/20 cursor-pointer";
+        badge.innerHTML = `
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          Register Closed
+        `;
+    } else {
+        badge.className = "header-status-badge !bg-slate-400 !text-white !opacity-60";
+        badge.innerHTML = `
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          Shift Required
+        `;
+    }
+  }
+}
+
+function canCurrentUserManageRegister() {
+  return !!(currentUser && (currentUser.can_manage_register || currentUser.role === 'admin' || currentUser.role === 'superadmin'));
+}
+
+async function ensureOpenShiftForPayment() {
+  await fetchActiveShift();
+  if (currentShift) return true;
+
+  if (canCurrentUserManageRegister()) {
+    toast("Open your register shift before collecting payment.", "error");
+    navigate("register");
+  } else {
+    toast("A cashier with an open register must collect this payment.", "error");
+  }
+  return false;
+}
+
+async function openShiftManagement() {
+  navigate("register");
+}
+
+// ─── Setup ────────────────────────────────────────────────────────────
 const AVAILABLE_PANELS = [
   {
     id: "dashboard",
@@ -170,7 +237,7 @@ const AVAILABLE_PANELS = [
   {
     id: "pos",
     icon: `<path d="M4 6h16v10c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V6z" fill="#F59E0B"/><path d="M3 6h18v2H3V6z" fill="#D97706"/><circle cx="12" cy="12" r="2" fill="white"/>`,
-    label: "Point of Sale",
+    label: "POS Terminal",
     desc: "Process sales, generate bills, and manage customer checkouts."
   },
   {
@@ -204,6 +271,12 @@ const AVAILABLE_PANELS = [
     desc: "Track operating costs, utilities, and brand expense shares."
   },
   {
+    id: "register",
+    icon: `<rect x="4" y="5" width="16" height="14" rx="3" fill="#0F766E"/><path d="M8 9h8M8 13h3m4 0h1M8 17h8" stroke="white" stroke-width="2" stroke-linecap="round"/>`,
+    label: "Register Shift",
+    desc: "Open your drawer, record cash drops, close shift, and review Z-report totals."
+  },
+  {
     id: "customers",
     icon: `<circle cx="12" cy="8" r="4" fill="#10B981"/><path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" fill="#10B981" opacity="0.6"/>`,
     label: "Customer Ledger",
@@ -218,8 +291,8 @@ const AVAILABLE_PANELS = [
   {
     id: "users",
     icon: `<circle cx="8" cy="8" r="3" fill="#6366F1"/><circle cx="16" cy="8" r="3" fill="#6366F1" opacity="0.5"/><path d="M2 18c0-3 2.5-5 6-5s6 2 6 5M12 18c0-2.5 2-4 5-4s5 1.5 5 4" fill="#6366F1" opacity="0.8"/>`,
-    label: "Employees",
-    desc: "Manage user accounts, roles, and permissions."
+    label: "Staff Directory",
+    desc: "Manage team accounts, track shift access, and update permissions."
   },
   {
     id: "hierarchy",
@@ -251,9 +324,32 @@ const AVAILABLE_PANELS = [
     label: "Raw Ingredients",
     desc: "Manage base stock, track ingredient batches and record waste."
   },
+  {
+    id: "logs",
+    icon: `<path d="M4 4h16v16H4z" fill="#6366F1" opacity="0.2"/><path d="M7 8h10M7 12h10M7 16h6" stroke="#6366F1" stroke-width="2" stroke-linecap="round"/><path d="M3 3h18v18H3V3z" fill="none" stroke="#6366F1" stroke-width="1.5"/>`,
+    label: "Register & Activity Logs",
+    desc: "Detailed audit trail of register shifts, cash movements, and user actions."
+  },
 ];
 
-const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions", "settings", "users"];
+const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions", "settings", "users", "logs"];
+
+function canCurrentUserAccessRegister() {
+  return canCurrentUserManageRegister() || !!currentShift;
+}
+
+function isPanelAllowedForCurrentUser(panelId) {
+  if (panelId === "register") return canCurrentUserAccessRegister();
+  if (panelId === "logs") return true; 
+  if (currentUser.role === "superadmin") return PLATFORM_OWNER_PANELS.includes(panelId);
+  const allowedPanels = currentUser.allowed_panels || [];
+  if (currentUser.role === "admin" && (panelId === "settings" || panelId === "users")) return true;
+  return allowedPanels.includes(panelId);
+}
+
+function getAllowedPanelsForCurrentUser() {
+  return AVAILABLE_PANELS.filter((panel) => isPanelAllowedForCurrentUser(panel.id));
+}
 
 const MODULE_GROUPS = [
   {
@@ -274,7 +370,7 @@ const MODULE_GROUPS = [
   {
     title: "Finance & Accounting",
     desc: "Costs, subscriptions, billing controls, and money movement.",
-    panels: ["expenses", "subscriptions"],
+    panels: ["register", "logs", "expenses", "subscriptions"],
   },
   {
     title: "Operations",
@@ -334,17 +430,13 @@ async function init() {
     }
 
     await fetchCategories();
+    await fetchActiveShift();
 
 
     if (!sessionStorage.getItem("lobby_selected")) return renderLobby();
     let startPage = localStorage.getItem("pos_page") || "dashboard";
-    if (
-      currentUser.role !== "superadmin" &&
-      currentUser.allowed_panels &&
-      !currentUser.allowed_panels.includes(startPage) &&
-      !(currentUser.role === 'admin' && (startPage === 'settings' || startPage === 'users'))
-    ) {
-      startPage = currentUser.allowed_panels[0] || "dashboard";
+    if (!isPanelAllowedForCurrentUser(startPage)) {
+      startPage = getAllowedPanelsForCurrentUser()[0]?.id || "dashboard";
     }
     navigate(startPage);
   } catch (e) {
@@ -368,8 +460,12 @@ window.addEventListener("pageshow", (event) => {
 
 // ─── Router ──────────────────────────────────────────────────────────
 function navigate(page) {
-  _currentPage = page;
-  if (currentUser.role === "superadmin" && !PLATFORM_OWNER_PANELS.includes(page)) {
+  if (page === "register" && !canCurrentUserAccessRegister()) {
+    toast("You do not have permission to manage the register.", "error");
+    return false;
+  }
+
+  if (currentUser.role === "superadmin" && !PLATFORM_OWNER_PANELS.includes(page) && page !== "register") {
     // Superadmins can only access platform-level pages
     return false;
   }
@@ -401,6 +497,7 @@ function navigate(page) {
       return false;
   }
 
+  _currentPage = page;
   localStorage.setItem("pos_page", page);
   sessionStorage.setItem("lobby_selected", "true");
   document.body.classList.remove("lobby-active");
@@ -417,9 +514,10 @@ function navigate(page) {
     pos: "POS / Checkout",
     "sales-history": "Sales History",
     expenses: "Expenses",
+    register: "Register Shift",
     customers: "Customer Ledger",
-    settings: "Settings",
-    users: "Users (Admin)",
+    settings: "System Settings",
+    users: "Staff Directory",
     subscriptions: "Subscription Tracking",
     hierarchy: "Master Platform Hierarchy",
     tables: "Table Management",
@@ -428,6 +526,7 @@ function navigate(page) {
     recipes: "Manage Recipes",
     "pending-dues": "Pending Dues Ledger",
     analytics: "Analytics & Reports",
+    logs: "Register & Activity Logs",
   };
   if (page === "dashboard" && currentUser.role === "superadmin")
     titles.dashboard = "System Overview (Master Admin)";
@@ -438,7 +537,7 @@ function navigate(page) {
 
   const container = document.querySelector('main > div');
   const pageHeader = document.getElementById('page-header-wrap');
-  if (page === 'settings' || page === 'pos') {
+  if (page === 'settings' || page === 'pos' || page === 'register') {
     container.classList.remove('container', 'mx-auto', 'px-6');
     container.classList.add('w-full', 'px-4', 'md:px-12');
     if (pageHeader) pageHeader.classList.add('hidden');
@@ -457,6 +556,7 @@ function navigate(page) {
     "sales-history": renderSalesHistory,
     "sales-pending": () => renderSalesHistory(true),
     expenses: renderExpenses,
+    register: renderRegister,
     customers: renderCustomers,
     settings: renderSettings,
     users: renderUsers,
@@ -468,6 +568,7 @@ function navigate(page) {
     recipes: renderRecipes,
     "pending-dues": () => renderSalesHistory(true),
     analytics: renderAnalytics,
+    logs: renderLogs,
   };
   if (pages[page]) {
     try {
@@ -499,7 +600,17 @@ function navigate(page) {
 }
 
 async function logout() {
+  if (currentShift) {
+    if (confirm("You have an active register shift open. It is recommended to close your shift and reconcile cash before logging out. Would you like to manage your shift now?")) {
+      return openShiftManagement();
+    }
+    if (!confirm("Are you sure you want to logout WITHOUT closing your register? Your drawer totals will remain pending.")) {
+      return;
+    }
+  }
   await fetch("/api/auth/logout", { method: "POST" });
+  localStorage.clear();
+  sessionStorage.clear();
   window.location.replace("/");
 }
 
@@ -2402,15 +2513,18 @@ async function renderPOS() {
               <span class="block text-[11px] font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400 mb-3">Grand Total</span>
               <span id="pos-checkout-overlay-total" class="block text-5xl md:text-7xl font-black tracking-tighter text-slate-900 dark:text-white mb-10">Rs. 0.00</span>
               
-              <div class="grid ${isRetail ? 'grid-cols-1' : 'grid-cols-2'} gap-6 px-4">
+              <div class="grid grid-cols-1 gap-6 px-4">
+                ${isRetail ? `
                 <button onclick="checkout()" id="checkout-btn"
                   class="py-4 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3">
                   <span>Place Order</span>
                 </button>
+                ` : `
                 <button onclick="sendToKitchen()" id="kitchen-btn"
-                  class="${isRetail ? 'hidden' : 'flex'} py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-black text-xl border border-slate-200 dark:border-slate-700 shadow-xl transition-all active:scale-95 disabled:opacity-40 items-center justify-center h-20 gap-3">
+                  class="py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-black text-xl border border-slate-200 dark:border-slate-700 shadow-xl transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center h-20 gap-3">
                   <span>Kitchen</span>
                 </button>
+                `}
               </div>
               <p class="mt-8 text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest opacity-50">Click background to return to cart</p>
             </div>
@@ -3454,6 +3568,7 @@ function updateCompleteOrderSummary(total) {
 async function updateAndCompleteOrder(id) {
   const nameEl = $c('op-name');
   if (!nameEl) return;
+  if (!(await ensureOpenShiftForPayment())) return;
 
   const s = _posActiveOrders.find(o => o.id === id);
   const data = {
@@ -4094,27 +4209,36 @@ function calculateCartTotal() {
     $c("pos-received").value = 0;
   }
 
-  // Update Checkout Button UI if editing
+  // Update the visible POS action button when editing an existing order.
   const checkoutBtn = $c("checkout-btn");
+  const kitchenBtn = $c("kitchen-btn");
+  const visibleActionBtn = checkoutBtn || kitchenBtn;
+
+  if (_editingOrderId && visibleActionBtn && !$c("cancel-edit-btn")) {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.id = "cancel-edit-btn";
+    cancelBtn.onclick = cancelEdit;
+    cancelBtn.className = "mt-4 w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all";
+    cancelBtn.textContent = "Cancel Editing";
+    visibleActionBtn.parentElement.appendChild(cancelBtn);
+  } else if (!_editingOrderId) {
+    $c("cancel-edit-btn")?.remove();
+  }
+
   if (checkoutBtn) {
     if (_editingOrderId) {
       checkoutBtn.innerHTML = `<span>Update Order #${_editingOrderId}</span>`;
       checkoutBtn.className = "py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-white font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3 w-full";
-      
-      // Add cancel button if not exists
-      if (!$c("cancel-edit-btn")) {
-        const cancelBtn = document.createElement("button");
-        cancelBtn.id = "cancel-edit-btn";
-        cancelBtn.onclick = cancelEdit;
-        cancelBtn.className = "mt-4 w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all";
-        cancelBtn.textContent = "Cancel Editing";
-        checkoutBtn.parentElement.appendChild(cancelBtn);
-      }
     } else {
       checkoutBtn.innerHTML = `<span>Place Order</span>`;
       checkoutBtn.className = "py-4 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3";
-      $c("cancel-edit-btn")?.remove();
     }
+  }
+
+  if (kitchenBtn) {
+    kitchenBtn.innerHTML = _editingOrderId
+      ? `<span>Update Kitchen #${_editingOrderId}</span>`
+      : `<span>Kitchen</span>`;
   }
 
   calculateRemaining();
@@ -4272,6 +4396,17 @@ function handlePOSMethodChange(method) {
   }
 }
 
+function getPOSActionButton(status = "completed") {
+  return status === "pending"
+    ? ($c("kitchen-btn") || $c("checkout-btn"))
+    : ($c("checkout-btn") || $c("kitchen-btn"));
+}
+
+function getPOSActionLabel(status = "completed", isEditing = false) {
+  if (isEditing) return status === "pending" ? "Update Kitchen" : "Update Order";
+  return status === "pending" ? "Kitchen" : "Place Order";
+}
+
 async function checkout(status = 'completed') {
   if (!cart.length) return toast("Cart is empty", "error");
 
@@ -4280,10 +4415,13 @@ async function checkout(status = 'completed') {
     return generateQuotation();
   }
 
+  if (status === 'completed' && !(await ensureOpenShiftForPayment())) return;
+
   const discount = parseFloat($c("pos-discount").value) || 0;
   const tax_percentage = parseFloat($c("pos-tax").value) || 0;
   const payment_method = $c("pos-method").value;
-  const amount_received = parseFloat($c("pos-received").value) || 0;
+  let amount_received = parseFloat($c("pos-received").value) || 0;
+  if (status !== 'completed') amount_received = 0;
   const grandTotal = parseFloat($c("cart-total").dataset.total) || 0;
 
   // Gather restaurant-specific fields
@@ -4319,7 +4457,7 @@ async function checkout(status = 'completed') {
   if (sidebarPhone) customer_phone = sidebarPhone;
 
   // Validation for Pending Dues
-  if (amount_received < grandTotal - 0.01) {
+  if (status === 'completed' && amount_received < grandTotal - 0.01) {
     if (!customer_name || !customer_phone) {
       $c('pos-cust-name').focus();
       return toast("Customer Name & Phone are REQUIRED for Pending Dues", "error");
@@ -4335,9 +4473,11 @@ async function checkout(status = 'completed') {
     }
   }
 
-  const btn = $c("checkout-btn");
-  btn.disabled = true;
-  btn.textContent = "Processing…";
+  const btn = getPOSActionButton(status);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Processing...";
+  }
 
   const payload = {
     items: cart.map((c) => ({
@@ -4375,8 +4515,10 @@ async function checkout(status = 'completed') {
     const r = await api(url, method, payload);
     if (r.error) {
       toast(r.error, "error");
-      btn.disabled = false;
-      btn.textContent = isEditing ? "Update Order" : "Place Order";
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = getPOSActionLabel(status, isEditing);
+      }
       return;
     }
     const completedSaleId = r.saleId || _editingOrderId;
@@ -4389,6 +4531,10 @@ async function checkout(status = 'completed') {
     }
 
     closePOSCheckout(true);
+
+    if (!isEditing && window._posIsRetail && status === 'completed') {
+      printCustomerBill(completedSaleId);
+    }
 
     // AUTO PRINT KITCHEN IF FLAG SET
     if (window._lastOrderAutoPrintKitchen) {
@@ -4431,8 +4577,10 @@ async function checkout(status = 'completed') {
     );
   } catch (err) {
     toast(err.message, "error");
-    btn.disabled = false;
-    btn.textContent = isEditing ? "Update Order" : "Place Order";
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = getPOSActionLabel(status, isEditing);
+    }
   }
 }
 
@@ -4583,7 +4731,7 @@ async function sendToKitchen() {
   }
 
   window._lastOrderAutoPrintKitchen = true;
-  checkout('pending');
+  return checkout('pending');
 }
 
 const RECEIPT_FORMATS = Object.freeze({
@@ -4732,12 +4880,12 @@ async function printBill(saleId, isUnpaid = false) {
 
   // Build receipt header based on settings
   let headerHtml = "";
-  const useLogo = shop?.use_logo_on_receipt && shop?.logo_path;
+  const useLogo = shop?.use_logo_on_receipt && (shop?.logo_data || shop?.logo_path);
   const useText = shop?.use_text_on_receipt !== false; // Default true
   const headerText = shop?.receipt_header_text || shop?.name || "STORE";
 
   if (useLogo) {
-    headerHtml += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${shop.logo_path}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
+    headerHtml += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${shop.logo_data || shop.logo_path}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${headerText}"></div>`;
   }
   if (useText) {
     headerHtml += `<h1 style="font-size: ${headerFontSize}px; font-weight: ${headerFontWeight}; margin: 0; text-transform: uppercase; text-align: center;">${headerText}</h1>`;
@@ -5031,6 +5179,7 @@ async function submitSaleReturn(saleId) {
 
   const reason = document.getElementById("return-reason").value.trim();
   const payment_method = document.getElementById("return-method").value;
+  if (payment_method === "cash" && !(await ensureOpenShiftForPayment())) return;
 
   try {
     const res = await api(`/api/sales/${saleId}/return`, "POST", {
@@ -5067,12 +5216,12 @@ async function printReturnReceipt(returnId) {
 
   // Build receipt header based on settings
   let headerHtml = "";
-  const useLogo = shop?.use_logo_on_receipt && shop?.logo_path;
+  const useLogo = shop?.use_logo_on_receipt && (shop?.logo_data || shop?.logo_path);
   const useText = shop?.use_text_on_receipt !== false;
   const headerText = shop?.receipt_header_text || shop?.name || "STORE";
 
   if (useLogo) {
-    headerHtml += `<img src="${shop.logo_path}" style="max-width: 60mm; max-height: 20mm; margin: 0 auto; display: block;" alt="${headerText}">`;
+    headerHtml += `<img src="${shop.logo_data || shop.logo_path}" style="max-width: 60mm; max-height: 20mm; margin: 0 auto; display: block;" alt="${headerText}">`;
   }
   if (useText) {
     headerHtml += `<h1>${headerText}</h1>`;
@@ -5183,7 +5332,7 @@ async function renderSalesHistory(onlyPendingDues = false) {
   try {
     const sales = await api("/api/sales");
     _allSalesCache = Array.isArray(sales)
-      ? sales.filter((s) => s.order_status === "completed")
+      ? sales.filter((s) => s.order_status === "completed" || s.order_status === "payment_pending")
       : [];
     updatePendingDuesBadge(_allSalesCache);
     _salesPendingFilter = onlyPendingDues;
@@ -5482,6 +5631,8 @@ async function markSalePaid(saleId, grandTotal, currentReceived) {
 }
 
 async function doMarkSalePaid(saleId, currentReceived) {
+  if (!(await ensureOpenShiftForPayment())) return;
+
   const amountInput = document.getElementById(`dues-recvd-${saleId}`);
   const noteInput = document.getElementById(`dues-note-${saleId}`);
   if (!amountInput) return toast("Input not found", "error");
@@ -5556,6 +5707,25 @@ async function showSaleDuesDetails(saleId) {
 
 // ─── Expenses ───────────────────────────────────────────────────────
 // ─── Expenses ───────────────────────────────────────────────────────
+function getExpenseCategoryChoices() {
+  const categories = Array.isArray(_expenseCategories) ? [..._expenseCategories] : [];
+  if (!categories.some((category) => category.name === "Shop Expense")) {
+    categories.unshift({
+      name: "Shop Expense",
+      emoji: "🏬",
+      color_class: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+    });
+  }
+  return categories;
+}
+
+function renderExpenseCategoryOptions(selected = "") {
+  return getExpenseCategoryChoices().map((category) => {
+    const label = `${category.emoji || ""} ${category.name}`.trim();
+    return `<option value="${escapeOrderValue(category.name)}" ${selected === category.name ? "selected" : ""}>${escapeOrderValue(label)}</option>`;
+  }).join("");
+}
+
 async function renderExpenses() {
   const [allExpenses, sharesRes, previousDues, categories] = await Promise.all([
     api("/api/expenses"),
@@ -5597,7 +5767,7 @@ async function renderExpenses() {
           <div class="grid grid-cols-2 gap-4">
             <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Category</label>
               <select id="exp-cat" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all">
-                ${_expenseCategories.map((c) => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join("")}
+                ${renderExpenseCategoryOptions()}
               </select></div>
             <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Date</label>
               <input id="exp-date" type="date" value="${new Date().toISOString().slice(0, 10)}" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all" /></div>
@@ -5970,11 +6140,11 @@ async function doPayBrandExpense(brandId, month) {
 }
 
 function catBadge(c) {
-  const cat = _expenseCategories.find((x) => x.name === c);
+  const cat = getExpenseCategoryChoices().find((x) => x.name === c);
   return cat ? cat.color_class : "bg-slate-700 text-slate-300";
 }
 function catEmoji(c) {
-  const cat = _expenseCategories.find((x) => x.name === c);
+  const cat = getExpenseCategoryChoices().find((x) => x.name === c);
   return cat ? cat.emoji : "📦";
 }
 
@@ -6019,7 +6189,7 @@ async function openEditExpense(id) {
         <input id="edit-exp-title" value="${e.title}" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all" /></div>
       <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Category</label>
         <select id="edit-exp-cat" class="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none transition-all">
-          ${_expenseCategories.map((c) => `<option value="${c.name}" ${e.category === c.name ? "selected" : ""}>${c.emoji} ${c.name}</option>`).join("")}
+          ${renderExpenseCategoryOptions(e.category)}
         </select></div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Amount (Rs.) *</label>
@@ -6339,6 +6509,8 @@ function openPaymentModal(customerId, customerName, currentBalance) {
 }
 
 async function submitPayment(customerId) {
+  if (!(await ensureOpenShiftForPayment())) return;
+
   const amount = parseFloat($c("pay-amount")?.value) || 0;
   const note = $c("pay-note")?.value.trim();
   if (amount <= 0) return toast("Enter a valid amount", "error");
@@ -6775,17 +6947,9 @@ function renderLobby() {
   const content = document.getElementById("page-content");
 
   // Filter panels based on user permissions
-  const allowed = AVAILABLE_PANELS.filter(p => {
-    if (currentUser.role === 'superadmin') {
-      return PLATFORM_OWNER_PANELS.includes(p.id);
-    }
-    const allowedPanels = currentUser.allowed_panels || [];
-    // Ensure settings and users are visible to shop admins in the lobby
-    if (currentUser.role === 'admin' && (p.id === 'settings' || p.id === 'users')) return true;
-    return allowedPanels.includes(p.id);
-  });
+  const allowed = getAllowedPanelsForCurrentUser();
 
-  if (allowed.length === 0) {
+  if (allowed.length === 0 && currentUser.role === 'admin') {
     const dash = AVAILABLE_PANELS.find(p => p.id === 'dashboard');
     if (dash) allowed.push(dash);
   }
@@ -7362,14 +7526,7 @@ function renderQuickSidebar() {
   if (!container) return;
 
   // Filter panels based on user permissions (reuse logic from lobby)
-  const allowed = AVAILABLE_PANELS.filter(p => {
-    if (currentUser.role === 'superadmin') {
-      return PLATFORM_OWNER_PANELS.includes(p.id);
-    }
-    const allowedPanels = currentUser.allowed_panels || [];
-    if (currentUser.role === 'admin' && (p.id === 'settings' || p.id === 'users')) return true;
-    return allowedPanels.includes(p.id);
-  });
+  const allowed = getAllowedPanelsForCurrentUser();
 
   const allowedById = Object.fromEntries(allowed.map((panel) => [panel.id, panel]));
   const groupedModules = MODULE_GROUPS
@@ -7719,6 +7876,1281 @@ async function saveDefaultPrinters() {
     if (list) list.innerHTML = renderPrintersListHtml();
   } catch(e) {
     toast("Failed to save default printers", "error");
+  }
+}
+
+/**
+ * ─── Shift Page & Actions ───────────────────────────────────────────
+ */
+function formatRegisterMoney(value) {
+  return `Rs. ${Number(value || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function renderRegisterMetric(label, value, tone = "slate", isNegative = false) {
+  const tones = {
+    slate: "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white",
+    emerald: "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300",
+    blue: "bg-blue-50 dark:bg-blue-950/20 border-blue-100 dark:border-blue-900/40 text-blue-700 dark:text-blue-300",
+    rose: "bg-rose-50 dark:bg-rose-950/20 border-rose-100 dark:border-rose-900/40 text-rose-700 dark:text-rose-300",
+    amber: "bg-amber-50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/40 text-amber-700 dark:text-amber-300",
+    indigo: "bg-indigo-50 dark:bg-indigo-950/20 border-indigo-100 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300"
+  };
+  return `
+    <div class="min-h-[112px] p-5 rounded-2xl border ${tones[tone] || tones.slate}">
+      <div class="text-[10px] font-black uppercase tracking-[0.18em] opacity-60">${label}</div>
+      <div class="mt-3 text-2xl font-black tracking-tight">${isNegative ? "- " : ""}${formatRegisterMoney(value)}</div>
+    </div>
+  `;
+}
+
+function isCurrentUserShiftAdmin() {
+  return ["admin", "superadmin", "manager"].includes(currentUser?.role);
+}
+
+let pendingCashDropsLoadError = "";
+let pendingCashHandoversLoadError = "";
+
+async function fetchPendingCashDropsForAdmin() {
+  if (!isCurrentUserShiftAdmin()) return [];
+  pendingCashDropsLoadError = "";
+  try {
+    const drops = await api("/api/shifts/cash-drops/pending");
+    return Array.isArray(drops) ? drops : [];
+  } catch (err) {
+    console.warn("Failed to load pending cash drops:", err);
+    pendingCashDropsLoadError = err.message || "Failed to load pending cash drops.";
+    return [];
+  }
+}
+
+async function fetchPendingCashHandoversForRegister() {
+  pendingCashHandoversLoadError = "";
+  try {
+    const handovers = await api("/api/shifts/pending-handovers");
+    return Array.isArray(handovers) ? handovers : [];
+  } catch (err) {
+    console.warn("Failed to load pending cash handovers:", err);
+    pendingCashHandoversLoadError = err.message || "Failed to load pending cash handovers.";
+    return [];
+  }
+}
+
+async function fetchRegisterHandoverRecipients() {
+  try {
+    const recipients = await api("/api/users/assignable");
+    return Array.isArray(recipients)
+      ? recipients.filter((user) => Number(user.id) !== Number(currentUser?.id))
+      : [];
+  } catch (err) {
+    console.warn("Failed to load handover recipients:", err);
+    return [];
+  }
+}
+
+function renderPendingCashDropsSection(drops = []) {
+  if (!isCurrentUserShiftAdmin()) return "";
+
+  const rows = pendingCashDropsLoadError ? `
+    <div class="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 text-sm font-bold text-rose-600 dark:text-rose-300">
+      ${escapeOrderValue(pendingCashDropsLoadError)}
+    </div>
+  ` : drops.length ? drops.map((drop) => {
+    const cashier = drop.cashier_username || drop.cashier_name || `User #${drop.requested_by_user_id}`;
+    const shopLabel = drop.shop_name ? ` | ${drop.shop_name}` : "";
+    const createdAt = drop.created_at ? new Date(drop.created_at).toLocaleString() : "Just now";
+    return `
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(180px,0.9fr)_minmax(140px,0.45fr)_minmax(220px,1fr)_auto] gap-4 items-center p-4 rounded-2xl bg-white dark:bg-slate-950 border border-amber-100 dark:border-amber-900/40">
+        <div>
+	          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Requested By</div>
+	          <div class="text-sm font-black text-slate-900 dark:text-white mt-1">${escapeOrderValue(cashier)}</div>
+	          <div class="text-[11px] font-bold text-slate-400 mt-0.5">Demanded: ${escapeOrderValue(`${createdAt}${shopLabel}`)}</div>
+        </div>
+        <div>
+          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Amount</div>
+          <div class="text-lg font-black text-amber-600 dark:text-amber-300 mt-1">${formatRegisterMoney(drop.amount)}</div>
+        </div>
+        <div>
+          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Note</div>
+          <div class="text-sm font-bold text-slate-600 dark:text-slate-300 mt-1">${escapeOrderValue(drop.note || "No note")}</div>
+        </div>
+        <div class="flex items-center gap-2 justify-end">
+          <button onclick="verifyCashDrop(${Number(drop.id)}, 'rejected')" class="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-800 transition-all">Reject</button>
+          <button onclick="verifyCashDrop(${Number(drop.id)}, 'verified')" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-600/20 transition-all">Verify</button>
+        </div>
+      </div>
+    `;
+  }).join("") : `
+    <div class="p-5 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-500 dark:text-slate-400">
+      No cash drops are waiting for admin verification.
+    </div>
+  `;
+
+  return `
+    <section class="p-6 rounded-3xl bg-amber-50/70 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-900/40 mb-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+        <div>
+          <h4 class="text-xl font-black text-slate-900 dark:text-white tracking-tight">Cash Drop Verification</h4>
+          <p class="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">Admin approval is required before a drop reduces the cashier drawer total.</p>
+        </div>
+        <span class="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-950 border border-amber-100 dark:border-amber-900/40 text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">
+          ${pendingCashDropsLoadError ? "Needs Attention" : `${drops.length} Pending`}
+        </span>
+      </div>
+      <div class="space-y-3">
+        ${rows}
+      </div>
+    </section>
+  `;
+}
+
+function renderPendingCashHandoversSection(handovers = []) {
+  const shouldShow = pendingCashHandoversLoadError || handovers.length > 0;
+  if (!shouldShow) return "";
+
+  const rows = pendingCashHandoversLoadError ? `
+    <div class="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 text-sm font-bold text-rose-600 dark:text-rose-300">
+      ${escapeOrderValue(pendingCashHandoversLoadError)}
+    </div>
+  ` : handovers.map((handover) => {
+    const sender = handover.sender_name || handover.sender_username || `User #${handover.sender_id}`;
+    const receiver = handover.receiver_name || handover.receiver_username || `User #${handover.receiver_id}`;
+    const shopLabel = handover.shop_name ? ` | ${handover.shop_name}` : "";
+    const createdAt = handover.created_at ? new Date(handover.created_at).toLocaleString() : "Just now";
+    return `
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(180px,0.8fr)_minmax(180px,0.8fr)_minmax(140px,0.45fr)_minmax(220px,1fr)_auto] gap-4 items-center p-4 rounded-2xl bg-white dark:bg-slate-950 border border-blue-100 dark:border-blue-900/40">
+        <div>
+	          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">From</div>
+	          <div class="text-sm font-black text-slate-900 dark:text-white mt-1">${escapeOrderValue(sender)}</div>
+	          <div class="text-[11px] font-bold text-slate-400 mt-0.5">Demanded: ${escapeOrderValue(`${createdAt}${shopLabel}`)}</div>
+        </div>
+        <div>
+          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">To</div>
+          <div class="text-sm font-black text-slate-900 dark:text-white mt-1">${escapeOrderValue(receiver)}</div>
+        </div>
+        <div>
+          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Amount</div>
+          <div class="text-lg font-black text-blue-600 dark:text-blue-300 mt-1">${formatRegisterMoney(handover.amount)}</div>
+        </div>
+        <div>
+          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Note</div>
+          <div class="text-sm font-bold text-slate-600 dark:text-slate-300 mt-1">${escapeOrderValue(handover.note || "No note")}</div>
+        </div>
+        <div class="flex items-center gap-2 justify-end">
+          <button onclick="verifyCashHandover(${Number(handover.id)}, 'rejected')" class="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-800 transition-all">Reject</button>
+          <button onclick="verifyCashHandover(${Number(handover.id)}, 'verified')" class="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all">Verify</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <section class="p-6 rounded-3xl bg-blue-50/70 dark:bg-blue-950/10 border border-blue-100 dark:border-blue-900/40 mb-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+        <div>
+          <h4 class="text-xl font-black text-slate-900 dark:text-white tracking-tight">Cash Handover Verification</h4>
+          <p class="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">The receiver or an admin verifies before the sender drawer total is reduced.</p>
+        </div>
+        <span class="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-950 border border-blue-100 dark:border-blue-900/40 text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">
+          ${pendingCashHandoversLoadError ? "Needs Attention" : `${handovers.length} Pending`}
+        </span>
+      </div>
+      <div class="space-y-3">
+        ${rows}
+      </div>
+    </section>
+  `;
+}
+
+function renderHandoverRecipientOptions(recipients = []) {
+  if (!recipients.length) return `<option value="">No active staff found</option>`;
+  return `<option value="">Select receiver</option>${recipients.map((user) => {
+    const role = user.role ? ` (${user.role})` : "";
+    return `<option value="${Number(user.id)}">${escapeOrderValue(`${user.name || user.username || "User"}${role}`)}</option>`;
+  }).join("")}`;
+}
+
+async function renderRegister() {
+  const content = document.getElementById("page-content");
+  if (!content) return;
+
+  content.innerHTML = `
+    <div class="min-h-[60vh] flex items-center justify-center text-slate-500 dark:text-slate-400 font-bold">
+      Loading register...
+    </div>
+  `;
+
+  await fetchActiveShift();
+
+  if (!canCurrentUserAccessRegister()) {
+    content.innerHTML = `
+      <div class="max-w-4xl mx-auto py-20">
+        <div class="p-10 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center">
+          <div class="w-16 h-16 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-6">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          </div>
+          <h3 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Register Access Required</h3>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2">Your account cannot open or manage a cash drawer.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const [pendingCashDrops, pendingCashHandovers, handoverRecipients] = await Promise.all([
+    fetchPendingCashDropsForAdmin(),
+    fetchPendingCashHandoversForRegister(),
+    fetchRegisterHandoverRecipients()
+  ]);
+
+  if (!currentShift) {
+    content.innerHTML = `
+      <div class="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8">
+          <div>
+            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-300 border border-rose-100 dark:border-rose-900/40 text-[10px] font-black uppercase tracking-[0.2em] mb-4">
+              <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+              Register Closed
+            </div>
+            <h3 class="text-4xl font-black text-slate-950 dark:text-white tracking-tight">Open Cash Register</h3>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium">Start your personal drawer before collecting cash, card payments, customer dues, or cash refunds.</p>
+          </div>
+          <button onclick="navigate('pos')" class="px-5 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">
+            Back to POS
+          </button>
+        </div>
+
+        ${renderPendingCashDropsSection(pendingCashDrops)}
+        ${renderPendingCashHandoversSection(pendingCashHandovers)}
+
+        <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)] gap-6">
+          <section class="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div class="flex items-center gap-4 mb-8">
+              <div class="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/20">
+                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
+              </div>
+              <div>
+                <h4 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Opening Float</h4>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Cash counted in drawer</p>
+              </div>
+            </div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">Opening Cash</label>
+            <div class="relative mb-6">
+              <span class="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-black text-lg">Rs.</span>
+              <input id="opening-balance-input" type="number" step="0.01" class="w-full pl-20 pr-6 py-7 rounded-3xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-950 dark:text-white focus:border-indigo-500 transition-all outline-none font-black text-4xl tracking-tight" placeholder="0.00" autofocus />
+            </div>
+            <button onclick="performOpenShift()" class="w-full py-5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-3">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+              Start Shift
+            </button>
+          </section>
+
+          <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-4">
+            <div class="p-6 rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-3">Personal Drawer</div>
+              <p class="text-sm font-bold text-slate-700 dark:text-slate-300 leading-relaxed">Cash collected by this user is attached to this shift only.</p>
+            </div>
+            <div class="p-6 rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-3">Closing Count</div>
+              <p class="text-sm font-bold text-slate-700 dark:text-slate-300 leading-relaxed">Expected cash is shown in Register so the drawer can be checked before close.</p>
+            </div>
+            <div class="p-6 rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 sm:col-span-2 xl:col-span-1">
+              <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-3">Drawer Formula</div>
+              <p class="text-sm font-bold text-slate-700 dark:text-slate-300 leading-relaxed">Opening + cash sales + due collections - cash refunds - verified cash drops - verified handovers.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    `;
+    setTimeout(() => document.getElementById("opening-balance-input")?.focus(), 50);
+    return;
+  }
+
+  let summary;
+  try {
+    summary = await api(`/api/shifts/summary/${currentShift.id}`);
+  } catch (err) {
+    content.innerHTML = `<div class="p-8 rounded-3xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-300 font-bold border border-rose-100 dark:border-rose-900/40">Failed to load register: ${err.message}</div>`;
+    return;
+  }
+
+  const startedAt = new Date(currentShift.start_time);
+  content.innerHTML = `
+    <div class="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8">
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900/40 text-[10px] font-black uppercase tracking-[0.2em] mb-4">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Register Open
+          </div>
+          <h3 class="text-4xl font-black text-slate-950 dark:text-white tracking-tight">Active Register Session</h3>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium">Started ${startedAt.toLocaleDateString()} at ${startedAt.toLocaleTimeString()}</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button onclick="renderRegister()" class="px-5 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">Refresh</button>
+          <button onclick="navigate('pos')" class="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all">Go to POS</button>
+        </div>
+      </div>
+
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        ${renderRegisterMetric("Expected Cash", summary.expected_balance, "emerald")}
+        ${renderRegisterMetric("Opening Cash", summary.opening_balance, "indigo")}
+        ${renderRegisterMetric("Cash Sales", summary.net_cash_sales, "emerald")}
+        ${renderRegisterMetric("Due Collections", summary.debt_collections, "blue")}
+        ${renderRegisterMetric("Card Sales", summary.net_card_sales, "slate")}
+        ${renderRegisterMetric("Cash Refunds", summary.total_cash_refunds, "rose", true)}
+        ${renderRegisterMetric("Cash Drops", summary.cash_drops, "amber", true)}
+        ${Number(summary.pending_cash_drops || 0) > 0 ? renderRegisterMetric("Pending Drops", summary.pending_cash_drops, "amber", true) : ""}
+        ${renderRegisterMetric("Verified Handovers", summary.cash_handovers, "amber", true)}
+        ${Number(summary.pending_cash_handovers || 0) > 0 ? renderRegisterMetric("Pending Handovers", summary.pending_cash_handovers, "blue", true) : ""}
+      </section>
+
+      ${renderPendingCashDropsSection(pendingCashDrops)}
+      ${renderPendingCashHandoversSection(pendingCashHandovers)}
+
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(420px,1.1fr)] gap-6">
+        <section class="p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div class="flex items-center justify-between gap-4 mb-6">
+            <div>
+              <h4 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Cash Movement</h4>
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Drop to safe, shop expense, or handover</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-300 flex items-center justify-center">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V6m0 12v-2m9-4a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+          </div>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Movement Type</label>
+              <select id="cash-movement-type" onchange="updateCashMovementTypeUI()" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-blue-500 transition-all outline-none font-black text-sm">
+                <option value="cash_drop">Cash drop to safe/admin</option>
+                <option value="shop_expense">Shop expense from drawer</option>
+                <option value="handover">Handover to person</option>
+              </select>
+            </div>
+            <div id="cash-handover-recipient-wrap" class="hidden">
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Receiver</label>
+              <select id="cash-handover-recipient" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-blue-500 transition-all outline-none font-black text-sm">
+                ${renderHandoverRecipientOptions(handoverRecipients)}
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Amount</label>
+              <input id="cash-movement-amount" type="number" step="0.01" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-blue-500 transition-all outline-none font-black text-xl" placeholder="0.00" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Note</label>
+              <textarea id="cash-movement-note" class="w-full min-h-[116px] px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-blue-500 transition-all outline-none font-medium text-sm resize-none" placeholder="Moved to safe, handed to manager, or drawer cleanup note."></textarea>
+            </div>
+            <button id="cash-movement-submit" onclick="performCashMovement()" class="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all">Request Cash Drop</button>
+          </div>
+        </section>
+
+        <section class="p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div class="flex items-center justify-between gap-4 mb-6">
+            <div>
+              <h4 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Close Register</h4>
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Cash reconciliation</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-300 flex items-center justify-center">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)] gap-5">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Actual Cash Count</label>
+                <div class="relative">
+                  <span class="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-black text-lg">Rs.</span>
+                  <input id="closing-balance-input" type="number" step="0.01" class="w-full pl-20 pr-6 py-6 rounded-3xl bg-slate-950 border border-slate-800 text-white focus:border-rose-500 transition-all outline-none font-black text-4xl tracking-tight" placeholder="0.00" />
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Closing Note (Public to Admins)</label>
+                <textarea id="closing-note-input" class="w-full min-h-[100px] px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-rose-500 transition-all outline-none font-medium text-sm resize-none" placeholder="General context..."></textarea>
+              </div>
+              <div id="shortage-reason-wrap">
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Shortage/Overage Reason (Explain Discrepancies)</label>
+                <textarea id="shortage-reason-input" class="w-full min-h-[100px] px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-rose-500 transition-all outline-none font-medium text-sm resize-none" placeholder="Why is there a difference? e.g. Forgotten cash drop, wrong return, etc."></textarea>
+              </div>
+            </div>
+            <div class="rounded-3xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-5 flex flex-col justify-between gap-5">
+              <div class="space-y-4">
+                <div>
+                  <div class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Expected Cash</div>
+                  <div class="text-2xl font-black text-slate-900 dark:text-white mt-2">${formatRegisterMoney(summary.expected_balance)}</div>
+                </div>
+                <div class="h-px bg-slate-200 dark:bg-slate-800"></div>
+                <div class="text-xs font-bold text-slate-500 dark:text-slate-400 leading-relaxed">Use the physical cash in drawer. Card sales are shown for reporting, but they do not increase cash drawer balance.</div>
+              </div>
+              <button onclick="performCloseShift()" class="w-full py-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-600/20 transition-all">Close Register</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function openRegisterModal() {
+  if (!canCurrentUserManageRegister()) return toast("You do not have permission to manage the register.", "error");
+  navigate("register");
+}
+
+async function performOpenShift() {
+  const val = parseFloat(document.getElementById("opening-balance-input").value);
+  if (isNaN(val) || val < 0) return toast("Please enter a valid opening balance.", "error");
+
+  try {
+    const res = await api("/api/shifts/open", "POST", { opening_balance: val });
+    if (res.ok) {
+      toast("Success! Register is now open.");
+      closeModal();
+      await fetchActiveShift();
+      if (_currentPage === "register") {
+        await renderRegister();
+      } else {
+        navigate("register");
+      }
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function openShiftSummaryModal() {
+  if (!currentShift) return;
+  
+  openModal(
+    "Active Register Session",
+    `
+    <div class="flex items-center justify-center h-40 text-slate-400 italic">Calculating drawer totals...</div>
+    `
+  );
+
+  try {
+    const summary = await api(`/api/shifts/summary/${currentShift.id}`);
+    const pendingVerificationTotal = Number(summary.pending_cash_drops || 0) + Number(summary.pending_cash_handovers || 0);
+    const hasPendingVerifications = pendingVerificationTotal > 0.01;
+    const provisionalExpected = Number(summary.expected_balance || 0) - pendingVerificationTotal;
+    
+    document.getElementById("modal-body").innerHTML = `
+      <div class="space-y-6">
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-2 gap-4">
+          <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Started At</p>
+            <p class="text-sm font-bold text-slate-700 dark:text-slate-300">${new Date(currentShift.start_time).toLocaleTimeString()}</p>
+          </div>
+          <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Opening Cash</p>
+            <p class="text-sm font-bold text-indigo-600 dark:text-indigo-400">Rs. ${summary.opening_balance.toFixed(2)}</p>
+          </div>
+          <div class="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
+            <p class="text-[9px] font-black text-emerald-600 dark:text-emerald-300 uppercase tracking-widest mb-1">Expected Cash</p>
+            <p class="text-sm font-bold text-emerald-700 dark:text-emerald-300">Rs. ${Number(summary.expected_balance || 0).toFixed(2)}</p>
+          </div>
+          ${hasPendingVerifications ? `
+          <div class="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+            <p class="text-[9px] font-black text-amber-600 dark:text-amber-300 uppercase tracking-widest mb-1">Provisional Close Expected</p>
+            <p class="text-sm font-bold text-amber-700 dark:text-amber-300">Rs. ${provisionalExpected.toFixed(2)}</p>
+          </div>
+          ` : ''}
+        </div>
+
+        ${hasPendingVerifications ? `
+        <div class="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+          <div class="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">Pending Verification</div>
+          <p class="mt-2 text-xs font-bold text-amber-700 dark:text-amber-200 leading-relaxed">
+            You can close this register now. Pending cash movement of Rs. ${pendingVerificationTotal.toFixed(2)} will keep this shift red until admin verifies or rejects it.
+          </p>
+        </div>
+        ` : ''}
+
+        <div class="space-y-3">
+            <div class="flex items-center justify-between p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 font-bold text-sm">
+                <span>Net Cash Sales</span>
+                <span>Rs. ${summary.net_cash_sales.toFixed(2)}</span>
+            </div>
+            ${summary.cash_drops > 0 ? `
+            <div class="flex items-center justify-between p-4 rounded-xl bg-orange-50 dark:bg-orange-950/20 text-orange-700 dark:text-orange-300 font-bold text-sm">
+                <span>Cash Drops (Manager)</span>
+                <span>- Rs. ${summary.cash_drops.toFixed(2)}</span>
+            </div>
+            ` : ''}
+        </div>
+
+        <div class="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4">
+          <div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1 text-center">Closing Cash Reconciliation</label>
+            <div class="relative">
+              <span class="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rs.</span>
+              <input id="closing-balance-input" type="number" step="0.01" class="w-full pl-14 pr-5 py-5 rounded-2xl bg-slate-900 dark:bg-black border border-slate-800 text-white focus:border-rose-500 transition-all outline-none font-black text-2xl" placeholder="Count your cash..." />
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Closing Note</label>
+            <textarea id="closing-note-input" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-indigo-500 transition-all outline-none font-medium text-sm" placeholder="Explain shortage, overage, handover, or end-of-shift context..."></textarea>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-4">
+             <button onclick="closeModal(); navigate('register')" class="py-4 rounded-2xl border-2 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-black text-xs uppercase tracking-widest hover:border-indigo-500 dark:hover:border-indigo-400 transition-all">Cash Movement</button>
+             <button onclick="performCloseShift()" class="py-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest shadow-xl shadow-rose-600/20 transition-all">Close Register</button>
+          </div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById("modal-body").innerHTML = `<div class="p-6 text-rose-500 font-bold">Error: ${err.message}</div>`;
+  }
+}
+
+function openCashDropModal() {
+  openModal(
+    "Record Cash Drop",
+    `
+    <div class="space-y-4">
+      <div class="p-4 bg-amber-50 dark:bg-amber-950/20 rounded-xl border border-amber-100 dark:border-amber-900/50">
+        <p class="text-[10px] text-amber-700 dark:text-amber-300 font-bold leading-relaxed italic">
+          Use this to request cash removed from the drawer and put into the safe. It reduces the drawer total only after admin verification.
+        </p>
+      </div>
+      <div>
+        <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Amount to Drop</label>
+        <input id="drop-amount" type="number" step="0.01" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-indigo-500 transition-all outline-none font-bold text-xl" placeholder="0.00" />
+      </div>
+      <div>
+        <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Note (Optional)</label>
+        <textarea id="drop-note" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:border-indigo-500 transition-all outline-none font-medium text-sm" placeholder="e.g. Moved to main safe"></textarea>
+      </div>
+      <button onclick="performCashDrop()" class="w-full py-4 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-sm uppercase tracking-widest shadow-xl transition-all">Confirm Drop</button>
+    </div>
+    `
+  );
+}
+
+async function performCashDrop() {
+  const amount = parseFloat(document.getElementById("drop-amount").value);
+  const note = document.getElementById("drop-note").value;
+  if (isNaN(amount) || amount <= 0) return toast("Valid amount required.", "error");
+
+  try {
+    const res = await api("/api/shifts/cash-drop", "POST", { shift_id: currentShift.id, amount, note });
+    if (res.ok) {
+      toast("Cash drop sent for admin verification.");
+      if (_currentPage === "register") {
+        await renderRegister();
+      } else {
+        openShiftSummaryModal(); // Refresh summary
+      }
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+function updateCashMovementTypeUI() {
+  const type = document.getElementById("cash-movement-type")?.value || "cash_drop";
+  const recipientWrap = document.getElementById("cash-handover-recipient-wrap");
+  const submitButton = document.getElementById("cash-movement-submit");
+  const noteInput = document.getElementById("cash-movement-note");
+
+  if (recipientWrap) recipientWrap.classList.toggle("hidden", type !== "handover");
+  if (submitButton) {
+    submitButton.textContent = type === "handover"
+      ? "Request Handover"
+      : type === "shop_expense"
+        ? "Request Shop Expense"
+        : "Request Cash Drop";
+  }
+  if (noteInput) {
+    noteInput.placeholder = type === "shop_expense"
+      ? "Shop expense details, invoice, or reason."
+      : "Moved to safe, handed to manager, or drawer cleanup note.";
+  }
+}
+
+async function performCashMovement() {
+  if (!currentShift) return toast("Open register first.", "error");
+
+  const type = document.getElementById("cash-movement-type")?.value || "cash_drop";
+  const amount = parseFloat(document.getElementById("cash-movement-amount")?.value);
+  const note = document.getElementById("cash-movement-note")?.value || "";
+  if (isNaN(amount) || amount <= 0) return toast("Valid amount required.", "error");
+
+  try {
+    if (type === "handover") {
+      const receiverId = document.getElementById("cash-handover-recipient")?.value;
+      if (!receiverId) return toast("Select the person receiving the cash.", "error");
+      const res = await api("/api/shifts/handover", "POST", {
+        shift_id: currentShift.id,
+        receiver_id: receiverId,
+        amount,
+        note
+      });
+      if (res.ok) toast("Cash handover sent for verification.");
+    } else {
+      const movementNote = type === "shop_expense"
+        ? `Shop Expense${note ? `: ${note}` : ""}`
+        : note;
+      const res = await api("/api/shifts/cash-drop", "POST", {
+        shift_id: currentShift.id,
+        amount,
+        note: movementNote
+      });
+      if (res.ok) toast(type === "shop_expense" ? "Shop expense sent for admin verification." : "Cash drop sent for admin verification.");
+    }
+
+    if (_currentPage === "register") {
+      await renderRegister();
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function verifyCashDrop(cashDropId, status) {
+  if (!isCurrentUserShiftAdmin()) return toast("Only admin or manager can verify cash drops.", "error");
+  const label = status === "verified" ? "verify" : "reject";
+  if (!confirm(`Are you sure you want to ${label} this cash drop?`)) return;
+
+  try {
+    await api(`/api/shifts/cash-drops/${cashDropId}/verify`, "POST", { status });
+    toast(status === "verified" ? "Cash drop verified." : "Cash drop rejected.");
+    await fetchActiveShift();
+    if (_currentPage === "register") await renderRegister();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function verifyCashHandover(handoverId, status) {
+  const label = status === "verified" ? "verify" : "reject";
+  if (!confirm(`Are you sure you want to ${label} this cash handover?`)) return;
+
+  try {
+    await api("/api/shifts/verify-handover", "POST", { handover_id: handoverId, status });
+    toast(status === "verified" ? "Cash handover verified." : "Cash handover rejected.");
+    await fetchActiveShift();
+    if (_currentPage === "register") await renderRegister();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function performCloseShift() {
+  const actual = parseFloat(document.getElementById("closing-balance-input").value);
+  const note = document.getElementById("closing-note-input")?.value.trim() || "Closed by user.";
+  const shortage_reason = document.getElementById("shortage-reason-input")?.value.trim() || null;
+  if (isNaN(actual)) return toast("Please count your cash and enter the total.", "error");
+
+  if (!confirm("Are you sure you want to close this register? This action is permanent.")) return;
+
+  try {
+    const res = await api("/api/shifts/close", "POST", {
+      shift_id: currentShift.id,
+      actual_balance: actual,
+      note,
+      shortage_reason
+    });
+    if (res.ok) {
+      const diff = actual - res.summary.expected_balance;
+      const diffMsg = diff === 0 ? "Perfect reconciliation." : (diff > 0 ? `Surplus of Rs. ${diff.toFixed(2)}` : `Shortage of Rs. ${Math.abs(diff).toFixed(2)}`);
+      const pendingMsg = res.summary.has_pending_verifications ? " Pending verification remains." : "";
+
+      toast(`Register closed! ${diffMsg}${pendingMsg}`);
+      openShiftClosedReport(res.summary);
+      await fetchActiveShift();
+      if (_currentPage === "register") await renderRegister();
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+function openShiftClosedReport(summary) {
+  const diff = Number(summary.discrepancy || 0);
+  const diffClass = Math.abs(diff) <= 0.01 ? "text-emerald-600 dark:text-emerald-400" : diff > 0 ? "text-blue-600 dark:text-blue-400" : "text-rose-600 dark:text-rose-400";
+  const diffLabel = Math.abs(diff) <= 0.01 ? "Balanced" : diff > 0 ? "Over" : "Short";
+  const pendingVerificationTotal = Number(summary.pending_verification_total || 0);
+  openModal("Shift Closed - Z Report", `
+    <div class="space-y-4">
+      ${summary.has_pending_verifications ? `
+      <div class="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40">
+        <div class="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">Closed with Pending Verification</div>
+        <p class="mt-2 text-xs font-bold text-amber-700 dark:text-amber-200 leading-relaxed">
+          Rs. ${pendingVerificationTotal.toFixed(2)} is still waiting for admin verification. This shift will stay red in logs until it is verified or rejected.
+        </p>
+      </div>
+      ` : ''}
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <div class="text-[9px] font-black uppercase tracking-widest text-slate-400">Expected Cash</div>
+          <div class="text-xl font-black text-slate-900 dark:text-white mt-1">Rs. ${Number(summary.expected_balance || 0).toFixed(2)}</div>
+        </div>
+        <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <div class="text-[9px] font-black uppercase tracking-widest text-slate-400">Actual Count</div>
+          <div class="text-xl font-black text-slate-900 dark:text-white mt-1">Rs. ${Number(summary.closing_balance || 0).toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center">
+        <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Discrepancy</div>
+        <div class="text-3xl font-black mt-1 ${diffClass}">${diffLabel}: Rs. ${Math.abs(diff).toFixed(2)}</div>
+      </div>
+      <div class="space-y-2 text-sm font-bold">
+        <div class="flex justify-between"><span>Opening Cash</span><span>Rs. ${Number(summary.opening_balance || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between"><span>Cash Sales</span><span>Rs. ${Number(summary.net_cash_sales || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between"><span>Debt Collections</span><span>Rs. ${Number(summary.debt_collections || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between"><span>Cash Refunds</span><span>- Rs. ${Number(summary.total_cash_refunds || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between"><span>Cash Drops</span><span>- Rs. ${Number(summary.cash_drops || 0).toFixed(2)}</span></div>
+        <div class="flex justify-between"><span>Verified Handovers</span><span>- Rs. ${Number(summary.cash_handovers || 0).toFixed(2)}</span></div>
+      </div>
+      <button onclick="closeModal()" class="w-full py-3 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-sm uppercase tracking-widest">Done</button>
+    </div>
+  `);
+}
+
+// ─── LOGS & AUDIT ────────────────────────────────────────────────────────────
+let _logsData = [];
+let _shiftHistoryData = [];
+let _logsFilter = { from: '', to: '', action: '', userId: '' };
+
+function _logsTableColspan() {
+  return currentUser?.role === "superadmin" ? 5 : 4;
+}
+
+async function renderLogs() {
+  const content = document.getElementById("page-content");
+  if (!content) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (!_logsFilter.from) _logsFilter.from = today;
+  if (!_logsFilter.to) _logsFilter.to = today;
+
+  content.innerHTML = `
+    <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <!-- Header & Filters -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            </div>
+            <div>
+              <h3 class="text-xl font-black text-slate-950 dark:text-white tracking-tight">Audit & Activity Logs</h3>
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">System-wide audit trail</p>
+            </div>
+          </div>
+          
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <span class="text-[10px] font-black text-slate-400 uppercase">From</span>
+              <input type="date" id="log-filter-from" value="${_logsFilter.from}" class="bg-transparent border-none text-xs font-bold text-slate-700 dark:text-white focus:ring-0 p-0" />
+            </div>
+            <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <span class="text-[10px] font-black text-slate-400 uppercase">To</span>
+              <input type="date" id="log-filter-to" value="${_logsFilter.to}" class="bg-transparent border-none text-xs font-bold text-slate-700 dark:text-white focus:ring-0 p-0" />
+            </div>
+            <button onclick="applyLogFilters()" class="px-5 py-2.5 rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs transition-all shadow-lg active:scale-95">Fetch Logs</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shift Health Table -->
+      <div id="shift-history-table-wrap">
+          <!-- Shift table injected here -->
+      </div>
+
+      <!-- Logs Table -->
+      <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[400px]">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+                <th class="px-6 py-4">Time</th>
+                <th class="px-6 py-4">User</th>
+                <th class="px-6 py-4">Action</th>
+                <th class="px-6 py-4">Details</th>
+                ${currentUser.role === 'superadmin' ? '<th class="px-6 py-4">Shop</th>' : ''}
+              </tr>
+            </thead>
+            <tbody id="logs-table-body">
+              <tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-slate-400 italic">No logs loaded. Click "Fetch Logs" to view system activity.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Auto-fetch today's logs
+  await applyLogFilters();
+}
+
+async function applyLogFilters() {
+  const from = document.getElementById("log-filter-from")?.value;
+  const to = document.getElementById("log-filter-to")?.value;
+  
+  if (from) _logsFilter.from = from;
+  if (to) _logsFilter.to = to;
+
+  const tbody = document.getElementById("logs-table-body");
+  if (tbody) tbody.innerHTML = `<tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-slate-400 italic">Fetching audit trail...</td></tr>`;
+
+  try {
+    const params = new URLSearchParams();
+    if (_logsFilter.from) params.append('from', _logsFilter.from + ' 00:00:00');
+    if (_logsFilter.to) params.append('to', _logsFilter.to + ' 23:59:59');
+    
+    const [logs, history] = await Promise.all([
+      api(`/api/activity-logs?${params.toString()}`),
+      api(`/api/shifts/history?${params.toString()}`)
+    ]);
+    
+    _logsData = logs;
+    _shiftHistoryData = history;
+    
+    _renderShiftHistoryTable();
+    _renderLogsTable();
+  } catch (err) {
+    toast(err.message, "error");
+    if (tbody) tbody.innerHTML = `<tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-rose-500 font-bold">Failed to load logs: ${err.message}</td></tr>`;
+  }
+}
+
+function _shiftCount(value, fallback = 0) {
+  const count = Number(value);
+  return Number.isFinite(count) ? count : fallback;
+}
+
+function _hasNumericValue(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
+function _formatAuditTimestamp(value, fallback = "None") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleString();
+}
+
+function _fallbackShiftLogCounts(shiftId) {
+  const related = _logsData.filter((log) =>
+    log.reference_type === "shift" && Number(log.reference_id) === Number(shiftId)
+  );
+
+  return {
+    audit: related.length,
+    open: related.filter((log) => log.action === "SHIFT_OPEN").length,
+    close: related.filter((log) => log.action === "SHIFT_CLOSE").length
+  };
+}
+
+function _buildShiftHealth(shift) {
+  const fallbackCounts = _fallbackShiftLogCounts(shift.id);
+  const status = String(shift.status || "open").toLowerCase();
+  const isClosed = status === "closed";
+  const openLogCount = _shiftCount(shift.open_log_count, fallbackCounts.open);
+  const closeLogCount = _shiftCount(shift.close_log_count, fallbackCounts.close);
+  const auditLogCount = _shiftCount(shift.audit_log_count, fallbackCounts.audit);
+  const pendingDrops = _shiftCount(shift.pending_cash_drop_count);
+  const pendingHandovers = _shiftCount(shift.pending_cash_handover_count);
+  const rejectedDrops = _shiftCount(shift.rejected_cash_drop_count);
+  const rejectedHandovers = _shiftCount(shift.rejected_cash_handover_count);
+  const issues = [];
+  let discrepancy = 0;
+
+  if (auditLogCount === 0) issues.push("No linked audit logs");
+  if (openLogCount === 0) issues.push("Missing open log");
+  if (openLogCount > 1) issues.push("Duplicate open logs");
+
+  if (isClosed) {
+    if (closeLogCount === 0) issues.push("Missing close log");
+    if (closeLogCount > 1) issues.push("Duplicate close logs");
+    if (!_hasNumericValue(shift.expected_balance)) issues.push("Expected balance missing");
+    if (!_hasNumericValue(shift.closing_balance)) issues.push("Closing count missing");
+
+    if (_hasNumericValue(shift.expected_balance) && _hasNumericValue(shift.closing_balance)) {
+      discrepancy = Number(shift.closing_balance) - Number(shift.expected_balance);
+      if (Math.abs(discrepancy) > 0.01) {
+        issues.push(`${discrepancy < 0 ? "Short" : "Over"} ${formatRegisterMoney(Math.abs(discrepancy))}`);
+      }
+    }
+  } else if (closeLogCount > 0) {
+    issues.push("Close log exists while shift is open");
+  }
+
+  if (pendingDrops > 0) issues.push(`${pendingDrops} pending cash drop${pendingDrops === 1 ? "" : "s"}`);
+  if (pendingHandovers > 0) issues.push(`${pendingHandovers} pending handover${pendingHandovers === 1 ? "" : "s"}`);
+  if (rejectedDrops > 0) issues.push(`${rejectedDrops} rejected cash drop${rejectedDrops === 1 ? "" : "s"}`);
+  if (rejectedHandovers > 0) issues.push(`${rejectedHandovers} rejected handover${rejectedHandovers === 1 ? "" : "s"}`);
+
+  return {
+    isClosed,
+    isOk: issues.length === 0,
+    issues,
+    discrepancy,
+    openLogCount,
+    closeLogCount,
+    auditLogCount,
+    pendingDrops,
+    pendingHandovers,
+    verificationRequestedAt: shift.verification_requested_at || null,
+    verificationCompletedAt: shift.verification_completed_at || null
+  };
+}
+
+function _renderShiftHistoryTable() {
+  const container = document.getElementById("shift-history-table-wrap");
+  if (!container) return;
+
+  if (!_shiftHistoryData.length) {
+    container.innerHTML = `
+      <div class="py-10 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-slate-400">
+        <svg class="w-10 h-10 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        <span class="text-xs font-bold uppercase tracking-widest">No shift history for this period</span>
+      </div>
+    `;
+    return;
+  }
+
+  const issuePreview = (issues) => {
+    if (!issues.length) {
+      return `<span class="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Error proof</span>`;
+    }
+
+    const visible = issues.slice(0, 3);
+    const remaining = issues.length - visible.length;
+    return `
+      <div class="flex flex-wrap gap-1.5">
+        ${visible.map((issue) => `<span class="px-2 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300 border border-rose-100 dark:border-rose-900/40 text-[10px] font-bold">${issue}</span>`).join("")}
+        ${remaining > 0 ? `<span class="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 text-[10px] font-bold">+${remaining} more</span>` : ""}
+      </div>
+    `;
+  };
+
+  const rows = _shiftHistoryData.map((shift) => {
+    const start = new Date(shift.start_time);
+    const end = shift.end_time ? new Date(shift.end_time) : null;
+    const dayName = start.toLocaleDateString(undefined, { weekday: 'long' });
+    const dateStr = start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    
+    const startTime = start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const endTime = end ? end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'ACTIVE';
+    const health = _buildShiftHealth(shift);
+    const dotClass = health.isOk ? "bg-emerald-500 shadow-emerald-500/30" : "bg-rose-500 shadow-rose-500/30";
+    const rowTint = health.isOk ? "hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10" : "bg-rose-50/30 dark:bg-rose-950/10 hover:bg-rose-50/60 dark:hover:bg-rose-950/20";
+    const statusPill = health.isOk
+      ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-900/40"
+      : "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-100 dark:border-rose-900/40";
+    const statusText = health.isOk ? "Error proof" : "Needs review";
+    const expectedText = _hasNumericValue(shift.expected_balance) ? formatRegisterMoney(shift.expected_balance) : "Missing";
+    const closingText = _hasNumericValue(shift.closing_balance) ? formatRegisterMoney(shift.closing_balance) : (health.isClosed ? "Missing" : "Open");
+    const verificationDemandedText = _formatAuditTimestamp(health.verificationRequestedAt);
+    const verificationCompletedText = _formatAuditTimestamp(health.verificationCompletedAt, health.verificationRequestedAt ? "Pending" : "None");
+    const discrepancyTone = Math.abs(health.discrepancy) <= 0.01
+      ? "text-emerald-600 dark:text-emerald-400"
+      : health.discrepancy > 0
+        ? "text-blue-600 dark:text-blue-400"
+        : "text-rose-600 dark:text-rose-400";
+
+    return `
+      <tr class="${rowTint} transition-colors border-b border-slate-100 dark:border-slate-800 last:border-0">
+        <td class="relative w-14 px-5 py-5 align-middle">
+          <span class="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2 bg-slate-200 dark:bg-slate-800"></span>
+          <span class="relative z-10 mx-auto block h-3.5 w-3.5 rounded-full ${dotClass} ring-4 ring-white dark:ring-slate-900 shadow-lg"></span>
+        </td>
+        <td class="px-4 py-5 align-middle min-w-[190px]">
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-300 text-[10px] font-black uppercase tracking-widest">${dayName}</span>
+            <span class="text-xs font-bold text-slate-500 dark:text-slate-400">${dateStr}</span>
+          </div>
+          <div class="mt-2 text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <span>${startTime}</span>
+            <span class="text-slate-300 dark:text-slate-600">to</span>
+            <span>${endTime}</span>
+          </div>
+          <div class="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shift #${shift.id} · ${String(shift.status || "open").toUpperCase()}</div>
+        </td>
+        <td class="px-4 py-5 align-middle min-w-[150px]">
+          <div class="text-xs font-black text-slate-800 dark:text-white">${shift.cashier_name || "System"}</div>
+          <div class="mt-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Closed by ${shift.closed_by_name || (health.isClosed ? "Unknown" : "Open")}</div>
+        </td>
+        <td class="px-4 py-5 align-middle min-w-[190px]">
+          <div class="grid grid-cols-2 gap-2 text-[11px]">
+            <div>
+              <div class="font-black uppercase tracking-widest text-slate-400 text-[9px]">Expected</div>
+              <div class="mt-1 font-black text-slate-800 dark:text-white">${expectedText}</div>
+            </div>
+            <div>
+              <div class="font-black uppercase tracking-widest text-slate-400 text-[9px]">Counted</div>
+              <div class="mt-1 font-black text-slate-800 dark:text-white">${closingText}</div>
+            </div>
+          </div>
+          <div class="mt-2 text-[11px] font-black ${discrepancyTone}">
+            Difference: ${health.isClosed && _hasNumericValue(shift.expected_balance) && _hasNumericValue(shift.closing_balance) ? formatRegisterMoney(Math.abs(health.discrepancy)) : "Pending"}
+          </div>
+        </td>
+        <td class="px-4 py-5 align-middle min-w-[160px]">
+          <div class="text-[11px] font-bold text-slate-500 dark:text-slate-400">Open logs: <span class="text-slate-900 dark:text-white">${health.openLogCount}</span></div>
+          <div class="text-[11px] font-bold text-slate-500 dark:text-slate-400 mt-1">Close logs: <span class="text-slate-900 dark:text-white">${health.closeLogCount}</span></div>
+          <div class="text-[11px] font-bold text-slate-500 dark:text-slate-400 mt-1">Total audit logs: <span class="text-slate-900 dark:text-white">${health.auditLogCount}</span></div>
+        </td>
+        <td class="px-4 py-5 align-middle min-w-[170px]">
+          <div class="text-[11px] font-bold text-slate-500 dark:text-slate-400">Pending drops: <span class="text-slate-900 dark:text-white">${health.pendingDrops}</span></div>
+          <div class="text-[11px] font-bold text-slate-500 dark:text-slate-400 mt-1">Pending handovers: <span class="text-slate-900 dark:text-white">${health.pendingHandovers}</span></div>
+          <div class="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Demanded</div>
+          <div class="mt-1 text-[11px] font-bold text-slate-700 dark:text-slate-200">${verificationDemandedText}</div>
+          <div class="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Admin Verified/Rejected</div>
+          <div class="mt-1 text-[11px] font-bold ${health.verificationCompletedAt ? "text-emerald-600 dark:text-emerald-400" : health.verificationRequestedAt ? "text-amber-600 dark:text-amber-300" : "text-slate-500 dark:text-slate-400"}">${verificationCompletedText}</div>
+          <div class="mt-2 px-2.5 py-1 rounded-lg border ${statusPill} text-[10px] font-black inline-flex">${statusText}</div>
+        </td>
+        <td class="px-4 py-5 align-middle min-w-[220px]">
+          ${issuePreview(health.issues)}
+        </td>
+        ${currentUser.role === 'superadmin' ? `<td class="px-4 py-5 align-middle text-xs font-bold text-indigo-500 min-w-[140px]">${shift.shop_name || "Core System"}</td>` : ""}
+        <td class="px-4 py-5 align-middle text-right">
+            <button onclick="viewShiftAuditFlow(${shift.id})" class="w-9 h-9 rounded-full bg-slate-900 dark:bg-indigo-600 text-white flex items-center justify-center hover:scale-105 transition-all shadow-lg ml-auto" title="View Full Shift Audit">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">Shift Health</h4>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Audit completeness and register calculation checks</p>
+        </div>
+        <div class="flex items-center gap-4 text-[10px] font-black uppercase tracking-widest">
+          <span class="inline-flex items-center gap-2 text-emerald-600 dark:text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Error proof</span>
+          <span class="inline-flex items-center gap-2 text-rose-600 dark:text-rose-400"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>Problem found</span>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+              <th class="w-14 px-5 py-4"></th>
+              <th class="px-4 py-4">Shift</th>
+              <th class="px-4 py-4">Cashier</th>
+              <th class="px-4 py-4">Calculations</th>
+              <th class="px-4 py-4">Logs</th>
+              <th class="px-4 py-4">Cash Movement</th>
+              <th class="px-4 py-4">Status</th>
+              ${currentUser.role === 'superadmin' ? '<th class="px-4 py-4">Shop</th>' : ''}
+              <th class="px-4 py-4 text-right">Audit</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderLogsTable() {
+  const tbody = document.getElementById("logs-table-body");
+  if (!tbody) return;
+
+  if (!_logsData.length) {
+    tbody.innerHTML = `<tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-slate-400 italic font-medium">No activity records found for the selected date range.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = _logsData.map(log => {
+    const time = new Date(log.created_at);
+    let detailsHtml = "";
+    
+    try {
+      if (log.details && log.details.startsWith('{')) {
+        const d = JSON.parse(log.details);
+        if (log.action === 'SHIFT_CLOSE') {
+          const diff = Number(d.actual) - Number(d.expected);
+          const diffClass = Math.abs(diff) <= 0.01 ? "text-emerald-500" : diff > 0 ? "text-blue-500" : "text-rose-500";
+          detailsHtml = `
+            <div class="space-y-1 text-[11px]">
+              <div class="flex gap-2"><span>Expected: Rs.${Number(d.expected).toFixed(0)}</span> | <span>Actual: Rs.${Number(d.actual).toFixed(0)}</span></div>
+              <div class="font-bold ${diffClass}">Discrepancy: Rs.${diff.toFixed(2)}</div>
+              ${d.provisional_close ? `<div class="font-bold text-amber-600 dark:text-amber-300">Pending verification: Rs.${Number(d.pending_verification_total || 0).toFixed(2)}</div>` : ""}
+              ${d.shortage_reason ? `<div class="mt-1 p-2 rounded bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-900/30 font-medium">Reason: ${d.shortage_reason}</div>` : ""}
+            </div>`;
+        } else if (log.action === 'SHIFT_OPEN') {
+           detailsHtml = `<span class="text-xs font-bold text-emerald-600">Opened with Rs. ${Number(d.opening_balance).toFixed(0)}</span>`;
+        } else if (log.action === 'CASH_DROP_REQUEST') {
+           detailsHtml = `
+            <div class="space-y-1 text-xs font-bold">
+              <div>Amount: <span class="text-amber-600">Rs. ${Number(d.amount).toFixed(0)}</span> ${d.note ? `<span class="text-slate-400 font-normal ml-1 italic">(${d.note})</span>` : ""}</div>
+              <div class="text-[10px] text-slate-400 uppercase tracking-widest">Demanded: ${time.toLocaleString()}</div>
+            </div>`;
+        } else if (log.action === 'CASH_DROP_VERIFIED' || log.action === 'CASH_DROP_REJECTED') {
+           const statusTone = log.action.includes('REJECTED') ? 'text-rose-600' : 'text-emerald-600';
+           const statusLabel = log.action.includes('REJECTED') ? 'Admin rejected' : 'Admin verified';
+           detailsHtml = `
+            <div class="space-y-1 text-xs font-bold">
+              <div>${statusLabel}: <span class="${statusTone}">Rs. ${Number(d.amount).toFixed(0)}</span></div>
+              <div class="text-[10px] text-slate-400 uppercase tracking-widest">Demanded: ${_formatAuditTimestamp(d.requested_at, "Unknown")}</div>
+              <div class="text-[10px] text-slate-400 uppercase tracking-widest">${statusLabel}: ${time.toLocaleString()}</div>
+            </div>`;
+        } else if (log.action.includes('HANDOVER')) {
+           const handoverTone = log.action.includes('REJECTED') ? 'text-rose-600' : 'text-blue-600';
+           const handoverStatus = log.action.includes('REQUEST')
+            ? 'Demanded'
+            : log.action.includes('REJECTED')
+              ? 'Admin rejected'
+              : 'Admin verified';
+           detailsHtml = `
+            <div class="space-y-1 text-xs font-bold">
+              <div>Amount: <span class="${handoverTone}">Rs. ${Number(d.amount).toFixed(0)}</span></div>
+              <div class="text-[10px] text-slate-400 uppercase tracking-widest">Demanded: ${log.action.includes('REQUEST') ? time.toLocaleString() : _formatAuditTimestamp(d.requested_at, "Unknown")}</div>
+              ${log.action.includes('REQUEST') ? "" : `<div class="text-[10px] text-slate-400 uppercase tracking-widest">${handoverStatus}: ${time.toLocaleString()}</div>`}
+            </div>`;
+        } else {
+           detailsHtml = `<pre class="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-800 p-1 rounded max-w-xs truncate">${JSON.stringify(d)}</pre>`;
+        }
+      } else {
+        detailsHtml = `<span class="text-xs text-slate-500">${log.details || ''}</span>`;
+      }
+    } catch(e) {
+      detailsHtml = `<span class="text-xs text-slate-500">${log.details || ''}</span>`;
+    }
+
+    const actionClass = {
+      'SHIFT_OPEN': 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+      'SHIFT_CLOSE': 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
+      'CASH_DROP_REQUEST': 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
+      'CASH_DROP_VERIFIED': 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+      'CASH_DROP_REJECTED': 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
+      'HANDOVER_REQUEST': 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+      'HANDOVER_VERIFIED': 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300',
+      'HANDOVER_REJECTED': 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
+    }[log.action] || 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400';
+
+    return `
+      <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.01] transition-colors border-b border-slate-50 dark:border-slate-800 last:border-0 grow">
+        <td class="px-6 py-4">
+          <div class="text-xs font-bold text-slate-900 dark:text-white uppercase">${time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+          <div class="text-[10px] font-medium text-slate-400 mt-0.5">${time.toLocaleDateString()}</div>
+        </td>
+        <td class="px-6 py-4">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-500">${log.user_name?.substring(0,2).toUpperCase() || '??'}</div>
+            <div>
+              <div class="text-xs font-black text-slate-800 dark:text-white">${log.user_name || 'System'}</div>
+              <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">${log.user_role || 'No Role'}</div>
+            </div>
+          </div>
+        </td>
+        <td class="px-6 py-4">
+          <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-tight ${actionClass}">${log.action.replace(/_/g, ' ')}</span>
+        </td>
+        <td class="px-6 py-4 flex items-center justify-between gap-4">
+          <div class="flex-1">${detailsHtml}</div>
+          ${log.reference_type === 'shift' ? `
+            <button onclick="viewShiftAuditFlow(${log.reference_id})" class="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 transition-all shadow-sm" title="View Full Shift Audit">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </button>
+          ` : ""}
+        </td>
+        ${currentUser.role === 'superadmin' ? `<td class="px-6 py-4 text-xs font-bold text-indigo-500">${log.shop_name || 'Core System'}</td>` : ''}
+      </tr>`;
+  }).join("");
+}
+
+async function viewShiftAuditFlow(shiftId) {
+  openModal("Shift Activity Timeline", `<div class="p-20 text-center text-slate-400 italic">Gathering shift records...</div>`, "max-w-3xl");
+  
+  try {
+    const logs = await api(`/api/activity-logs/shift/${shiftId}`);
+    if (!logs.length) {
+      document.getElementById("modal-body").innerHTML = `<div class="p-20 text-center text-slate-400 italic">No activity records found for this shift.</div>`;
+      return;
+    }
+
+    const opener = logs.find(l => l.action === 'SHIFT_OPEN');
+    const closer = logs.find(l => l.action === 'SHIFT_CLOSE');
+    const openTime = opener ? new Date(opener.created_at).toLocaleString() : 'Unknown';
+    const closeTime = closer ? new Date(closer.created_at).toLocaleString() : 'Active/Unknown';
+
+    let timelineHtml = `
+      <div class="space-y-6">
+        <!-- Summary Header -->
+        <div class="grid grid-cols-2 gap-4">
+          <div class="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
+            <div class="text-[9px] font-black uppercase text-emerald-500 tracking-widest pl-1">Shift Started</div>
+            <div class="text-xs font-black text-slate-900 dark:text-white mt-1">${openTime}</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40">
+            <div class="text-[9px] font-black uppercase text-rose-500 tracking-widest pl-1">Shift Ended</div>
+            <div class="text-xs font-black text-slate-900 dark:text-white mt-1">${closeTime}</div>
+          </div>
+        </div>
+
+        <!-- Flow List -->
+        <div class="relative pl-8 space-y-8 before:content-[''] before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100 dark:before:bg-slate-800">
+    `;
+
+    logs.forEach(log => {
+      const time = new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const actionClass = {
+        'SHIFT_OPEN': 'bg-emerald-500',
+        'SHIFT_CLOSE': 'bg-rose-500',
+        'CASH_DROP_REQUEST': 'bg-amber-500',
+        'CASH_DROP_VERIFIED': 'bg-emerald-500',
+        'CASH_DROP_REJECTED': 'bg-rose-500',
+        'HANDOVER_REQUEST': 'bg-blue-500',
+        'HANDOVER_VERIFIED': 'bg-indigo-500',
+        'HANDOVER_REJECTED': 'bg-rose-500',
+      }[log.action] || 'bg-slate-400';
+
+      let description = log.action.replace(/_/g, ' ');
+      let detailsText = "";
+      try {
+        if (log.details && log.details.startsWith('{')) {
+          const d = JSON.parse(log.details);
+          if (log.action === 'SHIFT_CLOSE') {
+            const diff = Number(d.actual) - Number(d.expected);
+            detailsText = `Drawer checked. Discrepancy: Rs. ${diff.toFixed(2)}. ${d.provisional_close ? `Pending verification: Rs. ${Number(d.pending_verification_total || 0).toFixed(2)}. ` : ""}${d.shortage_reason ? `Reason: ${d.shortage_reason}` : ""}`;
+          } else if (log.action === 'SHIFT_OPEN') {
+            detailsText = `Opened with float: Rs. ${Number(d.opening_balance).toFixed(0)}`;
+          } else if (log.action.includes('CASH_DROP') || log.action.includes('HANDOVER')) {
+            const demandedAt = log.action.includes('REQUEST')
+              ? new Date(log.created_at).toLocaleString()
+              : _formatAuditTimestamp(d.requested_at, "Unknown");
+            const verifiedAt = log.action.includes('REQUEST') ? "" : ` Verified: ${new Date(log.created_at).toLocaleString()}.`;
+            detailsText = `Amount: Rs. ${Number(d.amount).toFixed(0)}. Demanded: ${demandedAt}.${verifiedAt} ${d.note ? `(${d.note})` : ""}`;
+          }
+        } else {
+          detailsText = log.details || "";
+        }
+      } catch(e) {}
+
+      timelineHtml += `
+        <div class="relative">
+          <div class="absolute -left-[27px] top-1.5 w-3.5 h-3.5 rounded-full ${actionClass} border-4 border-white dark:border-slate-900 ring-1 ring-slate-100 dark:ring-slate-800"></div>
+          <div>
+            <div class="flex items-center justify-between gap-4">
+              <span class="text-[10px] font-black uppercase tracking-widest ${actionClass.replace('bg-', 'text-')}">${description}</span>
+              <span class="text-[10px] font-bold text-slate-400">${time}</span>
+            </div>
+            <div class="text-sm font-black text-slate-800 dark:text-white mt-1">${log.user_name}</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">${detailsText}</div>
+          </div>
+        </div>
+      `;
+    });
+
+    timelineHtml += `</div></div>`;
+    document.getElementById("modal-body").innerHTML = timelineHtml;
+  } catch (err) {
+    document.getElementById("modal-body").innerHTML = `<div class="p-20 text-center text-rose-500 font-bold">Error: ${err.message}</div>`;
   }
 }
 

@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS shops (
   extended_name_spacing INTEGER DEFAULT 2,
   use_text_on_receipt INTEGER DEFAULT 1,
   customer_bill_printer TEXT,
-  unpaid_bill_printer TEXT
+  unpaid_bill_printer TEXT,
+  logo_data TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -60,7 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
   allowed_panels TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  panel_permissions TEXT
+  panel_permissions TEXT,
+  can_manage_register BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS brands (
@@ -187,7 +189,8 @@ CREATE TABLE IF NOT EXISTS sales (
   guest_count INTEGER DEFAULT 1,
   token_number TEXT,
   special_instructions TEXT,
-  kitchen_id INTEGER REFERENCES users(id)
+  kitchen_id INTEGER REFERENCES users(id),
+  shift_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -213,7 +216,8 @@ CREATE TABLE IF NOT EXISTS returns (
   total_refund DOUBLE PRECISION NOT NULL DEFAULT 0,
   reason TEXT,
   payment_method TEXT NOT NULL DEFAULT 'cash',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  shift_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS return_items (
@@ -237,7 +241,8 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
   balance_after DOUBLE PRECISION NOT NULL DEFAULT 0,
   note TEXT,
   created_by INTEGER REFERENCES users(id),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  shift_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
@@ -250,7 +255,8 @@ CREATE TABLE IF NOT EXISTS expenses (
   note TEXT,
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  shift_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS brand_expense_payments (
@@ -418,3 +424,57 @@ CREATE TABLE IF NOT EXISTS printers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_printers_shop_id ON printers(shop_id);
+
+-- SHIFT MANAGEMENT TABLES
+CREATE TABLE IF NOT EXISTS shifts (
+  id SERIAL PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  start_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  end_time TIMESTAMPTZ,
+  opening_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+  closing_balance DOUBLE PRECISION,
+  expected_balance DOUBLE PRECISION,
+  net_cash_sales DOUBLE PRECISION DEFAULT 0,
+  net_card_sales DOUBLE PRECISION DEFAULT 0,
+  total_expenses DOUBLE PRECISION DEFAULT 0,
+  cash_drops DOUBLE PRECISION DEFAULT 0,
+  cash_handovers DOUBLE PRECISION DEFAULT 0,
+  status TEXT DEFAULT 'open', -- open, closed
+  note TEXT,
+  closed_by_user_id INTEGER REFERENCES users(id),
+  terminal_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cash_handovers (
+  id SERIAL PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+  sender_id INTEGER NOT NULL REFERENCES users(id),
+  receiver_id INTEGER NOT NULL REFERENCES users(id),
+  amount DOUBLE PRECISION NOT NULL,
+  status TEXT DEFAULT 'pending', -- pending, verified, rejected
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  verified_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS cash_drops (
+  id SERIAL PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+  requested_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  amount DOUBLE PRECISION NOT NULL,
+  status TEXT DEFAULT 'pending', -- pending, verified, rejected
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  verified_by_user_id INTEGER REFERENCES users(id),
+  verified_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_shifts_shop_id ON shifts(shop_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_user_id ON shifts(user_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
+CREATE INDEX IF NOT EXISTS idx_cash_handovers_shift_id ON cash_handovers(shift_id);
+CREATE INDEX IF NOT EXISTS idx_cash_drops_shift_id ON cash_drops(shift_id);
+CREATE INDEX IF NOT EXISTS idx_cash_drops_status ON cash_drops(status);

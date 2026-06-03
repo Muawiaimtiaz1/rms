@@ -41,7 +41,8 @@ class AuthService {
       name: user.name,
       username: user.username,
       role: user.role,
-      shop_id: user.shop_id
+      shop_id: user.shop_id,
+      can_manage_register: !!user.can_manage_register
     };
   }
 
@@ -75,7 +76,8 @@ class AuthService {
       ...user,
       shop_name: shopName,
       shop_type: shopType,
-      allowed_panels: allowedPanels
+      allowed_panels: allowedPanels,
+      can_manage_register: !!user.can_manage_register
     };
   }
 

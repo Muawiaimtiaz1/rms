@@ -17,7 +17,7 @@ router.put("/:id/items", requireAuth, async (req, res) => {
 
 // GET /api/sales — list sales for current shop
 router.get("/", requireAuth, async (req, res) => {
-  const sales = await salesService.getSales(req.session.user.shop_id);
+  const sales = await salesService.getSales(req.session.user.shop_id, req.session.user);
   res.json(sales);
 });
 
@@ -30,7 +30,7 @@ router.patch("/:id/pay", requireAuth, async (req, res) => {
 
 // PATCH /api/sales/:id/details — update sale details
 router.patch("/:id/details", requireAuth, async (req, res) => {
-  await salesService.updateDetails(req.params.id, req.session.user.shop_id, req.body);
+  await salesService.updateDetails(req.params.id, req.session.user.shop_id, req.body, req.session.user.id);
   res.json({ ok: true });
 });
 

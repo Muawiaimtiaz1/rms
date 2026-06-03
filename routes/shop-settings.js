@@ -37,7 +37,7 @@ router.get("/", requireAuth, async (req, res) => {
     if (!shopId) return res.status(403).json({ error: "No shop assigned" });
 
     const isPostgres = usePostgres();
-    const query = `SELECT id, name, logo_path, receipt_header_text, receipt_extended_name, receipt_phone, receipt_address, 
+    const query = `SELECT id, name, logo_path, logo_data, receipt_header_text, receipt_extended_name, receipt_phone, receipt_address, 
                 receipt_images_json, receipt_policies, use_logo_on_receipt, use_text_on_receipt, receipt_font_family,
                 header_font_size, header_font_weight, header_spacing,
                 extended_name_font_size, extended_name_font_weight, extended_name_spacing,
@@ -62,7 +62,8 @@ router.get("/", requireAuth, async (req, res) => {
 
     shop.use_logo_on_receipt = !!shop.use_logo_on_receipt;
     shop.use_text_on_receipt = !!shop.use_text_on_receipt;
-    if (shop.logo_path) shop.logo_url = `/uploads/receipt-assets/${path.basename(shop.logo_path)}`;
+    if (shop.logo_data) shop.logo_url = shop.logo_data;
+    else if (shop.logo_path) shop.logo_url = `/uploads/receipt-assets/${path.basename(shop.logo_path)}`;
 
     res.json(shop);
   } catch (e) {
@@ -84,7 +85,7 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), async (req, r
       "header_spacing", "extended_name_font_size", "extended_name_font_weight", "extended_name_spacing",
       "contact_font_size", "contact_align", "contact_padding", "footer_font_size", "footer_font_style",
       "footer_margin", "divider_style", "divider_width", "section_gap", "auto_calculate_damage_to_loss",
-      "customer_bill_printer", "unpaid_bill_printer"
+      "customer_bill_printer", "unpaid_bill_printer", "logo_data"
     ];
 
     const updates = [];
@@ -132,7 +133,11 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), async (req, r
 router.post("/images", requireAuth, requireAdmin, upload.single("image"), async (req, res) => {
   try {
     const shopId = req.session.user.shop_id;
-    if (!shopId || !req.file) return res.status(400).json({ error: "Missing data" });
+    if (!shopId) return res.status(403).json({ error: "No shop assigned" });
+    
+    // Support both file upload and direct logo_data (compressed Base64)
+    const logoData = req.body.logo_data;
+    if (!req.file && !logoData) return res.status(400).json({ error: "Missing image data" });
 
     const isPostgres = usePostgres();
     const { description } = req.body;
@@ -144,7 +149,9 @@ router.post("/images", requireAuth, requireAdmin, upload.single("image"), async 
     if (shop?.receipt_images_json) {
         try { images = typeof shop.receipt_images_json === 'string' ? JSON.parse(shop.receipt_images_json) : shop.receipt_images_json; } catch(e) { images = []; }
     }
-    const newImg = { id: Date.now().toString(), path: `/uploads/receipt-assets/${req.file.filename}`, description: description || "", created_at: new Date().toISOString() };
+
+    const imgPath = logoData ? logoData : `/uploads/receipt-assets/${req.file.filename}`;
+    const newImg = { id: Date.now().toString(), path: imgPath, description: description || "", created_at: new Date().toISOString() };
     images.push(newImg);
 
     if (isPostgres) await getPostgres().query("UPDATE shops SET receipt_images_json = $1 WHERE id = $2", [JSON.stringify(images), shopId]);
@@ -171,8 +178,8 @@ router.delete("/logo", requireAuth, requireAdmin, async (req, res) => {
       if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
     }
 
-    if (isPostgres) await getPostgres().query("UPDATE shops SET logo_path = NULL WHERE id = $1", [shopId]);
-    else getSqlite().prepare("UPDATE shops SET logo_path = NULL WHERE id = ?").run(shopId);
+    if (isPostgres) await getPostgres().query("UPDATE shops SET logo_path = NULL, logo_data = NULL WHERE id = $1", [shopId]);
+    else getSqlite().prepare("UPDATE shops SET logo_path = NULL, logo_data = NULL WHERE id = ?").run(shopId);
     res.json({ ok: true });
   } catch (e) {
     console.error("Logo delete error:", e);
@@ -198,8 +205,10 @@ router.delete("/images/:id", requireAuth, requireAdmin, async (req, res) => {
     const img = images.find(i => i.id === imageId);
     if (!img) return res.status(404).json({ error: "Not found" });
 
-    const fullPath = path.join(__dirname, "..", "public", img.path);
-    if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+    if (img.path && !img.path.startsWith("data:")) {
+      const fullPath = path.join(__dirname, "..", "public", img.path);
+      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+    }
     images = images.filter(i => i.id !== imageId);
 
     if (isPostgres) await getPostgres().query("UPDATE shops SET receipt_images_json = $1 WHERE id = $2", [JSON.stringify(images), shopId]);

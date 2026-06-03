@@ -221,6 +221,11 @@ class SalesService {
     const sale = await dbInstance('sales').where({ id: saleId, shop_id: shopId }).first();
     if (!sale) return { queued: 0, printer_configured: true };
 
+    const shop = await dbInstance('shops').where({ id: shopId }).select('shop_type').first();
+    if (shop?.shop_type !== 'restaurant') {
+      return { queued: 0, printer_configured: true };
+    }
+
     const jobs = {};
     const addItemToRoute = (route, item, category) => {
       if (!route || route.station === 'NONE') return;
@@ -299,13 +304,19 @@ class SalesService {
       return this.generatePrintJobs(saleId, bill.items, shopId, dbInstance);
     }
 
-    // For customer and unpaid bills, check if category-based routing is configured
-    // If yes, use split printing by category. If no, use the default bill printer setting.
+    const shopSettings = await dbInstance('shops')
+      .where({ id: shopId })
+      .select('shop_type', 'customer_bill_printer', 'unpaid_bill_printer')
+      .first();
+
+    // Retail customer slips must stay on the customer bill path, not kitchen/category routing.
+    // Restaurants may still use split bill printing when category routing is configured.
     const { printers, resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
-    const categoryRouteMap = await this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute);
-    
-    // Check if any categories have routing configured
-    const hasCategoryRouting = Object.values(categoryRouteMap).some(cat => cat.raw);
+    let hasCategoryRouting = false;
+    if (shopSettings?.shop_type === 'restaurant') {
+      const categoryRouteMap = await this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute);
+      hasCategoryRouting = Object.values(categoryRouteMap).some(cat => cat.raw);
+    }
     
     if (hasCategoryRouting && printers.length > 0) {
       // Use split printing by category for bills
@@ -313,7 +324,6 @@ class SalesService {
     }
 
     // Fallback to default bill printer setting (not split)
-    const shopSettings = await dbInstance('shops').where({ id: shopId }).select('customer_bill_printer', 'unpaid_bill_printer').first();
     let targetPrinterRouteValue = null;
 
     if (normalizedFormat === 'customer' && shopSettings?.customer_bill_printer) {
@@ -420,6 +430,20 @@ class SalesService {
     const data = checkoutSchema.parse(payload);
     
     return await db.transaction(async (trx) => {
+      // 0. Shift Resolution
+      let shiftId = data.order_status === 'payment_pending' ? null : payload.shift_id;
+      if (!shiftId && data.order_status !== 'payment_pending') {
+        const activeShift = await trx('shifts')
+          .where({ shop_id: shopId, user_id: userId, status: 'open' })
+          .first();
+        if (activeShift) {
+          shiftId = activeShift.id;
+        } else if (data.order_status === 'completed' || Number(data.amount_received || 0) > 0.01) {
+          data.order_status = 'payment_pending';
+          data.amount_received = 0;
+        }
+      }
+
       let subtotal = 0;
       const resolvedItems = [];
 
@@ -489,7 +513,7 @@ class SalesService {
         customerPhone: data.customer_phone
       });
 
-      if (customer && dueAmount > 0.01) {
+      if (customer && dueAmount > 0.01 && data.order_status === 'completed') {
         const limit = Number(customer.credit_limit || 0);
         const currentBal = Number(customer.current_balance || 0);
         if (limit > 0 && (currentBal + dueAmount) > limit) {
@@ -518,7 +542,8 @@ class SalesService {
           kitchen_id: data.kitchen_id,
           guest_count: data.guest_count,
           token_number: data.token_number,
-          order_status: data.order_status
+          order_status: data.order_status,
+          shift_id: shiftId
         })
         .returning('id');
       const saleId = typeof saleIdObj === 'object' ? saleIdObj.id : saleIdObj;
@@ -627,9 +652,9 @@ class SalesService {
       }
 
       // 6. Ledger Update
-      if (customer && dueAmount > 0.01) {
+      if (customer && dueAmount > 0.01 && data.order_status === 'completed') {
         await customerService.addSaleEntry(trx, {
-          customerId: customer.id, shopId, saleId, dueAmount, grandTotal, amountReceived: data.amount_received, userId
+          customerId: customer.id, shopId, saleId, dueAmount, grandTotal, amountReceived: data.amount_received, userId, shiftId
         });
       }
 
@@ -655,6 +680,19 @@ class SalesService {
       const sale = await trx('sales').where({ id: saleId, shop_id: shopId }).first();
       if (!sale) throw new Error("Sale not found");
       if (sale.order_status === 'completed') throw new Error("Cannot edit a completed order");
+
+      let shiftId = data.order_status === 'payment_pending' ? null : sale.shift_id;
+      if (!shiftId && data.order_status !== 'payment_pending') {
+        const activeShift = await trx('shifts')
+          .where({ shop_id: shopId, user_id: userId, status: 'open' })
+          .first();
+        if (activeShift) {
+          shiftId = activeShift.id;
+        } else if (data.order_status === 'completed' || Number(data.amount_received || 0) > 0.01) {
+          data.order_status = 'payment_pending';
+          data.amount_received = 0;
+        }
+      }
 
       // 1. Fetch previous items to restore stock
       const oldItems = await trx('sale_items').where({ sale_id: saleId });
@@ -769,6 +807,8 @@ class SalesService {
         kitchen_id: data.kitchen_id || sale.kitchen_id,
         guest_count: data.guest_count,
         token_number: data.token_number || sale.token_number,
+        order_status: data.order_status,
+        shift_id: shiftId,
         updated_at: trx.fn.now()
       });
 
@@ -849,9 +889,9 @@ class SalesService {
       }
       // 7. Ledger Update (if customer and due)
       const customer = await trx('customers').where({ id: data.customer_id || sale.customer_id }).first();
-      if (customer && dueAmount > 0.01) {
+      if (customer && dueAmount > 0.01 && data.order_status === 'completed') {
         await customerService.addSaleEntry(trx, {
-          customerId: customer.id, shopId, saleId, dueAmount, grandTotal, amountReceived: data.amount_received, userId
+          customerId: customer.id, shopId, saleId, dueAmount, grandTotal, amountReceived: data.amount_received, userId, shiftId
         });
       }
 
@@ -868,8 +908,8 @@ class SalesService {
   }
 
 
-  async getSales(shopId) {
-    return await db('sales as s')
+  async getSales(shopId, currentUser = null) {
+    const query = db('sales as s')
       .select('s.*', 'u.name as served_by_name', 'u.username as served_by_username', 'w.name as waiter_name', 'r.name as rider_name', 'k.name as kitchen_name', 't.table_number')
       .select(db.raw('(SELECT SUM(quantity) FROM return_items WHERE return_id IN (SELECT id FROM returns WHERE sale_id = s.id)) as items_returned'))
       .leftJoin('users as u', 's.user_id', 'u.id')
@@ -877,8 +917,23 @@ class SalesService {
       .leftJoin('users as r', 's.rider_id', 'r.id')
       .leftJoin('users as k', 's.kitchen_id', 'k.id')
       .leftJoin('tables as t', 's.table_id', 't.id')
-      .where('s.shop_id', shopId)
-      .orderBy('s.created_at', 'desc');
+      .where('s.shop_id', shopId);
+
+    const role = currentUser?.role;
+    const isPrivileged = ['admin', 'superadmin', 'manager'].includes(role);
+    if (currentUser && !isPrivileged) {
+      const activeShift = await db('shifts')
+        .where({ shop_id: shopId, user_id: currentUser.id, status: 'open' })
+        .first();
+      query.andWhere(function() {
+        this.where('s.user_id', currentUser.id);
+        if (activeShift) this.orWhere('s.shift_id', activeShift.id);
+        this.orWhere('s.order_status', 'payment_pending');
+        this.orWhereRaw('(s.total - s.amount_received) > 0.01');
+      });
+    }
+
+    return await query.orderBy('s.created_at', 'desc');
   }
 
   async payDue(saleId, shopId, userId, amount, note) {
@@ -888,7 +943,16 @@ class SalesService {
 
       const finalAmount = amount !== undefined ? parseFloat(amount) : Number(sale.total || 0);
 
-      await trx('sales').where({ id: saleId }).update({ amount_received: finalAmount });
+      // Resolve shift for payment
+      const activeShift = await trx('shifts')
+        .where({ shop_id: shopId, user_id: userId, status: 'open' })
+        .first();
+      
+      const updateData = { amount_received: finalAmount };
+      if (activeShift) updateData.shift_id = activeShift.id;
+      else throw new Error('You must open a register shift to collect payments.');
+
+      await trx('sales').where({ id: saleId }).update(updateData);
 
       if (sale.customer_id) {
         const prevDue = Number(sale.total || 0) - Number(sale.amount_received || 0);
@@ -897,7 +961,7 @@ class SalesService {
 
         if (paymentMade > 0.01) {
           await customerService.addPaymentEntry(trx, {
-            customerId: sale.customer_id, shopId, saleId: sale.id, paymentAmount: paymentMade, note, userId
+            customerId: sale.customer_id, shopId, saleId: sale.id, paymentAmount: paymentMade, note, userId, shiftId: activeShift ? activeShift.id : null
           });
         }
       }
@@ -905,7 +969,7 @@ class SalesService {
     });
   }
 
-  async updateDetails(saleId, shopId, { customer_name, customer_phone, delivery_address, rider_id, payment_method, amount_received, discount, tax_percentage }) {
+  async updateDetails(saleId, shopId, { customer_name, customer_phone, delivery_address, rider_id, payment_method, amount_received, discount, tax_percentage }, userId = null) {
     return await db.transaction(async (trx) => {
       const sale = await trx('sales').where({ id: saleId, shop_id: shopId }).first();
       if (!sale) throw new Error("Sale not found");
@@ -913,13 +977,28 @@ class SalesService {
       const updateData = {
         updated_at: trx.fn.now()
       };
+      let paymentShiftId = null;
+      let shouldSyncSaleLedger = false;
 
       if (customer_name !== undefined) updateData.customer_name = customer_name;
       if (customer_phone !== undefined) updateData.customer_phone = customer_phone;
       if (delivery_address !== undefined) updateData.delivery_address = delivery_address;
       if (rider_id !== undefined) updateData.rider_id = rider_id ? parseInt(rider_id, 10) : null;
       if (payment_method !== undefined) updateData.payment_method = payment_method;
-      if (amount_received !== undefined) updateData.amount_received = amount_received;
+      if (amount_received !== undefined) {
+        updateData.amount_received = amount_received;
+        shouldSyncSaleLedger = true;
+        if (userId) {
+          const activeShift = await trx('shifts')
+            .where({ shop_id: shopId, user_id: userId, status: 'open' })
+            .first();
+          if (activeShift) {
+            updateData.shift_id = activeShift.id;
+            paymentShiftId = activeShift.id;
+          }
+          else throw new Error('You must open a register shift to collect payments.');
+        }
+      }
 
       const newDiscount = discount !== undefined ? parseFloat(discount) : sale.discount;
       const newTaxPct = tax_percentage !== undefined ? parseFloat(tax_percentage) : sale.tax_percentage;
@@ -934,6 +1013,52 @@ class SalesService {
         updateData.discount = newDiscount;
         updateData.tax_percentage = newTaxPct;
         updateData.total = grandTotal;
+      }
+
+      if (shouldSyncSaleLedger) {
+        const oldSaleLedgerEntries = await trx('customer_ledger')
+          .where({ sale_id: saleId, shop_id: shopId, type: 'sale' });
+        for (const entry of oldSaleLedgerEntries) {
+          await trx('customers')
+            .where({ id: entry.customer_id, shop_id: shopId })
+            .update({ current_balance: db.raw('current_balance - ?', [Number(entry.amount || 0)]) });
+        }
+        await trx('customer_ledger')
+          .where({ sale_id: saleId, shop_id: shopId, type: 'sale' })
+          .del();
+
+        const finalTotal = Number(updateData.total !== undefined ? updateData.total : sale.total);
+        const finalReceived = Number(updateData.amount_received || 0);
+        const dueAmount = parseFloat((finalTotal - finalReceived).toFixed(2));
+
+        if (dueAmount > 0.01) {
+          const customer = await customerService.resolveOrCreateCustomer(trx, {
+            shopId,
+            customerId: sale.customer_id,
+            customerName: updateData.customer_name !== undefined ? updateData.customer_name : sale.customer_name,
+            customerPhone: updateData.customer_phone !== undefined ? updateData.customer_phone : sale.customer_phone
+          });
+
+          if (!customer) throw new Error('Customer details are required when completing an order with dues.');
+
+          const limit = Number(customer.credit_limit || 0);
+          const currentBal = Number(customer.current_balance || 0);
+          if (limit > 0 && (currentBal + dueAmount) > limit) {
+            throw new Error(`Credit limit exceeded for ${customer.name}.`);
+          }
+
+          updateData.customer_id = customer.id;
+          await customerService.addSaleEntry(trx, {
+            customerId: customer.id,
+            shopId,
+            saleId,
+            dueAmount,
+            grandTotal: finalTotal,
+            amountReceived: finalReceived,
+            userId,
+            shiftId: paymentShiftId
+          });
+        }
       }
 
       await trx('sales')
@@ -988,8 +1113,16 @@ class SalesService {
 
       const totalRefund = items.reduce((s, it) => s + (it.refund_price * it.quantity), 0);
 
+      const activeShift = await trx('shifts')
+        .where({ shop_id: shopId, user_id: userId, status: 'open' })
+        .first();
+
+      if (payment_method === 'cash' && !activeShift) {
+        throw new Error('You must open a register shift before processing cash refunds.');
+      }
+
       const [returnIdObj] = await trx('returns')
-        .insert({ shop_id: shopId, sale_id: saleId, user_id: userId, total_refund: totalRefund, reason, payment_method })
+        .insert({ shop_id: shopId, sale_id: saleId, user_id: userId, total_refund: totalRefund, reason, payment_method, shift_id: activeShift ? activeShift.id : null })
         .returning('id');
       const returnId = typeof returnIdObj === 'object' ? returnIdObj.id : returnIdObj;
 
@@ -1048,8 +1181,8 @@ class SalesService {
           // Refund to customer balance if paid via ledger
           if (payment_method === 'ledger') {
               await customerService.addPaymentEntry(trx, {
-                  customerId: sale.customer_id, shop_id: shopId, saleId: null, paymentAmount: totalRefund, 
-                  note: `Refund for sale SALE-${String(saleId).padStart(5, '0')}`, userId
+                  customerId: sale.customer_id, shopId, saleId: null, paymentAmount: totalRefund, 
+                  note: `Refund for sale SALE-${String(saleId).padStart(5, '0')}`, userId, shiftId: activeShift ? activeShift.id : null
               });
           }
       }

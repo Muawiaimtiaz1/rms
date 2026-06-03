@@ -75,21 +75,39 @@ class InfrastructureService {
     return orders;
   }
 
-  async updateOrderStatus(saleId, status, shopId) {
-    await db('sales')
-      .where({ id: saleId, shop_id: shopId })
-      .update({ order_status: status });
-
+  async updateOrderStatus(saleId, status, shopId, userId = null) {
     if (status === 'completed') {
       const sale = await db('sales')
         .where({ id: saleId, shop_id: shopId })
         .first();
+      if (!sale) throw new Error('Sale not found');
+
+      const updateData = { order_status: status };
+      if (!sale.shift_id) {
+        const activeShift = userId
+          ? await db('shifts')
+            .where({ shop_id: shopId, user_id: userId, status: 'open' })
+            .first()
+          : null;
+        if (!activeShift) throw new Error('Open a register shift before completing this order.');
+        updateData.shift_id = activeShift.id;
+      }
+
+      await db('sales')
+        .where({ id: saleId, shop_id: shopId })
+        .update(updateData);
+
       if (sale && sale.table_id) {
         await db('tables')
           .where({ id: sale.table_id, shop_id: shopId })
           .update({ status: 'available' });
       }
+      return;
     }
+
+    await db('sales')
+      .where({ id: saleId, shop_id: shopId })
+      .update({ order_status: status });
   }
 }
 

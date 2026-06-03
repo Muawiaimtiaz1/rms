@@ -72,7 +72,7 @@ class CustomerService {
   /**
    * Add a sale entry to the customer ledger and update balance.
    */
-  async addSaleEntry(trx, { customerId, shopId, saleId, dueAmount, grandTotal, amountReceived, userId }) {
+  async addSaleEntry(trx, { customerId, shopId, saleId, dueAmount, grandTotal, amountReceived, userId, shiftId }) {
     if (!customerId || dueAmount <= 0.01) return;
 
     const customer = await trx('customers')
@@ -96,14 +96,15 @@ class CustomerService {
       amount: dueAmount,
       balance_after: newBalance,
       note: `Credit sale — Total: Rs. ${Number(grandTotal || 0).toFixed(2)}, Paid: Rs. ${Number(amountReceived || 0).toFixed(2)}`,
-      created_by: userId
+      created_by: userId,
+      shift_id: shiftId
     });
   }
 
   /**
    * Add a payment entry (due payment) to the customer ledger and update balance.
    */
-  async addPaymentEntry(trx, { customerId, shopId, saleId, paymentAmount, note, userId }) {
+  async addPaymentEntry(trx, { customerId, shopId, saleId, paymentAmount, note, userId, shiftId }) {
     if (!customerId || paymentAmount <= 0.01) return;
 
     const customer = await trx('customers')
@@ -127,7 +128,8 @@ class CustomerService {
       amount: paymentAmount,
       balance_after: newBalance,
       note: note || (saleId ? `Payment received for SALE-${String(saleId).padStart(5, "0")}` : "Payment received"),
-      created_by: userId
+      created_by: userId,
+      shift_id: shiftId
     });
   }
 }

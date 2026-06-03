@@ -1,6 +1,48 @@
 // --- settings.js ---
 // ─── Receipt Settings ─────────────────────────────────────────────────
 
+async function compressImage(file, maxWidth = 600, maxHeight = 600, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Try webp first, then jpeg
+        try {
+            resolve(canvas.toDataURL("image/webp", quality));
+        } catch(e) {
+            resolve(canvas.toDataURL("image/jpeg", quality));
+        }
+      };
+      img.onerror = (err) => reject(new Error("Failed to load image for compression"));
+    };
+    reader.onerror = (err) => reject(new Error("Failed to read file for compression"));
+  });
+}
+
 let _receiptSettings = null;
 
 async function fetchReceiptSettings() {
@@ -27,8 +69,8 @@ function renderReceiptPreview() {
   const useText = document.getElementById("use-text-on-receipt")?.checked ?? (settings.use_text_on_receipt !== false);
 
   // Use temporary logo URL if available (from file preview), otherwise use saved logo
-  const savedLogoUrl = settings.logo_url || "";
-  const hasSavedLogo = !!settings.logo_path;
+  const savedLogoUrl = settings.logo_url || settings.logo_data || "";
+  const hasSavedLogo = !!(settings.logo_path || settings.logo_data);
   const logoUrl = _tempLogoUrl || savedLogoUrl;
   const hasLogo = _tempLogoUrl || hasSavedLogo;
   const images = settings.receipt_images || [];
@@ -182,8 +224,8 @@ function previewLogoFile(input) {
 
 function renderReceiptSettings() {
   const settings = _receiptSettings || {};
-  const hasLogo = !!settings.logo_path;
-  const logoUrl = settings.logo_url || "";
+  const hasLogo = !!(settings.logo_path || settings.logo_data);
+  const logoUrl = settings.logo_url || settings.logo_data || "";
   const images = settings.receipt_images || [];
 
   // Delay preview update until after render
@@ -623,7 +665,8 @@ async function saveReceiptSettings() {
     // Logo file
     const logoFile = document.getElementById("logo-file")?.files[0];
     if (logoFile) {
-      formData.append("logo", logoFile);
+      const compressedData = await compressImage(logoFile, 400, 400, 0.7);
+      formData.append("logo_data", compressedData);
     }
 
     const res = await fetch("/api/shop-settings", {
@@ -655,7 +698,7 @@ async function deleteLogo() {
   document.getElementById("logo-file").value = "";
 
   // Check if there's a saved logo to delete
-  if (!_receiptSettings?.logo_path) {
+  if (!_receiptSettings?.logo_path && !_receiptSettings?.logo_data) {
     // No saved logo, just clear the preview
     const previewContainer = document.getElementById("logo-preview-container");
     const previewImg = document.getElementById("logo-preview-img");
@@ -690,7 +733,8 @@ async function addReceiptImage() {
 
   try {
     const formData = new FormData();
-    formData.append("image", fileInput.files[0]);
+    const compressedData = await compressImage(fileInput.files[0], 400, 400, 0.7);
+    formData.append("logo_data", compressedData);
     formData.append("description", descInput.value || "");
 
     const res = await fetch("/api/shop-settings/images", {
@@ -930,6 +974,13 @@ async function renderUsers() {
           <div class="px-5 py-2 rounded-2xl ${badge} text-[9px] font-black uppercase tracking-[0.25em] shadow-sm relative z-10 transition-transform group-hover:scale-110">
             ${u.role.replace("_", " ")}
           </div>
+
+          <div class="mt-2 w-full pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center">
+            <span class="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 group-hover:translate-x-1 transition-transform flex items-center gap-2">
+              Manage Access
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+            </span>
+          </div>
           
           <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/0 via-white/5 to-indigo-500/0 opacity-0 group-hover:opacity-100 pointer-events-none transform -translate-x-full group-hover:translate-x-full transition-all duration-1000"></div>
         </div>`;
@@ -1005,7 +1056,7 @@ async function renderUsers() {
                 </span>
               </td>
               <td class="px-5 py-4 text-right space-x-1">
-                <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}','${u.username}','${u.email || ""}','${u.phone || ""}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, "&quot;")}, ${u.shop_id}, '${u.status || "active"}')" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all">Edit</button>
+                <button onclick="openEditUser(${u.id},'${(u.name || "").replace(/'/g, "\\'")}','${u.username}','${u.email || ""}','${u.phone || ""}','${u.role}', ${JSON.stringify(u.allowed_panels).replace(/"/g, "&quot;")}, ${u.shop_id}, '${u.status || "active"}', ${!!u.can_manage_register})" class="px-2 py-1 text-xs rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition-all">Edit</button>
                 ${u.id !== currentUser.id
             ? `
                   <button onclick="deleteUser(${u.id})" class="px-2 py-1 text-xs rounded-lg bg-red-100 dark:bg-red-900/30 text-rose-700 dark:text-rose-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all">Del</button>
@@ -1083,7 +1134,7 @@ function userFormHtml(u = {}) {
         </div>
         `
     }
-        ${u.role === "superadmin" || !isMaster
+    ${u.role === "superadmin" || !isMaster
       ? ""
       : `
         <div class="sm:col-span-2 lg:col-span-3" id="uf-panels-container" style="display: ${u.role === "admin" ? "none" : "block"}">
@@ -1105,6 +1156,23 @@ function userFormHtml(u = {}) {
         </div>
         `
     }
+        <div class="sm:col-span-2 lg:col-span-3 pt-6 border-t border-slate-100 dark:border-slate-800">
+          <label class="flex items-center justify-between p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-all group">
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              </div>
+              <div>
+                <p class="text-sm font-bold text-slate-800 dark:text-slate-100">Register Management</p>
+                <p class="text-[10px] text-slate-500 font-medium tracking-tight">Allow this user to start shifts and manage cash drawer</p>
+              </div>
+            </div>
+            <div class="relative">
+              <input type="checkbox" id="uf-can-manage-register" ${u.can_manage_register ? "checked" : ""} class="peer sr-only">
+              <div class="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-indigo-600 transition-all after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full shadow-inner"></div>
+            </div>
+          </label>
+        </div>
       </div>
     </div>
   `;
@@ -1194,6 +1262,7 @@ function openEditUser(
   allowed_panels,
   shop_id,
   status,
+  can_manage_register
 ) {
   openModal(
     "Edit User",
@@ -1207,6 +1276,7 @@ function openEditUser(
       allowed_panels,
       shop_id,
       status,
+      can_manage_register
     }) +
     `<button onclick="saveUser(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update User</button>`,
     "max-w-2xl",
@@ -1223,6 +1293,7 @@ async function saveUser(id) {
     role: $c("uf-role").value,
     status: $c("uf-status").value,
     shop_id: $c("uf-shop").value,
+    can_manage_register: document.getElementById("uf-can-manage-register")?.checked || false,
     allowed_panels:
       $c("uf-role").value === "admin"
         ? []
@@ -1915,7 +1986,7 @@ function openUserAccess(user) {
     `;
     editBtn.onclick = () => {
       toggleUserAccessMenu();
-      openEditUser(user.id, user.name, user.username, user.email, user.phone, user.role, (user.allowed_panels || []), user.shop_id, user.status);
+      openEditUser(user.id, user.name, user.username, user.email, user.phone, user.role, (user.allowed_panels || []), user.shop_id, user.status, !!user.can_manage_register);
     };
   }
 

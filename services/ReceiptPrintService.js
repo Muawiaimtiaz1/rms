@@ -53,13 +53,13 @@ function renderShopHeader(shop, baseUrl) {
   const dividerStyle = shop?.divider_style || "dashed";
   const dividerWidth = shop?.divider_width || 1;
   const dividerCss = dividerStyle === "none" ? "none" : `${dividerWidth}px ${dividerStyle} #111827`;
-  const useLogo = shop?.use_logo_on_receipt && shop?.logo_path;
+  const useLogo = shop?.use_logo_on_receipt && (shop?.logo_data || shop?.logo_path);
   const useText = shop?.use_text_on_receipt !== false;
   const headerText = shop?.receipt_header_text || shop?.name || "STORE";
 
   let html = "";
   if (useLogo) {
-    html += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${assetUrl(shop.logo_path, baseUrl)}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${escapeHtml(headerText)}"></div>`;
+    html += `<div style="margin-bottom: ${headerSpacing}px;"><img src="${assetUrl(shop.logo_data || shop.logo_path, baseUrl)}" style="max-width: 60mm; max-height: 22mm; margin: 0 auto; display: block;" alt="${escapeHtml(headerText)}"></div>`;
   }
 
   if (useText) {
@@ -109,7 +109,7 @@ function renderFooter(shop, baseUrl, isUnpaid) {
   }
 
   html += `<div style="font-size: ${footerFontSize + 1}px; margin-top: ${footerMargin}px;">${isUnpaid ? "Payment pending. Please keep this bill for counter settlement." : "Thank you for your purchase!"}</div>`;
-  if (shop?.name && !(shop?.use_logo_on_receipt && shop?.logo_path)) {
+  if (shop?.name && !(shop?.use_logo_on_receipt && (shop?.logo_data || shop?.logo_path))) {
     html += `<div style="font-size: ${footerFontSize + 1}px;">${escapeHtml(shop.name)}</div>`;
   }
   html += `<div style="font-size: ${footerFontSize}px; margin-top: 5px; border-top: 1px dashed #ccc; padding-top: 5px; font-weight: bold;">Software by DEVFORGE - 03226155209</div>`;

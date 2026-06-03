@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS shops (
   use_text_on_receipt INTEGER DEFAULT 1,
   customer_bill_printer TEXT,
   unpaid_bill_printer TEXT,
+  logo_data TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
   printer_station TEXT,
   status TEXT DEFAULT 'active', -- active, blocked
   allowed_panels TEXT, -- JSON array of panel IDs (subset of shop's allowed_panels)
+  can_manage_register INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
@@ -112,6 +114,7 @@ CREATE TABLE IF NOT EXISTS sales (
   waiter_id INTEGER,
   rider_id INTEGER,
   kitchen_id INTEGER,
+  shift_id INTEGER,
   guest_count INTEGER DEFAULT 1,
   token_number TEXT,
   created_at TEXT DEFAULT (datetime('now')),
@@ -120,7 +123,8 @@ CREATE TABLE IF NOT EXISTS sales (
   FOREIGN KEY (table_id) REFERENCES tables(id),
   FOREIGN KEY (waiter_id) REFERENCES users(id),
   FOREIGN KEY (rider_id) REFERENCES users(id),
-  FOREIGN KEY (kitchen_id) REFERENCES users(id)
+  FOREIGN KEY (kitchen_id) REFERENCES users(id),
+  FOREIGN KEY (shift_id) REFERENCES shifts(id)
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -150,10 +154,12 @@ CREATE TABLE IF NOT EXISTS expenses (
   category TEXT NOT NULL DEFAULT 'other',
   amount REAL NOT NULL DEFAULT 0,
   note TEXT,
+  shift_id INTEGER,
   date TEXT NOT NULL DEFAULT (date('now')),
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (shift_id) REFERENCES shifts(id)
 );
 
 CREATE TABLE IF NOT EXISTS product_categories (
@@ -239,11 +245,16 @@ CREATE TABLE IF NOT EXISTS ticket_comments (
 CREATE TABLE IF NOT EXISTS activity_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     shop_id INTEGER NOT NULL,
+    user_id INTEGER,
     action TEXT NOT NULL,
     details TEXT,
+    reference_id INTEGER,
+    reference_type TEXT,
     created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+    FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS idx_activity_logs_reference ON activity_logs(reference_id, reference_type);
 
 CREATE TABLE IF NOT EXISTS product_compositions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,10 +275,12 @@ CREATE TABLE IF NOT EXISTS returns (
   total_refund REAL NOT NULL DEFAULT 0,
   reason TEXT,
   payment_method TEXT NOT NULL DEFAULT 'cash',
+  shift_id INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (shift_id) REFERENCES shifts(id)
 );
 
 CREATE TABLE IF NOT EXISTS return_items (
@@ -383,3 +396,68 @@ CREATE TABLE IF NOT EXISTS taxes (
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS shifts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  start_time TEXT NOT NULL DEFAULT (datetime('now')),
+  end_time TEXT,
+  opening_balance REAL NOT NULL DEFAULT 0,
+  closing_balance REAL,
+  expected_balance REAL,
+  net_cash_sales REAL DEFAULT 0,
+  net_card_sales REAL DEFAULT 0,
+  total_expenses REAL DEFAULT 0,
+  cash_drops REAL DEFAULT 0,
+  cash_handovers REAL DEFAULT 0,
+  status TEXT DEFAULT 'open',
+  note TEXT,
+  closed_by_user_id INTEGER,
+  terminal_id TEXT,
+  shortage_reason TEXT,
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (closed_by_user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS cash_handovers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  shift_id INTEGER NOT NULL,
+  sender_id INTEGER NOT NULL,
+  receiver_id INTEGER NOT NULL,
+  amount REAL NOT NULL,
+  status TEXT DEFAULT 'pending',
+  note TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  verified_at TEXT,
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+  FOREIGN KEY (sender_id) REFERENCES users(id),
+  FOREIGN KEY (receiver_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS cash_drops (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  shift_id INTEGER NOT NULL,
+  requested_by_user_id INTEGER NOT NULL,
+  amount REAL NOT NULL,
+  status TEXT DEFAULT 'pending',
+  note TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  verified_by_user_id INTEGER,
+  verified_at TEXT,
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+  FOREIGN KEY (requested_by_user_id) REFERENCES users(id),
+  FOREIGN KEY (verified_by_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_shifts_shop_id ON shifts(shop_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_user_id ON shifts(user_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
+CREATE INDEX IF NOT EXISTS idx_cash_handovers_shift_id ON cash_handovers(shift_id);
+CREATE INDEX IF NOT EXISTS idx_cash_drops_shift_id ON cash_drops(shift_id);
+CREATE INDEX IF NOT EXISTS idx_cash_drops_status ON cash_drops(status);
