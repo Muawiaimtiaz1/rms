@@ -208,7 +208,7 @@ class SalesService {
 
   /**
    * Generates automatic print jobs based on item categories and stations
-   * Creates separate print jobs per category even if they route to the same printer
+   * Creates one print job per physical printer, with all routed items included.
    */
   async generatePrintJobs(saleId, items, shopId, trx) {
     const dbInstance = trx || db;
@@ -227,19 +227,14 @@ class SalesService {
     }
 
     const jobs = {};
-    const addItemToRoute = (route, item, category) => {
+    const addItemToRoute = (route, item) => {
       if (!route || route.station === 'NONE') return;
-      
-      // Create unique key combining category and route to enable split printing
-      // This ensures separate print jobs even if categories route to the same printer
-      let routeKey = route.key || route.station;
-      if (category) {
-        routeKey = `${category}::${routeKey}`;
-      }
-      
+
+      const routeKey = route.station;
       if (!jobs[routeKey]) {
-        jobs[routeKey] = { route, items: [], category };
+        jobs[routeKey] = { route, items: [], routeLabels: new Set() };
       }
+      if (route.label) jobs[routeKey].routeLabels.add(route.label);
       jobs[routeKey].items.push(this.buildPrintJobItem(item));
     };
 
@@ -251,21 +246,22 @@ class SalesService {
     for (const item of items) {
       const category = this.getItemCategory(item);
       const route = this.getItemPrintRoute(item, categoryRouteMap, kitchenRoute);
-      addItemToRoute(route, item, category);
+      addItemToRoute(route, item);
     }
 
     let queuedCount = 0;
-    for (const { route, items: stationItems } of Object.values(jobs)) {
+    for (const { route, items: stationItems, routeLabels } of Object.values(jobs)) {
       const station = route.station;
+      const routeLabel = Array.from(routeLabels).join(' + ') || route.label;
       const content = {
         type: 'PRINT_URL',
         format: 'kitchen',
         sale_id: saleId,
         station_name: station,
-        route_key: route.key,
-        route_label: route.label,
+        route_key: station,
+        route_label: routeLabel,
         printer_label: route.printerLabel || route.label,
-        print_url: `/print/sales/${saleId}?format=kitchen&station=${encodeURIComponent(route.key)}&shop_id=${shopId}&autoprint=0`,
+        print_url: `/print/sales/${saleId}?format=kitchen&station=${encodeURIComponent(station)}&shop_id=${shopId}&autoprint=0`,
         order_type: sale.order_type,
         table_number: sale.table_id ? (await dbInstance('tables').where({id: sale.table_id}).first())?.table_number : null,
         token_number: sale.token_number,
