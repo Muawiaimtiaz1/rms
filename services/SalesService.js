@@ -306,24 +306,12 @@ class SalesService {
 
     const shopSettings = await dbInstance('shops')
       .where({ id: shopId })
-      .select('shop_type', 'customer_bill_printer', 'unpaid_bill_printer')
+      .select('customer_bill_printer', 'unpaid_bill_printer')
       .first();
 
-    // Retail customer slips must stay on the customer bill path, not kitchen/category routing.
-    // Restaurants may still use split bill printing when category routing is configured.
-    const { printers, resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
-    let hasCategoryRouting = false;
-    if (shopSettings?.shop_type === 'restaurant') {
-      const categoryRouteMap = await this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute);
-      hasCategoryRouting = Object.values(categoryRouteMap).some(cat => cat.raw);
-    }
-    
-    if (hasCategoryRouting && printers.length > 0) {
-      // Use split printing by category for bills
-      return this.generateBillPrintJobs(saleId, bill.items, shopId, normalizedFormat, dbInstance);
-    }
-
-    // Fallback to default bill printer setting (not split)
+    // Customer and unpaid bills are single customer-facing receipts. Kitchen and
+    // category routing is handled separately by generatePrintJobs().
+    const { resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
     let targetPrinterRouteValue = null;
 
     if (normalizedFormat === 'customer' && shopSettings?.customer_bill_printer) {
@@ -358,69 +346,6 @@ class SalesService {
     });
 
     return { queued: 1, printer_configured: true };
-  }
-
-  /**
-   * Generate split bill print jobs by category (for customer/unpaid bills)
-   */
-  async generateBillPrintJobs(saleId, items, shopId, format, trx) {
-    const dbInstance = trx || db;
-    const { printers, resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
-    
-    if (!printers.length) {
-      return { queued: 0, printer_configured: false };
-    }
-
-    const sale = await dbInstance('sales').where({ id: saleId, shop_id: shopId }).first();
-    if (!sale) return { queued: 0, printer_configured: true };
-
-    const jobs = {};
-    const [categoryRouteMap, kitchenRoute] = await Promise.all([
-      this.getCategoryPrintRouteMap(dbInstance, shopId, resolvePrinterRoute),
-      this.resolveKitchenRoute(dbInstance, sale, shopId, resolvePrinterRoute)
-    ]);
-
-    // Group items by category
-    for (const item of items) {
-      const category = this.getItemCategory(item);
-      const route = this.getItemPrintRoute(item, categoryRouteMap, kitchenRoute);
-      
-      if (!route || route.station === 'NONE') continue;
-      
-      let routeKey = route.key || route.station;
-      if (category) {
-        routeKey = `${category}::${routeKey}`;
-      }
-      
-      if (!jobs[routeKey]) {
-        jobs[routeKey] = { route, items: [], category };
-      }
-      jobs[routeKey].items.push(this.buildPrintJobItem(item));
-    }
-
-    let queuedCount = 0;
-    for (const { route, items: categoryItems } of Object.values(jobs)) {
-      const station = route.station;
-      await dbInstance('print_queue').insert({
-        shop_id: shopId,
-        station_name: station,
-        content_json: JSON.stringify({
-          type: 'PRINT_URL',
-          format: format,
-          sale_id: saleId,
-          station_name: station,
-          route_key: route.key,
-          route_label: route.label,
-          printer_label: route.printerLabel || route.label,
-          print_url: `/print/sales/${saleId}?format=${format}&station=${encodeURIComponent(route.key)}&shop_id=${shopId}&autoprint=0`,
-          items: categoryItems
-        }),
-        status: 'pending'
-      });
-      queuedCount += 1;
-    }
-
-    return { queued: queuedCount, printer_configured: true };
   }
 
   /**

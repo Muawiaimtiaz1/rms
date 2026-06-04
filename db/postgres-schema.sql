@@ -409,11 +409,17 @@ CREATE TABLE IF NOT EXISTS print_queue (
   station_name TEXT NOT NULL,
   content_json TEXT NOT NULL,
   status TEXT DEFAULT 'pending',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  attempts INTEGER DEFAULT 0,
+  claimed_at TIMESTAMPTZ,
+  printed_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_print_queue_shop_id ON print_queue(shop_id);
 CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status);
+CREATE INDEX IF NOT EXISTS idx_print_queue_claimed_at ON print_queue(claimed_at);
 
 CREATE TABLE IF NOT EXISTS printers (
   id SERIAL PRIMARY KEY,

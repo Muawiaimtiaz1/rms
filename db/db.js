@@ -324,11 +324,17 @@ if (!tableExists) {
         station_name TEXT NOT NULL,
         content_json TEXT NOT NULL,
         status TEXT DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        claimed_at TEXT,
+        printed_at TEXT,
+        last_error TEXT,
         created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_print_queue_shop_id ON print_queue(shop_id);
       CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status);
+      CREATE INDEX IF NOT EXISTS idx_print_queue_claimed_at ON print_queue(claimed_at);
 
       CREATE TABLE IF NOT EXISTS printers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -342,6 +348,29 @@ if (!tableExists) {
     `);
   } catch (e) {
     console.error("Failed to ensure print queue/printers tables:", e.message);
+  }
+
+  try {
+    const printQueueCols = db.prepare("PRAGMA table_info(print_queue)").all();
+    const printQueueColumns = [
+      { name: "attempts", type: "INTEGER DEFAULT 0" },
+      { name: "claimed_at", type: "TEXT" },
+      { name: "printed_at", type: "TEXT" },
+      { name: "last_error", type: "TEXT" },
+      { name: "updated_at", type: "TEXT" },
+    ];
+
+    printQueueColumns.forEach((col) => {
+      if (!printQueueCols.some((c) => c.name === col.name)) {
+        console.log(`🔧 Updating database: Adding ${col.name} to print_queue...`);
+        db.exec(`ALTER TABLE print_queue ADD COLUMN ${col.name} ${col.type};`);
+        console.log(`✅ print_queue.${col.name} column added.`);
+      }
+    });
+    db.exec("UPDATE print_queue SET updated_at = COALESCE(updated_at, created_at, datetime('now'));");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_print_queue_claimed_at ON print_queue(claimed_at);");
+  } catch (e) {
+    console.error("Failed to check print queue retry columns:", e.message);
   }
 
   // Migration for Products table (is_component flag)

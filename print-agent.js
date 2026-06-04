@@ -6,7 +6,7 @@
  */
 
 const axios = require('axios');
-const { exec, execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -24,27 +24,45 @@ const CONFIG = {
     PRINT_TIMEOUT_MS: Number(process.env.PRINT_TIMEOUT_MS || 30000),
 };
 
+let isPolling = false;
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function pollJobs() {
+    if (isPolling) return;
+    isPolling = true;
+
     try {
         console.log(`[${new Date().toLocaleTimeString()}] Polling for jobs...`);
         const res = await axios.get(`${CONFIG.SERVER_URL}/api/print-jobs/poll`, {
             params: { shop_id: CONFIG.SHOP_ID }
         });
 
-        const jobs = res.data;
+        const jobs = Array.isArray(res.data) ? res.data : [];
         if (jobs.length > 0) {
-            console.log(`Found ${jobs.length} pending jobs.`);
+            console.log(`Claimed ${jobs.length} print job${jobs.length === 1 ? '' : 's'}.`);
             for (const job of jobs) {
                 await processJob(job);
             }
         }
     } catch (err) {
         console.error("Polling Error:", err.message);
+    } finally {
+        isPolling = false;
     }
 }
 
 async function processJob(job) {
-    const content = JSON.parse(job.content_json);
+    let content;
+    try {
+        content = JSON.parse(job.content_json);
+    } catch (error) {
+        console.error(`Job #${job.id} has invalid print content: ${error.message}`);
+        await confirmJob(job.id);
+        return;
+    }
     
     // The station_name now holds the ACTUAL system printer name (e.g. "EPSON-TM88")
     // as defined in your Settings > Printers & Routing dashboard.
@@ -71,6 +89,7 @@ async function processJob(job) {
         } catch (error) {
             console.error(`URL Print Failed: ${error.message}`);
             console.info(`Check browser path, server URL, and printer "${printerName}".`);
+            await failJob(job.id, error.message);
         }
         return;
     }
@@ -103,30 +122,23 @@ async function processJob(job) {
     try {
         fs.writeFileSync(tempFile, text);
 
-        let printCmd = "";
         if (isWindows) {
-            // Using a generic Windows command. 
-            // Note: Thermal printers work best with raw text. 
-            // If this opens notepad, consider installing 'RawPrint' CLI tool.
-            printCmd = `notepad /p "${tempFile}"`; 
+            // Note: Thermal printers work best with raw text.
+            // If this opens notepad, consider installing a raw-print CLI tool.
+            await execFileAsync('notepad', ['/p', tempFile], { timeout: CONFIG.PRINT_TIMEOUT_MS });
         } else {
             // Linux/Mac (CUPS)
-            printCmd = `lp -d "${printerName}" "${tempFile}"`;
+            await execFileAsync('lp', ['-d', printerName, tempFile], { timeout: CONFIG.PRINT_TIMEOUT_MS });
         }
 
-        exec(printCmd, async (error) => {
-            if (error) {
-                console.error(`Print Failed on OS level: ${error.message}`);
-                console.info(`Check if printer "${printerName}" is installed and online.`);
-            } else {
-                console.log(`Print signal sent to ${printerName}.`);
-                await confirmJob(job.id);
-                // Clean up
-                setTimeout(() => { if(fs.existsSync(tempFile)) fs.unlinkSync(tempFile); }, 1000);
-            }
-        });
-    } catch (fsError) {
-        console.error("File System Error:", fsError.message);
+        console.log(`Print signal sent to ${printerName}.`);
+        await confirmJob(job.id);
+    } catch (error) {
+        console.error(`Print Failed on OS level: ${error.message}`);
+        console.info(`Check if printer "${printerName}" is installed and online.`);
+        await failJob(job.id, error.message);
+    } finally {
+        setTimeout(() => { if(fs.existsSync(tempFile)) fs.unlinkSync(tempFile); }, 1000);
     }
 }
 
@@ -260,9 +272,25 @@ async function printUrlJob(job, content, printerName) {
     }
 }
 
+async function postJobStatus(id, path, body, label, attempts = 5) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            await axios.post(`${CONFIG.SERVER_URL}/api/print-jobs/${id}/${path}`, body);
+            return true;
+        } catch (err) {
+            console.error(`${label} failed on attempt ${attempt}/${attempts}:`, err.message);
+            if (attempt < attempts) await sleep(Math.min(1000 * attempt, 5000));
+        }
+    }
+    return false;
+}
+
 function confirmJob(id) {
-    return axios.post(`${CONFIG.SERVER_URL}/api/print-jobs/${id}/confirm`)
-        .catch(err => console.error("Confirming Job Failed on Server:", err.message));
+    return postJobStatus(id, 'confirm', {}, 'Confirming job on server');
+}
+
+function failJob(id, reason) {
+    return postJobStatus(id, 'fail', { reason }, 'Releasing job for retry on server');
 }
 
 console.log("==========================================");

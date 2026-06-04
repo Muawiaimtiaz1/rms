@@ -191,13 +191,40 @@ async function initPostgres() {
           station_name TEXT NOT NULL,
           content_json TEXT NOT NULL,
           status TEXT DEFAULT 'pending',
-          created_at TIMESTAMPTZ DEFAULT NOW()
+          attempts INTEGER DEFAULT 0,
+          claimed_at TIMESTAMPTZ,
+          printed_at TIMESTAMPTZ,
+          last_error TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_print_queue_shop_id ON print_queue(shop_id);
         CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status);
+        CREATE INDEX IF NOT EXISTS idx_print_queue_claimed_at ON print_queue(claimed_at);
       `);
       console.log("✅ print_queue table added.");
     }
+
+    const printQueueColumns = [
+      ["attempts", "INTEGER DEFAULT 0"],
+      ["claimed_at", "TIMESTAMPTZ"],
+      ["printed_at", "TIMESTAMPTZ"],
+      ["last_error", "TEXT"],
+      ["updated_at", "TIMESTAMPTZ DEFAULT NOW()"],
+    ];
+    for (const [columnName, columnType] of printQueueColumns) {
+      const columnCheck = await query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'print_queue' AND column_name = $1
+      `, [columnName]);
+      if (columnCheck.rows.length === 0) {
+        console.log(`🔧 Migrating print_queue table: Adding ${columnName} column...`);
+        await query(`ALTER TABLE print_queue ADD COLUMN ${columnName} ${columnType}`);
+        console.log(`✅ print_queue.${columnName} added.`);
+      }
+    }
+    await query("UPDATE print_queue SET updated_at = COALESCE(updated_at, created_at, NOW())");
+    await query("CREATE INDEX IF NOT EXISTS idx_print_queue_claimed_at ON print_queue(claimed_at)");
     
     // Check printers table
     const printersTableCheck = await query(`
