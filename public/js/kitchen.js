@@ -189,16 +189,12 @@ async function renderRawStock() {
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
           <div>
             <h3 class="text-3xl font-black text-slate-950 dark:text-white tracking-tight">Raw Ingredients</h3>
-            <p class="text-slate-500 text-sm mt-1">Manage base stock, track batches and record waste.</p>
+            <p class="text-slate-500 text-sm mt-1">Manage base stock and track ingredient batches.</p>
           </div>
           <div class="flex gap-3">
             <button onclick="showAddRawStockModal()" class="px-6 py-3.5 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 active:scale-95 transition-all flex items-center gap-2">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
               Add New Ingredient
-            </button>
-            <button onclick="showWasteLogModal()" class="px-6 py-3.5 rounded-2xl bg-rose-600/10 text-rose-600 text-sm font-bold hover:bg-rose-600/20 active:scale-95 transition-all flex items-center gap-2">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-              Record Waste
             </button>
           </div>
         </div>
@@ -387,27 +383,346 @@ function showUpdateRawStockModal(id, name) {
   };
 }
 
-function showWasteLogModal() {
+let _wasteContextCache = null;
+
+function escapeWasteValue(value) {
+  if (typeof escapeOrderValue === "function") return escapeOrderValue(value);
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function wasteSourceLabel(sourceType) {
+  const labels = {
+    product: "Product stock",
+    raw_ingredient: "Raw ingredient",
+    recipe_product: "Recipe product",
+    prepared_batch: "Prepared batch",
+    order: "Sale / order",
+    return: "Return damage"
+  };
+  return labels[sourceType] || sourceType;
+}
+
+function wasteReasonLabel(reasonCode) {
+  const labels = {
+    expired: "Expired",
+    spoiled: "Spoiled",
+    damaged: "Damaged",
+    overproduction: "Overproduction",
+    kitchen_mistake: "Kitchen mistake",
+    cancelled_order: "Cancelled order",
+    customer_return: "Customer return",
+    supplier_rejection: "Supplier rejection",
+    transfer_damage: "Transfer damage",
+    stock_shrinkage: "Stock shrinkage",
+    staff_use: "Staff use",
+    other: "Other"
+  };
+  return labels[reasonCode] || reasonCode;
+}
+
+function buildWasteOption(value, label, attrs = {}) {
+  const attrString = Object.entries(attrs)
+    .map(([key, attrValue]) => ` data-${key}="${escapeWasteValue(attrValue)}"`)
+    .join("");
+  return `<option value="${escapeWasteValue(value)}"${attrString}>${escapeWasteValue(label)}</option>`;
+}
+
+function buildWasteSourceOptions(context, sourceType) {
+  const products = Array.isArray(context.products) ? context.products : [];
+  const rawStocks = Array.isArray(context.rawStocks) ? context.rawStocks : [];
+  const recipes = Array.isArray(context.recipes) ? context.recipes : [];
+  const recentSales = Array.isArray(context.recentSales) ? context.recentSales : [];
+  const recentReturns = Array.isArray(context.recentReturns) ? context.recentReturns : [];
+
+  if (sourceType === "raw_ingredient") {
+    return rawStocks.map((item) => buildWasteOption(`raw:${item.id}`, `${item.name} (${Number(item.current_stock || 0)} ${item.unit || "unit"})`, { unit: item.unit || "unit" }));
+  }
+
+  if (sourceType === "product") {
+    return products.map((item) => buildWasteOption(`product:${item.id}`, `${item.name} (${Number(item.stock || 0)} units)`, { unit: "unit" }));
+  }
+
+  if (sourceType === "recipe_product") {
+    const recipeProducts = products
+      .filter((item) => Number(item.recipe_count || 0) > 0)
+      .map((item) => buildWasteOption(`product:${item.id}`, `${item.name} (linked recipe product)`, { unit: "unit" }));
+    const directRecipes = recipes.map((item) => buildWasteOption(`recipe:${item.id}`, `${item.name} (recipe only)`, { unit: "unit" }));
+    return [...recipeProducts, ...directRecipes];
+  }
+
+  if (sourceType === "prepared_batch") {
+    return recipes.map((item) => buildWasteOption(`recipe:${item.id}`, item.name, { unit: "batch" }));
+  }
+
+  if (sourceType === "order") {
+    return recentSales.map((sale) => {
+      const label = `Sale #${sale.id} - ${sale.customer_name || "Walk-in"} - Rs. ${Number(sale.total || 0).toFixed(2)}`;
+      return buildWasteOption(`sale:${sale.id}`, label, { unit: "order" });
+    });
+  }
+
+  if (sourceType === "return") {
+    return recentReturns.map((ret) => {
+      const label = `Return #${ret.id} - Sale #${ret.sale_id || "-"} - Rs. ${Number(ret.total_refund || 0).toFixed(2)}`;
+      return buildWasteOption(`return:${ret.id}`, label, { unit: "return" });
+    });
+  }
+
+  return [];
+}
+
+function selectedWastePayload(sourceType, sourceValue) {
+  const [kind, idValue] = String(sourceValue || "").split(":");
+  const id = parseInt(idValue, 10);
+  if (!Number.isFinite(id) || id <= 0) return null;
+
+  const payload = {};
+  if (kind === "raw") payload.raw_stock_id = id;
+  if (kind === "product") payload.product_id = id;
+  if (kind === "recipe") payload.recipe_id = id;
+  if (kind === "sale") payload.sale_id = id;
+  if (kind === "return") payload.return_id = id;
+
+  return Object.keys(payload).length ? payload : null;
+}
+
+function formatWasteDateTime(value) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleString();
+}
+
+function formatWasteMoney(value) {
+  if (typeof formatRegisterMoney === "function") return formatRegisterMoney(value);
+  return `Rs. ${Number(value || 0).toFixed(2)}`;
+}
+
+function formatWastePhrase(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function wastePanelSourceName(row) {
+  if (row.product_name) return row.product_name;
+  if (row.raw_stock_name) return row.raw_stock_name;
+  if (row.recipe_name) return row.recipe_name;
+  if (row.sale_id) return `Sale #${row.sale_id}`;
+  if (row.return_id) return `Return #${row.return_id}`;
+  return `Waste #${row.id}`;
+}
+
+function wastePanelPill(label, tone = "slate") {
+  const tones = {
+    rose: "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-100 dark:border-rose-900/40",
+    amber: "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-100 dark:border-amber-900/40",
+    blue: "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-blue-100 dark:border-blue-900/40",
+    emerald: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-900/40",
+    slate: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+  };
+  return `<span class="inline-flex px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${tones[tone] || tones.slate}">${escapeWasteValue(label)}</span>`;
+}
+
+async function renderWasteManagement() {
+  const content = document.getElementById("page-content");
+  content.innerHTML = '<div class="flex items-center justify-center h-40 text-slate-600">Loading Waste Management...</div>';
+
+  try {
+    const rows = await api("/api/waste?limit=150");
+    const wasteRows = Array.isArray(rows) ? rows : [];
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayRows = wasteRows.filter((row) => String(row.created_at || "").slice(0, 10) === todayKey);
+    const totalCost = wasteRows.reduce((sum, row) => sum + Number(row.cost_amount || 0), 0);
+    const deductCount = wasteRows.filter((row) => row.stock_action === "deduct").length;
+    const recoverableCount = wasteRows.filter((row) => row.recovery_status === "recoverable").length;
+
+    const stat = (label, value, tone = "slate") => {
+      const toneClasses = {
+        rose: "text-rose-600 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/20 border-rose-100 dark:border-rose-900/40",
+        amber: "text-amber-600 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/40",
+        blue: "text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/20 border-blue-100 dark:border-blue-900/40",
+        emerald: "text-emerald-600 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/40",
+        slate: "text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+      };
+      return `
+        <div class="rounded-2xl border p-5 ${toneClasses[tone] || toneClasses.slate}">
+          <p class="text-[10px] font-black uppercase tracking-widest opacity-70">${label}</p>
+          <div class="text-2xl font-black mt-2">${value}</div>
+        </div>
+      `;
+    };
+
+    const quickAction = (sourceType, label, tone = "rose") => {
+      const toneClasses = {
+        rose: "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20",
+        amber: "bg-amber-500 hover:bg-amber-400 text-white shadow-amber-500/20",
+        blue: "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20",
+        slate: "bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 shadow-slate-900/10"
+      };
+      return `<button onclick="showWasteLogModal({ source_type: '${sourceType}' })" class="px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-widest shadow-lg transition-all active:scale-95 ${toneClasses[tone] || toneClasses.rose}">${label}</button>`;
+    };
+
+    const tableRows = wasteRows.map((row) => {
+      const sourceType = wasteSourceLabel(row.source_type || "product");
+      const tone = row.source_type === "order" ? "blue" : row.source_type === "return" ? "amber" : row.recovery_status === "recoverable" ? "emerald" : "rose";
+      const quantity = `${Number(row.quantity || 0).toFixed(2)}${row.unit ? ` ${escapeWasteValue(row.unit)}` : ""}`;
+      return `
+        <tr class="border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.01]">
+          <td class="px-6 py-4 text-xs font-bold text-slate-900 dark:text-white">${formatWasteDateTime(row.created_at)}</td>
+          <td class="px-6 py-4">
+            <div class="text-sm font-black text-slate-900 dark:text-white">${escapeWasteValue(wastePanelSourceName(row))}</div>
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">${escapeWasteValue(formatWastePhrase(row.stock_action || "recorded"))}</div>
+          </td>
+          <td class="px-6 py-4">${wastePanelPill(sourceType, tone)}</td>
+          <td class="px-6 py-4 text-sm font-black text-rose-600 dark:text-rose-300">${quantity}</td>
+          <td class="px-6 py-4 text-xs font-black text-slate-700 dark:text-slate-200">${Number(row.cost_amount || 0) > 0 ? formatWasteMoney(row.cost_amount) : "-"}</td>
+          <td class="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 max-w-xs">${escapeWasteValue(row.reason || row.reason_code || "No reason recorded")}</td>
+          <td class="px-6 py-4 text-xs font-black text-slate-700 dark:text-slate-200">${escapeWasteValue(row.user_name || row.user_username || "Unknown")}</td>
+        </tr>
+      `;
+    }).join("");
+
+    content.innerHTML = `
+      <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <section class="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+            <div>
+              <h3 class="text-3xl font-black text-slate-950 dark:text-white tracking-tight">Waste Management</h3>
+              <p class="text-slate-500 text-sm mt-1">Product, ingredient, recipe, order, and return waste records.</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              ${quickAction("product", "Product Waste", "rose")}
+              ${quickAction("raw_ingredient", "Ingredient Waste", "amber")}
+              ${quickAction("recipe_product", "Recipe Waste", "blue")}
+              ${quickAction("order", "Order Waste", "slate")}
+              ${quickAction("return", "Return Waste", "slate")}
+            </div>
+          </div>
+        </section>
+
+        <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          ${stat("Today", todayRows.length, "blue")}
+          ${stat("Total Cost", formatWasteMoney(totalCost), "rose")}
+          ${stat("Stock Deductions", deductCount, "amber")}
+          ${stat("Recoverable", recoverableCount, "emerald")}
+        </section>
+
+        <section class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
+            <div>
+              <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">Recent Waste Records</h4>
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Last ${wasteRows.length} records</p>
+            </div>
+            <button onclick="renderWasteManagement()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">Refresh</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left">
+              <thead>
+                <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+                  <th class="px-6 py-4">Time</th>
+                  <th class="px-6 py-4">Source</th>
+                  <th class="px-6 py-4">Type</th>
+                  <th class="px-6 py-4">Quantity</th>
+                  <th class="px-6 py-4">Cost</th>
+                  <th class="px-6 py-4">Reason</th>
+                  <th class="px-6 py-4">Staff</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows || '<tr><td colspan="7" class="px-6 py-20 text-center text-slate-400 italic font-medium">No waste records yet.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    `;
+  } catch (e) {
+    content.innerHTML = `
+      <div class="rounded-3xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 p-8 text-rose-700 dark:text-rose-300 font-bold">
+        ${escapeWasteValue(e.message || "Failed to load waste management.")}
+      </div>
+    `;
+  }
+}
+
+async function showWasteLogModal(prefill = {}) {
+  let context = _wasteContextCache;
+  try {
+    context = await api("/api/waste/context");
+    _wasteContextCache = context;
+  } catch (e) {
+    return toast(e.message || "Unable to load waste options", "error");
+  }
+
+  const initialSourceType = prefill.source_type || prefill.sourceType || (prefill.product_id || prefill.productId ? "product" : "raw_ingredient");
+  const modalTitle = prefill.title ? `Record Waste: ${escapeWasteValue(prefill.title)}` : "Record Waste";
   const modal = document.createElement("div");
   modal.className = "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300";
   modal.innerHTML = `
-    <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-      <h3 class="text-2xl font-black text-slate-950 dark:text-white mb-6">Record Ingredient Waste</h3>
-      <div class="space-y-4">
+    <div class="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[2rem] p-6 md:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-start justify-between gap-4 mb-6">
         <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Select Ingredient</label>
-          <select id="rs-waste-id" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold"></select>
+          <h3 class="text-2xl font-black text-slate-950 dark:text-white">${modalTitle}</h3>
+          <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Product, ingredient, recipe, order, and return waste</p>
+        </div>
+        <button onclick="this.closest('.fixed').remove()" class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all font-black">&times;</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Waste Source</label>
+          <select id="waste-source-type" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold">
+            ${["product", "raw_ingredient", "recipe_product", "prepared_batch", "order", "return"].map((type) => `<option value="${type}" ${type === initialSourceType ? "selected" : ""}>${wasteSourceLabel(type)}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label id="waste-source-label" class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Select Item</label>
+          <select id="waste-source-id" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold"></select>
         </div>
         <div>
           <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Quantity Wasted</label>
           <div class="relative">
-            <input id="rs-waste-qty" type="number" class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
-            <span id="rs-waste-unit" class="absolute right-6 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">unit</span>
+            <input id="waste-qty" type="number" min="0" step="0.001" value="${escapeWasteValue(prefill.quantity || 1)}" class="w-full px-5 py-4 pr-20 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
+            <span id="waste-unit" class="absolute right-5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">unit</span>
           </div>
         </div>
         <div>
-          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Reason</label>
-          <input id="rs-waste-reason" placeholder="Spoilage, Overcooking, etc." class="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Stock Action</label>
+          <select id="waste-stock-action" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold">
+            <option value="deduct">Deduct from stock</option>
+            <option value="already_deducted">Already deducted</option>
+            <option value="no_stock">Record only, no stock</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Reason Type</label>
+          <select id="waste-reason-code" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold">
+            ${["expired", "spoiled", "damaged", "overproduction", "kitchen_mistake", "cancelled_order", "customer_return", "supplier_rejection", "transfer_damage", "stock_shrinkage", "staff_use", "other"].map((code) => `<option value="${code}">${wasteReasonLabel(code)}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Recovery Status</label>
+          <select id="waste-recovery-status" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold">
+            <option value="full_loss">Full loss</option>
+            <option value="recoverable">Move to damaged/recoverable</option>
+            <option value="discounted">Sold/used at discount</option>
+            <option value="supplier_claim">Supplier claim</option>
+            <option value="staff_use">Staff use</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Manual Cost (Optional)</label>
+          <input id="waste-manual-cost" type="number" min="0" step="0.01" placeholder="Auto calculated" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Notes</label>
+          <textarea id="waste-reason" rows="3" placeholder="Expiry, breakage, overproduction, cancelled order, customer return condition, etc." class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-transparent focus:border-indigo-500 transition-all outline-none text-sm font-bold resize-none">${escapeWasteValue(prefill.reason || "")}</textarea>
         </div>
       </div>
       <div class="flex gap-3 mt-8">
@@ -418,25 +733,75 @@ function showWasteLogModal() {
   `;
   document.body.appendChild(modal);
 
-  api("/api/raw-stock").then(stocks => {
-    const sel = document.getElementById("rs-waste-id");
-    sel.innerHTML = '<option value="">Choose...</option>' + stocks.map(s => `<option value="${s.id}" data-unit="${s.unit}">${s.name}</option>`).join('');
-    sel.onchange = () => {
-      const opt = sel.options[sel.selectedIndex];
-      document.getElementById("rs-waste-unit").textContent = opt.dataset.unit || "unit";
-    };
-  });
+  const sourceTypeSelect = document.getElementById("waste-source-type");
+  const sourceSelect = document.getElementById("waste-source-id");
+  const sourceLabel = document.getElementById("waste-source-label");
+  const stockAction = document.getElementById("waste-stock-action");
+  const unitLabel = document.getElementById("waste-unit");
+  const prefillSourceId = prefill.product_id || prefill.productId
+    ? `product:${prefill.product_id || prefill.productId}`
+    : prefill.raw_stock_id || prefill.rawStockId
+      ? `raw:${prefill.raw_stock_id || prefill.rawStockId}`
+      : prefill.recipe_id || prefill.recipeId
+        ? `recipe:${prefill.recipe_id || prefill.recipeId}`
+        : "";
+
+  const updateWasteSourceControls = () => {
+    const sourceType = sourceTypeSelect.value;
+    const options = buildWasteSourceOptions(context, sourceType);
+    sourceLabel.textContent = sourceType === "order" ? "Select Sale / Order" : sourceType === "return" ? "Select Return" : "Select Item";
+    sourceSelect.innerHTML = '<option value="">Choose...</option>' + (options.length ? options.join("") : '<option value="" disabled>No matching records</option>');
+    if (prefillSourceId && Array.from(sourceSelect.options).some((option) => option.value === prefillSourceId)) {
+      sourceSelect.value = prefillSourceId;
+    }
+    stockAction.value = sourceType === "order" || sourceType === "return" ? "already_deducted" : (prefill.stock_action || prefill.stockAction || "deduct");
+    unitLabel.textContent = sourceSelect.options[sourceSelect.selectedIndex]?.dataset?.unit || "unit";
+  };
+
+  sourceTypeSelect.onchange = updateWasteSourceControls;
+  sourceSelect.onchange = () => {
+    unitLabel.textContent = sourceSelect.options[sourceSelect.selectedIndex]?.dataset?.unit || "unit";
+  };
+  updateWasteSourceControls();
 
   document.getElementById("save-waste").onclick = async () => {
-    const id = $c("rs-waste-id").value;
-    const qty = parseFloat($c("rs-waste-qty").value);
-    if (!id || !qty) return toast("Select ingredient and quantity", "error");
+    const saveButton = document.getElementById("save-waste");
+    const sourceType = $c("waste-source-type").value;
+    const sourcePayload = selectedWastePayload(sourceType, $c("waste-source-id").value);
+    const qty = parseFloat($c("waste-qty").value);
+    const manualCostValue = $c("waste-manual-cost").value;
+    if (!sourcePayload || !qty || qty <= 0) return toast("Select item and quantity", "error");
+
     try {
-      await api("/api/raw-stock/waste", "POST", { raw_stock_id: id, quantity: qty, reason: $c("rs-waste-reason").value });
+      saveButton.disabled = true;
+      saveButton.textContent = "Recording...";
+      await api("/api/waste", "POST", {
+        source_type: sourceType,
+        quantity: qty,
+        stock_action: $c("waste-stock-action").value,
+        reason_code: $c("waste-reason-code").value,
+        recovery_status: $c("waste-recovery-status").value,
+        reason: $c("waste-reason").value,
+        ...(manualCostValue !== "" ? { manual_cost_amount: parseFloat(manualCostValue) || 0 } : {}),
+        ...sourcePayload
+      });
       toast("Waste recorded!");
       modal.remove();
-      renderRawStock();
-    } catch (e) { toast(e.message, "error"); }
+      _wasteContextCache = null;
+      if (typeof _currentPage !== "undefined" && _currentPage === "products" && typeof renderProducts === "function") {
+        renderProducts();
+      } else if (typeof _currentPage !== "undefined" && _currentPage === "raw-stock" && typeof renderRawStock === "function") {
+        renderRawStock();
+      } else if (typeof _currentPage !== "undefined" && _currentPage === "waste-management" && typeof renderWasteManagement === "function") {
+        renderWasteManagement();
+      } else if (typeof _currentPage !== "undefined" && _currentPage === "logs" && typeof applyLogFilters === "function") {
+        applyLogFilters();
+      }
+    } catch (e) {
+      saveButton.disabled = false;
+      saveButton.textContent = "Record Waste";
+      toast(e.message, "error");
+    }
   };
 }
 

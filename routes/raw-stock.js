@@ -1,6 +1,7 @@
 const express = require('express');
 const { getSqlite, getPostgres, usePostgres } = require('../db/runtime');
 const { requireAuth } = require('../middleware/auth');
+const wasteService = require('../services/WasteService');
 const router = express.Router();
 
 // GET /api/raw-stock
@@ -174,38 +175,38 @@ router.post('/waste', requireAuth, async (req, res) => {
     if (!raw_stock_id || !quantity) return res.status(400).json({ error: 'Ingredient ID and quantity required' });
 
     try {
-        const performWaste = async (client) => {
-            let stock;
-            if (isPostgres) stock = (await client.query('SELECT current_stock FROM raw_stocks WHERE id = $1 AND shop_id = $2', [raw_stock_id, shopId])).rows[0];
-            else stock = client.prepare('SELECT current_stock FROM raw_stocks WHERE id = ? AND shop_id = ?').get(raw_stock_id, shopId);
+        if (isPostgres) {
+            const result = await wasteService.record(shopId, userId, {
+                source_type: 'raw_ingredient',
+                raw_stock_id,
+                quantity,
+                reason,
+                stock_action: 'deduct'
+            });
+            return res.json(result);
+        }
+
+        const performWaste = (client) => {
+            const stock = client.prepare('SELECT current_stock FROM raw_stocks WHERE id = ? AND shop_id = ?').get(raw_stock_id, shopId);
             
             if (!stock) throw new Error('Ingredient not found');
 
-            if (isPostgres) {
-                await client.query('INSERT INTO raw_stock_waste (raw_stock_id, shop_id, user_id, quantity, reason) VALUES ($1, $2, $3, $4, $5)', [raw_stock_id, shopId, userId, quantity, reason || '']);
-            } else {
-                client.prepare('INSERT INTO raw_stock_waste (raw_stock_id, shop_id, user_id, quantity, reason) VALUES (?, ?, ?, ?, ?)').run(raw_stock_id, shopId, userId, quantity, reason || '');
-            }
+            client.prepare('INSERT INTO raw_stock_waste (raw_stock_id, shop_id, user_id, quantity, reason) VALUES (?, ?, ?, ?, ?)').run(raw_stock_id, shopId, userId, quantity, reason || '');
 
             let toRemove = parseFloat(quantity);
-            let batches;
-            if (isPostgres) batches = (await client.query('SELECT * FROM raw_stock_batches WHERE raw_stock_id = $1 AND shop_id = $2 AND quantity > 0 ORDER BY created_at ASC', [raw_stock_id, shopId])).rows;
-            else batches = client.prepare('SELECT * FROM raw_stock_batches WHERE raw_stock_id = ? AND shop_id = ? AND quantity > 0 ORDER BY created_at ASC').all(raw_stock_id, shopId);
+            const batches = client.prepare('SELECT * FROM raw_stock_batches WHERE raw_stock_id = ? AND shop_id = ? AND quantity > 0 ORDER BY created_at ASC').all(raw_stock_id, shopId);
             
             for (const b of batches) {
                 if (toRemove <= 0) break;
                 const take = Math.min(b.quantity, toRemove);
-                if (isPostgres) await client.query('UPDATE raw_stock_batches SET quantity = quantity - $1 WHERE id = $2', [take, b.id]);
-                else client.prepare('UPDATE raw_stock_batches SET quantity = quantity - ? WHERE id = ?').run(take, b.id);
+                client.prepare('UPDATE raw_stock_batches SET quantity = quantity - ? WHERE id = ?').run(take, b.id);
                 toRemove -= take;
             }
 
-            if (isPostgres) await client.query('UPDATE raw_stocks SET current_stock = current_stock - $1 WHERE id = $2 AND shop_id = $3', [quantity, raw_stock_id, shopId]);
-            else client.prepare('UPDATE raw_stocks SET current_stock = current_stock - ? WHERE id = ? AND shop_id = ?').run(quantity, raw_stock_id, shopId);
+            client.prepare('UPDATE raw_stocks SET current_stock = current_stock - ? WHERE id = ? AND shop_id = ?').run(quantity, raw_stock_id, shopId);
         };
 
-        if (isPostgres) await getPostgres().withTransaction(performWaste);
-        else getSqlite().transaction(() => performWaste(getSqlite()))();
+        getSqlite().transaction(() => performWaste(getSqlite()))();
 
         res.json({ ok: true });
     } catch (e) {

@@ -322,13 +322,19 @@ const AVAILABLE_PANELS = [
     id: "raw-stock",
     icon: `<path d="M12 2L2 7l10 5 10-5-10-5z" fill="#F97316"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="#F97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
     label: "Raw Ingredients",
-    desc: "Manage base stock, track ingredient batches and record waste."
+    desc: "Manage base stock and track ingredient batches."
+  },
+  {
+    id: "waste-management",
+    icon: `<path d="M6 3h12l1 4H5l1-4z" fill="#E11D48" opacity="0.25"/><path d="M7 7h10l-.8 13H7.8L7 7z" fill="#E11D48" opacity="0.65"/><path d="M10 10v7M14 10v7M4 7h16" stroke="#E11D48" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
+    label: "Waste Management",
+    desc: "Record product, ingredient, recipe, order, and return waste."
   },
   {
     id: "logs",
     icon: `<path d="M4 4h16v16H4z" fill="#6366F1" opacity="0.2"/><path d="M7 8h10M7 12h10M7 16h6" stroke="#6366F1" stroke-width="2" stroke-linecap="round"/><path d="M3 3h18v18H3V3z" fill="none" stroke="#6366F1" stroke-width="1.5"/>`,
-    label: "Register & Activity Logs",
-    desc: "Detailed audit trail of register shifts, cash movements, and user actions."
+    label: "Logs",
+    desc: "Register, wastage, payment, sales, delivery, and activity audit records."
   },
 ];
 
@@ -340,7 +346,10 @@ function canCurrentUserAccessRegister() {
 
 function isPanelAllowedForCurrentUser(panelId) {
   if (panelId === "register") return canCurrentUserAccessRegister();
-  if (panelId === "logs") return true; 
+  if (panelId === "logs") {
+    if (["admin", "superadmin", "manager"].includes(currentUser?.role)) return true;
+    return (currentUser.allowed_panels || []).includes("logs");
+  }
   if (currentUser.role === "superadmin") return PLATFORM_OWNER_PANELS.includes(panelId);
   const allowedPanels = currentUser.allowed_panels || [];
   if (currentUser.role === "admin" && (panelId === "settings" || panelId === "users")) return true;
@@ -365,7 +374,7 @@ const MODULE_GROUPS = [
   {
     title: "Inventory",
     desc: "Products, brands, ingredients, and kitchen preparation.",
-    panels: ["products", "brands", "raw-stock", "kds"],
+    panels: ["products", "brands", "raw-stock", "waste-management", "kds"],
   },
   {
     title: "Finance & Accounting",
@@ -464,6 +473,10 @@ function navigate(page) {
     toast("You do not have permission to manage the register.", "error");
     return false;
   }
+  if (page === "logs" && !isPanelAllowedForCurrentUser("logs")) {
+    toast("You do not have permission to view logs.", "error");
+    return false;
+  }
 
   if (currentUser.role === "superadmin" && !PLATFORM_OWNER_PANELS.includes(page) && page !== "register") {
     // Superadmins can only access platform-level pages
@@ -523,10 +536,11 @@ function navigate(page) {
     tables: "Table Management",
     kds: "Kitchen Display System",
     "raw-stock": "Raw Ingredients",
+    "waste-management": "Waste Management",
     recipes: "Manage Recipes",
     "pending-dues": "Pending Dues Ledger",
     analytics: "Analytics & Reports",
-    logs: "Register & Activity Logs",
+    logs: "Logs",
   };
   if (page === "dashboard" && currentUser.role === "superadmin")
     titles.dashboard = "System Overview (Master Admin)";
@@ -565,6 +579,7 @@ function navigate(page) {
     tables: renderTables,
     kds: renderKDS,
     "raw-stock": renderRawStock,
+    "waste-management": renderWasteManagement,
     recipes: renderRecipes,
     "pending-dues": () => renderSalesHistory(true),
     analytics: renderAnalytics,
@@ -2295,6 +2310,14 @@ async function toggleDamageAutoCalc(cb) {
 }
 
 function openLossPopup(productId, productName) {
+  if (typeof showWasteLogModal === "function") {
+    return showWasteLogModal({
+      source_type: "product",
+      product_id: productId,
+      title: productName
+    });
+  }
+
   openModal(
     `Report Loss: ${productName}`,
     `
@@ -8099,8 +8122,7 @@ async function renderRegister() {
     return;
   }
 
-  const [pendingCashDrops, pendingCashHandovers, handoverRecipients] = await Promise.all([
-    fetchPendingCashDropsForAdmin(),
+  const [pendingCashHandovers, handoverRecipients] = await Promise.all([
     fetchPendingCashHandoversForRegister(),
     fetchRegisterHandoverRecipients()
   ]);
@@ -8122,7 +8144,6 @@ async function renderRegister() {
           </button>
         </div>
 
-        ${renderPendingCashDropsSection(pendingCashDrops)}
         ${renderPendingCashHandoversSection(pendingCashHandovers)}
 
         <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)] gap-6">
@@ -8207,7 +8228,6 @@ async function renderRegister() {
         ${Number(summary.pending_cash_handovers || 0) > 0 ? renderRegisterMetric("Pending Handovers", summary.pending_cash_handovers, "blue", true) : ""}
       </section>
 
-      ${renderPendingCashDropsSection(pendingCashDrops)}
       ${renderPendingCashHandoversSection(pendingCashHandovers)}
 
       <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(420px,1.1fr)] gap-6">
@@ -8521,6 +8541,7 @@ async function verifyCashDrop(cashDropId, status) {
     toast(status === "verified" ? "Cash drop verified." : "Cash drop rejected.");
     await fetchActiveShift();
     if (_currentPage === "register") await renderRegister();
+    if (_currentPage === "logs") await applyLogFilters();
   } catch (err) {
     toast(err.message, "error");
   }
@@ -8535,6 +8556,7 @@ async function verifyCashHandover(handoverId, status) {
     toast(status === "verified" ? "Cash handover verified." : "Cash handover rejected.");
     await fetchActiveShift();
     if (_currentPage === "register") await renderRegister();
+    if (_currentPage === "logs") await applyLogFilters();
   } catch (err) {
     toast(err.message, "error");
   }
@@ -8616,22 +8638,392 @@ function openShiftClosedReport(summary) {
 let _logsData = [];
 let _shiftHistoryData = [];
 let _logsFilter = { from: '', to: '', action: '', userId: '' };
+let _logsActiveTab = "register";
+
+const LOG_TABS = [
+  { id: "register", label: "Register Logs" },
+  { id: "wastage", label: "Wastage Logs" },
+  { id: "payments", label: "Payment Logs" },
+  { id: "sales", label: "Sales Logs" },
+  { id: "delivery", label: "Delivery Logs" },
+  { id: "other", label: "All Logs" }
+];
 
 function _logsTableColspan() {
   return currentUser?.role === "superadmin" ? 5 : 4;
+}
+
+function renderLogsTabButtons() {
+  return LOG_TABS.map((tab) => {
+    const active = _logsActiveTab === tab.id;
+    return `
+      <button type="button" onclick="setLogsTab('${tab.id}')" class="shrink-0 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest border transition-all ${active
+        ? "bg-slate-950 dark:bg-white text-white dark:text-slate-950 border-slate-950 dark:border-white shadow-lg"
+        : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700"}">
+        ${tab.label}
+      </button>
+    `;
+  }).join("");
+}
+
+function setLogsTab(tabId) {
+  if (!LOG_TABS.some((tab) => tab.id === tabId)) return;
+  const from = document.getElementById("log-filter-from")?.value;
+  const to = document.getElementById("log-filter-to")?.value;
+  if (from) _logsFilter.from = from;
+  if (to) _logsFilter.to = to;
+  _logsActiveTab = tabId;
+  renderLogs();
+}
+
+function _renderLogsLoading(message = "Fetching logs...") {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+  tabContent.innerHTML = `
+    <div class="min-h-[320px] rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-sm font-bold text-slate-400">
+      ${escapeOrderValue(message)}
+    </div>
+  `;
+}
+
+function _renderLogsError(message) {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+  tabContent.innerHTML = `
+    <div class="p-8 rounded-3xl bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-300 font-bold">
+      ${escapeOrderValue(message || "Failed to load logs.")}
+    </div>
+  `;
+}
+
+function _activityLogTableShell(title = "Activity Trail", subtitle = "System activity records") {
+  return `
+    <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[360px]">
+      <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+        <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">${title}</h4>
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">${subtitle}</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+              <th class="px-6 py-4">Time</th>
+              <th class="px-6 py-4">User</th>
+              <th class="px-6 py-4">Action</th>
+              <th class="px-6 py-4">Details</th>
+              ${currentUser.role === 'superadmin' ? '<th class="px-6 py-4">Shop</th>' : ''}
+            </tr>
+          </thead>
+          <tbody id="logs-table-body">
+            <tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-slate-400 italic">No logs loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderRegisterLogsTab(pendingCashDrops = [], pendingCashHandovers = []) {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+
+  tabContent.innerHTML = `
+    ${renderPendingCashDropsSection(pendingCashDrops)}
+    ${renderPendingCashHandoversSection(pendingCashHandovers)}
+    <div id="shift-history-table-wrap"></div>
+    ${_activityLogTableShell("Register Activity Trail", "Shift openings, closings, cash drops, handovers, and drawer audit records")}
+  `;
+
+  _renderShiftHistoryTable();
+  _renderLogsTable();
+}
+
+function _localDateKey(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function _isWithinLogDateRange(value) {
+  const key = _localDateKey(value);
+  if (!key) return false;
+  if (_logsFilter.from && key < _logsFilter.from) return false;
+  if (_logsFilter.to && key > _logsFilter.to) return false;
+  return true;
+}
+
+function _formatLogDateTime(value) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleString();
+}
+
+function _formatOrderType(value) {
+  return String(value || "sale").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function _statusPill(label, tone = "slate") {
+  const tones = {
+    emerald: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-900/40",
+    blue: "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-blue-100 dark:border-blue-900/40",
+    amber: "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-100 dark:border-amber-900/40",
+    rose: "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-100 dark:border-rose-900/40",
+    slate: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+  };
+  return `<span class="inline-flex px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${tones[tone] || tones.slate}">${escapeOrderValue(label)}</span>`;
+}
+
+function _renderWastageLogsTab(wasteRows = []) {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+  const colspan = currentUser.role === "superadmin" ? 8 : 7;
+
+  const rows = wasteRows.map((row) => {
+    const sourceType = row.source_type ? _formatOrderType(row.source_type) : "Raw Ingredient";
+    const stockAction = row.stock_action ? _formatOrderType(row.stock_action) : "Deduct";
+    const quantity = `${Number(row.quantity || 0).toFixed(2)}${row.unit ? ` ${escapeOrderValue(row.unit)}` : ""}`;
+    const cost = Number(row.cost_amount || 0);
+
+    return `
+      <tr class="border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.01]">
+        <td class="px-6 py-4 text-xs font-bold text-slate-900 dark:text-white">${_formatLogDateTime(row.created_at || row.date)}</td>
+        <td class="px-6 py-4 text-sm font-black text-slate-900 dark:text-white">${escapeOrderValue(row.ingredient_name || `Waste #${row.id}`)}</td>
+        <td class="px-6 py-4">
+          <div class="flex flex-col gap-1">
+            ${_statusPill(sourceType, row.source_type === "return" ? "amber" : row.source_type === "order" ? "blue" : "rose")}
+            <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${escapeOrderValue(stockAction)}</span>
+          </div>
+        </td>
+        <td class="px-6 py-4 text-sm font-black text-rose-600 dark:text-rose-300">${quantity}</td>
+        <td class="px-6 py-4 text-xs font-black text-slate-700 dark:text-slate-200">${cost > 0 ? `Rs. ${cost.toFixed(2)}` : "-"}</td>
+        <td class="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400">${escapeOrderValue(row.reason || row.reason_code || "No reason recorded")}</td>
+        <td class="px-6 py-4 text-xs font-black text-slate-700 dark:text-slate-200">${escapeOrderValue(row.user_name || "Unknown")}</td>
+        ${currentUser.role === "superadmin" ? `<td class="px-6 py-4 text-xs font-bold text-indigo-500">${escapeOrderValue(row.shop_name || "Core System")}</td>` : ""}
+      </tr>
+    `;
+  }).join("");
+
+  tabContent.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+        <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">Wastage Logs</h4>
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Product, ingredient, recipe, order, return, and stock loss records</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+              <th class="px-6 py-4">Time</th>
+              <th class="px-6 py-4">Source</th>
+              <th class="px-6 py-4">Type</th>
+              <th class="px-6 py-4">Quantity</th>
+              <th class="px-6 py-4">Cost</th>
+              <th class="px-6 py-4">Reason</th>
+              <th class="px-6 py-4">Staff</th>
+              ${currentUser.role === "superadmin" ? '<th class="px-6 py-4">Shop</th>' : ""}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="${colspan}" class="px-6 py-20 text-center text-slate-400 italic font-medium">No wastage records found for the selected date range.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderPaymentLogsTab(paymentRows = []) {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+
+  const rows = paymentRows.map((payment) => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.01]">
+      <td class="px-6 py-4 text-xs font-bold text-slate-900 dark:text-white">${_formatLogDateTime(payment.created_at)}</td>
+      <td class="px-6 py-4">
+        <div class="text-sm font-black text-slate-900 dark:text-white">${escapeOrderValue(payment.customer_name || "Walk-in customer")}</div>
+        <div class="text-[10px] font-bold text-slate-400 mt-0.5">${escapeOrderValue(payment.customer_phone || "")}</div>
+      </td>
+      <td class="px-6 py-4 text-sm font-black text-emerald-600 dark:text-emerald-300">${formatRegisterMoney(payment.amount)}</td>
+      <td class="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400">${escapeOrderValue(payment.note || "Payment received")}</td>
+      <td class="px-6 py-4">
+        <div class="text-xs font-black text-slate-800 dark:text-white">${escapeOrderValue(payment.created_by_name || "Unknown")}</div>
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">${payment.sale_id ? `Sale #${payment.sale_id}` : "Ledger payment"}</div>
+      </td>
+      ${currentUser.role === 'superadmin' ? `<td class="px-6 py-4 text-xs font-bold text-indigo-500">${escapeOrderValue(payment.shop_name || "Core System")}</td>` : ""}
+    </tr>
+  `).join("");
+
+  tabContent.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+        <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">Payment Logs</h4>
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Customer ledger payment events and due collections</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+              <th class="px-6 py-4">Time</th>
+              <th class="px-6 py-4">Customer</th>
+              <th class="px-6 py-4">Amount</th>
+              <th class="px-6 py-4">Note</th>
+              <th class="px-6 py-4">Collected By</th>
+              ${currentUser.role === 'superadmin' ? '<th class="px-6 py-4">Shop</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="${currentUser.role === 'superadmin' ? 6 : 5}" class="px-6 py-20 text-center text-slate-400 italic font-medium">No payment records found for the selected date range.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderSalesLogsTab(salesRows = []) {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+  const colspan = currentUser.role === "superadmin" ? 6 : 5;
+
+  const rows = salesRows.map((sale) => {
+    const total = Number(sale.total || 0);
+    const paid = Number(sale.amount_received || 0);
+    const due = Math.max(0, total - paid);
+    const status = String(sale.order_status || "completed");
+    const statusTone = status === "completed" ? "emerald" : status === "payment_pending" ? "amber" : "slate";
+    return `
+      <tr class="border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.01]">
+        <td class="px-6 py-4">
+          <div class="text-xs font-black text-slate-900 dark:text-white">#${sale.id}</div>
+          <div class="text-[10px] font-bold text-slate-400 mt-0.5">${_formatLogDateTime(sale.created_at)}</div>
+        </td>
+        <td class="px-6 py-4">
+          <div class="text-sm font-black text-slate-900 dark:text-white">${escapeOrderValue(sale.customer_name || "Walk-in customer")}</div>
+          <div class="text-[10px] font-bold text-slate-400 mt-0.5">${escapeOrderValue(sale.customer_phone || _formatOrderType(sale.order_type))}</div>
+        </td>
+        <td class="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400">${escapeOrderValue(sale.served_by_name || sale.served_by_username || "Unknown")}</td>
+        <td class="px-6 py-4">
+          <div class="text-sm font-black text-slate-900 dark:text-white">${formatRegisterMoney(total)}</div>
+          <div class="text-[10px] font-bold ${due > 0.01 ? "text-amber-600 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300"} mt-0.5">Paid ${formatRegisterMoney(paid)}${due > 0.01 ? ` / Due ${formatRegisterMoney(due)}` : ""}</div>
+        </td>
+        <td class="px-6 py-4">
+          <div class="text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">${escapeOrderValue(sale.payment_method || "cash")}</div>
+          <div class="mt-2">${_statusPill(status.replace(/_/g, " "), statusTone)}</div>
+        </td>
+        ${currentUser.role === "superadmin" ? `<td class="px-6 py-4 text-xs font-bold text-indigo-500">${escapeOrderValue(sale.shop_name || "Core System")}</td>` : ""}
+      </tr>
+    `;
+  }).join("");
+
+  tabContent.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+        <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">Sales Logs</h4>
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Bills, payment status, sale type, and cashier activity</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+              <th class="px-6 py-4">Sale</th>
+              <th class="px-6 py-4">Customer</th>
+              <th class="px-6 py-4">Served By</th>
+              <th class="px-6 py-4">Amount</th>
+              <th class="px-6 py-4">Payment</th>
+              ${currentUser.role === "superadmin" ? '<th class="px-6 py-4">Shop</th>' : ""}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="${colspan}" class="px-6 py-20 text-center text-slate-400 italic font-medium">No sales found for the selected date range.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderDeliveryLogsTab(deliveryRows = []) {
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+  const colspan = currentUser.role === "superadmin" ? 6 : 5;
+
+  const rows = deliveryRows.map((sale) => {
+    const status = String(sale.order_status || "delivery");
+    const statusTone = status === "completed" ? "emerald" : status === "payment_pending" ? "amber" : "blue";
+    return `
+      <tr class="border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.01]">
+        <td class="px-6 py-4">
+          <div class="text-xs font-black text-slate-900 dark:text-white">#${sale.id}</div>
+          <div class="text-[10px] font-bold text-slate-400 mt-0.5">${_formatLogDateTime(sale.created_at)}</div>
+        </td>
+        <td class="px-6 py-4">
+          <div class="text-sm font-black text-slate-900 dark:text-white">${escapeOrderValue(sale.customer_name || "Delivery customer")}</div>
+          <div class="text-[10px] font-bold text-slate-400 mt-0.5">${escapeOrderValue(sale.customer_phone || "")}</div>
+        </td>
+        <td class="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 max-w-xs">${escapeOrderValue(sale.delivery_address || "No address recorded")}</td>
+        <td class="px-6 py-4 text-xs font-black text-slate-800 dark:text-white">${escapeOrderValue(sale.rider_name || "No rider assigned")}</td>
+        <td class="px-6 py-4">
+          <div class="text-sm font-black text-slate-900 dark:text-white">${formatRegisterMoney(sale.total)}</div>
+          <div class="mt-2">${_statusPill(status.replace(/_/g, " "), statusTone)}</div>
+        </td>
+        ${currentUser.role === "superadmin" ? `<td class="px-6 py-4 text-xs font-bold text-indigo-500">${escapeOrderValue(sale.shop_name || "Core System")}</td>` : ""}
+      </tr>
+    `;
+  }).join("");
+
+  tabContent.innerHTML = `
+    <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+        <h4 class="text-base font-black text-slate-950 dark:text-white tracking-tight">Delivery Logs</h4>
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Delivery orders, rider assignment, address, and order status</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
+              <th class="px-6 py-4">Order</th>
+              <th class="px-6 py-4">Customer</th>
+              <th class="px-6 py-4">Address</th>
+              <th class="px-6 py-4">Rider</th>
+              <th class="px-6 py-4">Status</th>
+              ${currentUser.role === "superadmin" ? '<th class="px-6 py-4">Shop</th>' : ""}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="${colspan}" class="px-6 py-20 text-center text-slate-400 italic font-medium">No delivery records found for the selected date range.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderOtherLogsTab(logs = []) {
+  _logsData = Array.isArray(logs) ? logs : [];
+
+  const tabContent = document.getElementById("logs-tab-content");
+  if (!tabContent) return;
+  tabContent.innerHTML = _activityLogTableShell("All Logs", "Complete activity trail for the selected period");
+  _renderLogsTable();
 }
 
 async function renderLogs() {
   const content = document.getElementById("page-content");
   if (!content) return;
 
-  const today = new Date().toISOString().slice(0, 10);
-  if (!_logsFilter.from) _logsFilter.from = today;
+  const today = _localDateKey(new Date());
+  const defaultFromDate = new Date();
+  defaultFromDate.setDate(defaultFromDate.getDate() - 30);
+  if (!_logsFilter.from) _logsFilter.from = _localDateKey(defaultFromDate);
   if (!_logsFilter.to) _logsFilter.to = today;
 
   content.innerHTML = `
     <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <!-- Header & Filters -->
       <div class="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div class="flex items-center gap-4">
@@ -8639,8 +9031,8 @@ async function renderLogs() {
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
             </div>
             <div>
-              <h3 class="text-xl font-black text-slate-950 dark:text-white tracking-tight">Audit & Activity Logs</h3>
-              <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">System-wide audit trail</p>
+              <h3 class="text-xl font-black text-slate-950 dark:text-white tracking-tight">Logs</h3>
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Register, wastage, payment, sales, delivery, and activity trails</p>
             </div>
           </div>
           
@@ -8658,34 +9050,16 @@ async function renderLogs() {
         </div>
       </div>
 
-      <!-- Shift Health Table -->
-      <div id="shift-history-table-wrap">
-          <!-- Shift table injected here -->
-      </div>
-
-      <!-- Logs Table -->
-      <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden min-h-[400px]">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left">
-            <thead>
-              <tr class="bg-slate-50 dark:bg-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700">
-                <th class="px-6 py-4">Time</th>
-                <th class="px-6 py-4">User</th>
-                <th class="px-6 py-4">Action</th>
-                <th class="px-6 py-4">Details</th>
-                ${currentUser.role === 'superadmin' ? '<th class="px-6 py-4">Shop</th>' : ''}
-              </tr>
-            </thead>
-            <tbody id="logs-table-body">
-              <tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-slate-400 italic">No logs loaded. Click "Fetch Logs" to view system activity.</td></tr>
-            </tbody>
-          </table>
+      <div class="overflow-x-auto">
+        <div class="min-w-max flex items-center gap-2 pb-1">
+          ${renderLogsTabButtons()}
         </div>
       </div>
+
+      <div id="logs-tab-content" class="space-y-6"></div>
     </div>
   `;
 
-  // Auto-fetch today's logs
   await applyLogFilters();
 }
 
@@ -8696,27 +9070,59 @@ async function applyLogFilters() {
   if (from) _logsFilter.from = from;
   if (to) _logsFilter.to = to;
 
-  const tbody = document.getElementById("logs-table-body");
-  if (tbody) tbody.innerHTML = `<tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-slate-400 italic">Fetching audit trail...</td></tr>`;
+  _renderLogsLoading(`Fetching ${LOG_TABS.find((tab) => tab.id === _logsActiveTab)?.label || "logs"}...`);
 
   try {
     const params = new URLSearchParams();
     if (_logsFilter.from) params.append('from', _logsFilter.from + ' 00:00:00');
     if (_logsFilter.to) params.append('to', _logsFilter.to + ' 23:59:59');
-    
-    const [logs, history] = await Promise.all([
-      api(`/api/activity-logs?${params.toString()}`),
-      api(`/api/shifts/history?${params.toString()}`)
-    ]);
-    
-    _logsData = logs;
-    _shiftHistoryData = history;
-    
-    _renderShiftHistoryTable();
-    _renderLogsTable();
+
+    if (_logsActiveTab === "register") {
+      const [logs, history, pendingCashDrops, pendingCashHandovers] = await Promise.all([
+        api(`/api/activity-logs?${params.toString()}`),
+        api(`/api/shifts/history?${params.toString()}`),
+        fetchPendingCashDropsForAdmin(),
+        fetchPendingCashHandoversForRegister()
+      ]);
+
+      _logsData = Array.isArray(logs) ? logs : [];
+      _shiftHistoryData = Array.isArray(history) ? history : [];
+      _renderRegisterLogsTab(pendingCashDrops, pendingCashHandovers);
+      return;
+    }
+
+    if (_logsActiveTab === "wastage") {
+      const waste = await api(`/api/activity-logs/wastage?${params.toString()}`);
+      _renderWastageLogsTab(Array.isArray(waste) ? waste : []);
+      return;
+    }
+
+    if (_logsActiveTab === "payments") {
+      const payments = await api(`/api/activity-logs/payments?${params.toString()}`);
+      _renderPaymentLogsTab(Array.isArray(payments) ? payments : []);
+      return;
+    }
+
+    if (_logsActiveTab === "sales" || _logsActiveTab === "delivery") {
+      const salesParams = new URLSearchParams(params);
+      if (_logsActiveTab === "delivery") {
+        salesParams.append("order_type", "delivery");
+      }
+      const sales = await api(`/api/activity-logs/sales?${salesParams.toString()}`);
+      const salesRows = Array.isArray(sales) ? sales : [];
+      if (_logsActiveTab === "delivery") {
+        _renderDeliveryLogsTab(salesRows);
+      } else {
+        _renderSalesLogsTab(salesRows);
+      }
+      return;
+    }
+
+    const logs = await api(`/api/activity-logs?${params.toString()}`);
+    _renderOtherLogsTab(logs);
   } catch (err) {
     toast(err.message, "error");
-    if (tbody) tbody.innerHTML = `<tr><td colspan="${_logsTableColspan()}" class="px-6 py-20 text-center text-rose-500 font-bold">Failed to load logs: ${err.message}</td></tr>`;
+    _renderLogsError(err.message);
   }
 }
 
