@@ -3,6 +3,7 @@ let activeAnalyticsTab = "overview";
 let analyticsPeriod = "7days";
 let analyticsCustomFrom = "";
 let analyticsCustomTo = "";
+let analyticsBrandId = "";
 let analyticsData = null;
 
 const analyticsLinks = [
@@ -162,6 +163,8 @@ async function renderAnalytics() {
               </select>
             </div>
 
+            <div id="analytics-brand-filter-container"></div>
+
             <!-- Export PDF/CSV Button -->
             <button onclick="exportAnalyticsReport()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/15 transition-all flex items-center gap-1.5 active:scale-[0.98]">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -228,8 +231,13 @@ async function loadAnalyticsData() {
     if (analyticsPeriod === 'custom') {
       url += `&from=${analyticsCustomFrom}&to=${analyticsCustomTo}`;
     }
+    if (analyticsBrandId) {
+      url += `&brand_id=${encodeURIComponent(analyticsBrandId)}`;
+    }
     
     analyticsData = await api(url);
+    if (analyticsBrandId && !analyticsData.selectedBrandId) analyticsBrandId = "";
+    renderAnalyticsBrandFilter();
     renderActiveAnalyticsTab();
   } catch (err) {
     console.error("Failed to load aggregated analytics:", err);
@@ -241,6 +249,32 @@ async function loadAnalyticsData() {
       </div>
     `;
   }
+}
+
+function renderAnalyticsBrandFilter() {
+  const container = document.getElementById("analytics-brand-filter-container");
+  if (!container || !analyticsData) return;
+
+  const brands = Array.isArray(analyticsData.brands) ? analyticsData.brands : [];
+  if (brands.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/40 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800">
+      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Partner / Brand:</span>
+      <select id="analytics-brand-select" onchange="handleAnalyticsBrandChange()" class="bg-transparent text-xs font-bold text-teal-600 dark:text-teal-400 outline-none cursor-pointer max-w-[170px]">
+        <option value="">All Brands</option>
+        ${brands.map((brand) => `<option value="${brand.id}" ${String(analyticsBrandId) === String(brand.id) ? "selected" : ""}>${brand.name}</option>`).join("")}
+      </select>
+    </div>
+  `;
+}
+
+function handleAnalyticsBrandChange() {
+  analyticsBrandId = document.getElementById("analytics-brand-select")?.value || "";
+  loadAnalyticsData();
 }
 
 function renderActiveAnalyticsTab() {

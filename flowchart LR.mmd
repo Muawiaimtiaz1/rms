@@ -1,0 +1,38 @@
+flowchart LR
+  Server["server.js"]
+
+  Server --> Auth["/api/auth\nlogin, logout, me, forgot-password"]
+  Server --> Admin["/api/admin\nstore stats, stores, activity, health, hierarchy, support list, reset password, plan"]
+  Server --> Users["/api/users\nstaff CRUD and permissions"]
+  Server --> Shops["/api/shops\nshop CRUD for superadmin"]
+  Server --> Subs["/api/subscriptions\nsubscription payment tracking"]
+  Server --> Brands["/api/brands\nbrand CRUD, expense shares, payments, PDF reports"]
+  Server --> Products["/api/products\ncatalog CRUD, image upload, stock batches, harvest, damage"]
+  Server --> ProductCats["/api/product-categories\ncategory CRUD"]
+  Server --> Expenses["/api/expenses\nexpense CRUD, bulk edit, PDF"]
+  Server --> ExpenseCats["/api/expense-categories\ncategory CRUD"]
+  Server --> Sales["/api/sales\ncheckout, history, pay due, edit details, bill, returns, return receipt"]
+  Server --> Customers["/api/customers\ncustomer list, ledger, payment, adjustment, PDF reports"]
+  Server --> Analytics["/api/analytics\nlegacy dashboard and optimized dashboard-data"]
+  Server --> Tables["/api/tables\nfloors, tables, table status"]
+  Server --> KDS["/api/kds\nactive kitchen orders and status"]
+  Server --> RawStock["/api/raw-stock\ningredient stock, batches, waste"]
+  Server --> Recipes["/api/recipes\nrecipe CRUD and product mapping"]
+  Server --> Settings["/api/shop-settings\nreceipt settings, logo/images, damage policy"]
+
+  Auth --> MW1["public login"]
+  Admin --> MW3["requireSuperAdmin"]
+  Shops --> MW3
+  Subs --> MW3
+  Users --> MW2["requireAdmin"]
+  Brands --> MW1A["requireAuth plus superadmin checks on brand CRUD"]
+  Products --> MW1A
+  Expenses --> MW1A
+  Sales --> MW1A
+  Customers --> MW1A
+  Analytics --> MW1A
+  Tables --> MW1A
+  KDS --> MW1A
+  RawStock --> MW1A
+  Recipes --> MW1A
+  Settings --> MW2A["requireAuth, requireAdmin for writes"]

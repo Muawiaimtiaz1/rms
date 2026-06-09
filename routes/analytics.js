@@ -14,7 +14,7 @@ router.get('/dashboard-data', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Shop ID required' });
     }
 
-    const data = await analyticsService.getDashboardData(targetShopId, req.query.period, req.query.from, req.query.to);
+    const data = await analyticsService.getDashboardData(targetShopId, req.query.period, req.query.from, req.query.to, req.query.brand_id);
     res.json(data);
 });
 
@@ -26,7 +26,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     // Legacy support for shop-specific analytics via the new service
-    const data = await analyticsService.getDashboardData(req.session.user.shop_id, req.query.period, req.query.from, req.query.to);
+    const data = await analyticsService.getDashboardData(req.session.user.shop_id, req.query.period, req.query.from, req.query.to, req.query.brand_id);
     res.json(data);
 });
 

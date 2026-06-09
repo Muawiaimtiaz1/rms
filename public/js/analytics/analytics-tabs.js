@@ -153,6 +153,7 @@ function renderSpecificSubTab(tabId, data) {
 
   } else if (tabId === "profit") {
     // ─── PROFIT ANALYTICS ───
+    const brandRows = Array.isArray(data.brandPerformance) ? data.brandPerformance : [];
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -170,6 +171,50 @@ function renderSpecificSubTab(tabId, data) {
             ${renderMetricLabel("Refund Deficit Deducted", "Total refund amount from return invoices created in the selected period. This is deducted from revenue.")}
             <h4 class="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">${formatCurrency(s.totalRefunds)}</h4>
             <span class="text-[10px] font-bold text-rose-500 block mt-1">Over ${s.totalReturns} total return invoices</span>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
+          <div class="mb-4">
+            ${analyticsPanelTitle("Partner / Brand Profit & Loss", "Per-brand net revenue, COGS, gross profit, stock damage/loss, and margin for the selected analytics period.")}
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead>
+                <tr class="border-b border-slate-100 dark:border-slate-800 text-slate-400 uppercase tracking-widest text-[9px] font-black">
+                  <th class="py-3 pl-2">Partner / Brand</th>
+                  <th class="py-3 text-right">Net Revenue</th>
+                  <th class="py-3 text-right">COGS</th>
+                  <th class="py-3 text-right">Gross Profit</th>
+                  <th class="py-3 text-right">Damage / Loss</th>
+                  <th class="py-3 text-right">After Loss</th>
+                  <th class="py-3 text-right">Margin</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50 dark:divide-slate-800/40">
+                ${brandRows.map((brand) => {
+                  const afterLoss = Number(brand.netAfterDamage || 0);
+                  const profit = Number(brand.grossProfit || 0);
+                  const profitTone = profit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+                  const afterLossTone = afterLoss >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+                  return `
+                    <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all font-semibold">
+                      <td class="py-3 pl-2">
+                        <div class="font-black text-slate-800 dark:text-white">${brand.brand_name}</div>
+                        <div class="text-[10px] text-slate-400">${formatNum(Number(brand.orders || 0))} order${Number(brand.orders || 0) === 1 ? "" : "s"}</div>
+                      </td>
+                      <td class="py-3 text-right text-blue-600 dark:text-blue-400 font-extrabold">${formatCurrency(Number(brand.netRevenue || 0))}</td>
+                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${formatCurrency(Number(brand.netCogs || 0))}</td>
+                      <td class="py-3 text-right ${profitTone} font-extrabold">${formatCurrency(profit)}</td>
+                      <td class="py-3 text-right text-rose-600 dark:text-rose-400 font-bold">${formatCurrency(Number(brand.damageLoss || 0))}</td>
+                      <td class="py-3 text-right ${afterLossTone} font-extrabold">${formatCurrency(afterLoss)}</td>
+                      <td class="py-3 text-right font-black text-slate-900 dark:text-white">${Number(brand.profitMargin || 0).toFixed(1)}%</td>
+                    </tr>
+                  `;
+                }).join('')}
+                ${brandRows.length === 0 ? `<tr><td colspan="7" class="py-6 text-center text-slate-400 italic">No brand profit/loss data available.</td></tr>` : ''}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

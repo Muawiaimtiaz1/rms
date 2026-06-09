@@ -157,6 +157,7 @@ let _posCustomerResults = [];
 let _posSelectedCustomer = null;
 let _posCheckoutCloseTimer = null;
 let _editingOrderId = null; // ID of the sale being edited in the POS
+let _posCheckoutSubmitting = false;
 let _tempEditCart = []; // Temporary cart for the edit modal
 let _tempEditSaleDetails = null; // Temporary sale details for the edit modal
 let _currentPage = "dashboard";
@@ -1181,6 +1182,7 @@ async function renderDashboard(period, brandId, from, to) {
   if (data.isGlobal) return renderGlobalDashboard(data);
 
   const brands = data.brands || [];
+  if (_dashBrandId && !data.selectedBrandId) _dashBrandId = "";
 
   const PERIOD_OPTS = [
     { val: "today", label: "Today" },
@@ -1208,7 +1210,7 @@ async function renderDashboard(period, brandId, from, to) {
     </div>`;
 
   const brandSelect =
-    brands.length > 1
+    brands.length > 0
       ? `
     <select id="dash-brand-filter" onchange="renderDashboard(undefined, this.value)"
       class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">
@@ -1222,6 +1224,57 @@ async function renderDashboard(period, brandId, from, to) {
     _dashPeriod !== "all" ||
     (_dashBrandId !== "" && _dashBrandId !== null) ||
     (_dashPeriod === "custom" && (_dashFrom !== "" || _dashTo !== ""));
+  const brandPerformance = Array.isArray(data.brandPerformance) ? data.brandPerformance : [];
+  const brandProfitHtml = brandPerformance.length
+    ? `
+    <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300 overflow-hidden mb-8">
+      <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V7m0 10v-1m9-4a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Partner / Brand Profit & Loss</h3>
+          ${statInfoIcon("Per-brand net revenue, COGS, gross profit, stock damage/loss, and margin for the selected dashboard period.")}
+        </div>
+        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${data.selectedBrandName || "All Brands"}</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
+              <th class="px-6 py-3">Partner / Brand</th>
+              <th class="px-6 py-3 text-right">Net Revenue</th>
+              <th class="px-6 py-3 text-right">COGS</th>
+              <th class="px-6 py-3 text-right">Gross Profit</th>
+              <th class="px-6 py-3 text-right">Damage / Loss</th>
+              <th class="px-6 py-3 text-right">After Loss</th>
+              <th class="px-6 py-3 text-right">Margin</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+            ${brandPerformance.map((brand) => {
+              const grossProfit = Number(brand.grossProfit || 0);
+              const afterLoss = Number(brand.netAfterDamage || 0);
+              const grossTone = grossProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+              const afterLossTone = afterLoss >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+              return `
+                <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                  <td class="px-6 py-3">
+                    <div class="text-sm font-black text-slate-800 dark:text-slate-100">${brand.brand_name}</div>
+                    <div class="text-[10px] text-slate-400 font-bold">${Number(brand.orders || 0).toLocaleString()} order${Number(brand.orders || 0) === 1 ? "" : "s"}</div>
+                  </td>
+                  <td class="px-6 py-3 text-right text-xs font-black text-blue-600 dark:text-blue-400">Rs. ${Number(brand.netRevenue || 0).toLocaleString()}</td>
+                  <td class="px-6 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">Rs. ${Number(brand.netCogs || 0).toLocaleString()}</td>
+                  <td class="px-6 py-3 text-right text-xs font-black ${grossTone}">Rs. ${grossProfit.toLocaleString()}</td>
+                  <td class="px-6 py-3 text-right text-xs font-bold text-rose-600 dark:text-rose-400">Rs. ${Number(brand.damageLoss || 0).toLocaleString()}</td>
+                  <td class="px-6 py-3 text-right text-xs font-black ${afterLossTone}">Rs. ${afterLoss.toLocaleString()}</td>
+                  <td class="px-6 py-3 text-right text-xs font-black text-slate-900 dark:text-white">${Number(brand.profitMargin || 0).toFixed(1)}%</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`
+    : "";
 
   $c("page-content").innerHTML = `
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -1247,7 +1300,7 @@ async function renderDashboard(period, brandId, from, to) {
         </div>
         ${brandSelect
       ? `<div class="flex items-center gap-2">
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Brand</span>
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Partner / Brand</span>
           ${brandSelect}
         </div>`
       : ""
@@ -1265,6 +1318,8 @@ async function renderDashboard(period, brandId, from, to) {
       ${statCard("Damage Value", "Rs. " + Number(data.damageTotal || 0).toLocaleString(), "Inventory & Returns", "rose", "Current product damage/loss value tracked in inventory. This is separate from normal sales COGS.")}
       ${statCard("Products", data.totalProducts, "in catalog", "amber", "Count of active catalog products for this shop, excluding deleted products.")}
     </div>
+
+    ${brandProfitHtml}
 
     <!-- Tables -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -4248,7 +4303,7 @@ function calculateCartTotal() {
     $c("cancel-edit-btn")?.remove();
   }
 
-  if (checkoutBtn) {
+  if (checkoutBtn && !_posCheckoutSubmitting) {
     if (_editingOrderId) {
       checkoutBtn.innerHTML = `<span>Update Order #${_editingOrderId}</span>`;
       checkoutBtn.className = "py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-white font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3 w-full";
@@ -4258,7 +4313,7 @@ function calculateCartTotal() {
     }
   }
 
-  if (kitchenBtn) {
+  if (kitchenBtn && !_posCheckoutSubmitting) {
     kitchenBtn.innerHTML = _editingOrderId
       ? `<span>Update Kitchen #${_editingOrderId}</span>`
       : `<span>Kitchen</span>`;
@@ -4430,7 +4485,37 @@ function getPOSActionLabel(status = "completed", isEditing = false) {
   return status === "pending" ? "Kitchen" : "Place Order";
 }
 
+function setPOSActionSubmitting(status = "completed", isSubmitting = true, fallbackIsEditing = false) {
+  const btn = getPOSActionButton(status);
+  if (!btn) return null;
+
+  if (isSubmitting) {
+    if (!btn.dataset.idleHtml) btn.dataset.idleHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.innerHTML = `<span>Processing...</span>`;
+    return btn;
+  }
+
+  btn.disabled = false;
+  btn.removeAttribute("aria-busy");
+  if (btn.dataset.idleHtml) {
+    btn.innerHTML = btn.dataset.idleHtml;
+    delete btn.dataset.idleHtml;
+  } else {
+    btn.innerHTML = `<span>${getPOSActionLabel(status, fallbackIsEditing)}</span>`;
+  }
+  return btn;
+}
+
+function resetPOSCheckoutSubmission(status = "completed", fallbackIsEditing = false) {
+  _posCheckoutSubmitting = false;
+  window._lastOrderAutoPrintKitchen = false;
+  setPOSActionSubmitting(status, false, fallbackIsEditing);
+}
+
 async function checkout(status = 'completed') {
+  if (_posCheckoutSubmitting) return;
   if (!cart.length) return toast("Cart is empty", "error");
 
   // CLIENT SIDE QUOTATION CHECK
@@ -4438,7 +4523,14 @@ async function checkout(status = 'completed') {
     return generateQuotation();
   }
 
-  if (status === 'completed' && !(await ensureOpenShiftForPayment())) return;
+  const isEditing = _editingOrderId !== null;
+  const btn = setPOSActionSubmitting(status, true, isEditing);
+  _posCheckoutSubmitting = true;
+
+  if (status === 'completed' && !(await ensureOpenShiftForPayment())) {
+    resetPOSCheckoutSubmission(status, isEditing);
+    return;
+  }
 
   const discount = parseFloat($c("pos-discount").value) || 0;
   const tax_percentage = parseFloat($c("pos-tax").value) || 0;
@@ -4463,8 +4555,14 @@ async function checkout(status = 'completed') {
     customer_phone = $c('pos-delivery-phone')?.value.trim() || '';
     delivery_address = $c('pos-delivery-addr')?.value.trim() || '';
     rider_id = parseInt($c('pos-rider')?.value) || null;
-    if (!customer_name) return toast("Customer name required for delivery", "error");
-    if (!customer_phone) return toast("Customer phone required for delivery", "error");
+    if (!customer_name) {
+      resetPOSCheckoutSubmission(status, isEditing);
+      return toast("Customer name required for delivery", "error");
+    }
+    if (!customer_phone) {
+      resetPOSCheckoutSubmission(status, isEditing);
+      return toast("Customer phone required for delivery", "error");
+    }
   } else if (orderType === 'takeaway') {
     token_number = $c('pos-token')?.value.trim() || `TK-${Date.now()}`;
     customer_name = $c('pos-takeaway-name')?.value.trim() || '';
@@ -4483,6 +4581,7 @@ async function checkout(status = 'completed') {
   if (status === 'completed' && amount_received < grandTotal - 0.01) {
     if (!customer_name || !customer_phone) {
       $c('pos-cust-name').focus();
+      resetPOSCheckoutSubmission(status, isEditing);
       return toast("Customer Name & Phone are REQUIRED for Pending Dues", "error");
     }
   }
@@ -4494,12 +4593,6 @@ async function checkout(status = 'completed') {
     if (amount_received < grandTotal - 0.01 && (!legacy_name || !legacy_phone)) {
       // Allow if customer not required in restaurant mode
     }
-  }
-
-  const btn = getPOSActionButton(status);
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Processing...";
   }
 
   const payload = {
@@ -4530,20 +4623,18 @@ async function checkout(status = 'completed') {
     order_status: status,
   };
 
-  const isEditing = _editingOrderId !== null;
   const url = isEditing ? `/api/sales/${_editingOrderId}/items` : "/api/sales";
   const method = isEditing ? "PUT" : "POST";
+  let orderPersisted = false;
 
   try {
     const r = await api(url, method, payload);
     if (r.error) {
       toast(r.error, "error");
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = getPOSActionLabel(status, isEditing);
-      }
+      resetPOSCheckoutSubmission(status, isEditing);
       return;
     }
+    orderPersisted = true;
     const completedSaleId = r.saleId || _editingOrderId;
     
     if (isEditing) {
@@ -4598,12 +4689,16 @@ async function checkout(status = 'completed') {
       "max-w-md",
       true,
     );
+    _posCheckoutSubmitting = false;
+    if (btn) btn.removeAttribute("aria-busy");
   } catch (err) {
     toast(err.message, "error");
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = getPOSActionLabel(status, isEditing);
+    if (orderPersisted) {
+      _posCheckoutSubmitting = false;
+      if (btn) btn.removeAttribute("aria-busy");
+      return;
     }
+    resetPOSCheckoutSubmission(status, isEditing);
   }
 }
 
