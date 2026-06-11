@@ -23,6 +23,10 @@ const shopSchema = z.object({
   })).optional(),
 });
 
+function ensureShopPanels(panels = []) {
+  return [...new Set([...(Array.isArray(panels) ? panels : []), 'notifications'])];
+}
+
 class ShopService {
   async listShops() {
     const shops = await db('shops').orderBy('created_at', 'desc');
@@ -34,7 +38,7 @@ class ShopService {
 
   async createShop(payload) {
     const data = shopSchema.parse(payload);
-    const panelsJson = JSON.stringify(data.allowed_panels);
+    const panelsJson = JSON.stringify(ensureShopPanels(data.allowed_panels));
 
     const shopId = await db.transaction(async (trx) => {
       // 1. Create Shop
@@ -106,7 +110,7 @@ class ShopService {
     const upData = {};
     if (name) upData.name = name;
     if (status) upData.status = status;
-    if (allowed_panels) upData.allowed_panels = JSON.stringify(allowed_panels);
+    if (allowed_panels) upData.allowed_panels = JSON.stringify(ensureShopPanels(allowed_panels));
 
     if (Object.keys(upData).length === 0) return;
 

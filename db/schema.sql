@@ -248,6 +248,37 @@ CREATE TABLE IF NOT EXISTS ticket_comments (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER,
+  target_user_id INTEGER,
+  created_by_user_id INTEGER,
+  type TEXT NOT NULL DEFAULT 'announcement',
+  priority TEXT NOT NULL DEFAULT 'normal',
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  action_label TEXT,
+  action_url TEXT,
+  publish_at TEXT,
+  expires_at TEXT,
+  due_at TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_reads (
+  notification_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  read_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (notification_id, user_id),
+  FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS activity_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     shop_id INTEGER NOT NULL,
@@ -261,6 +292,11 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_activity_logs_reference ON activity_logs(reference_id, reference_type);
+CREATE INDEX IF NOT EXISTS idx_notifications_shop_id ON notifications(shop_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_target_user_id ON notifications(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_reads_user_id ON notification_reads(user_id);
 
 CREATE TABLE IF NOT EXISTS product_compositions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

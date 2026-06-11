@@ -133,6 +133,7 @@ app.use('/api/recipes', require('./routes/recipes'));
 app.use("/api/waste", require("./routes/waste"));
 app.use("/api/shop-settings", require("./routes/shop-settings"));
 app.use("/api/admin", require("./routes/admin"));
+app.use("/api/notifications", require("./routes/notifications"));
 app.use("/api/tables", require("./routes/tables"));
 app.use("/api/kds", require("./routes/kds"));
 app.use("/api/print-jobs", require("./routes/print-jobs"));

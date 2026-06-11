@@ -83,6 +83,7 @@ if (!tableExists) {
       "sales-history",
       "expenses",
       "customers",
+      "notifications",
       "composite_products",
     ]);
     const longTermDate = "2099-12-31";
@@ -130,6 +131,7 @@ if (!tableExists) {
         "sales-history",
         "expenses",
         "customers",
+        "notifications",
         "composite_products",
       ]);
       const longTermDate = "2099-12-31";
@@ -756,8 +758,9 @@ if (!tableExists) {
       console.log("✅ customer_id column added to sales.");
     }
 
-    // Migration: enable customers panel for existing shops and admins
+    // Migration: enable newer shop panels for existing shops and admins
     try {
+      const requiredPanels = ["customers", "notifications"];
       const existingShops = db
         .prepare("SELECT id, allowed_panels FROM shops")
         .all();
@@ -774,8 +777,11 @@ if (!tableExists) {
           panels = [];
         }
 
-        if (!panels.includes("customers")) {
-          panels.push("customers");
+        const beforeLength = panels.length;
+        requiredPanels.forEach((panelId) => {
+          if (!panels.includes(panelId)) panels.push(panelId);
+        });
+        if (panels.length !== beforeLength) {
           updateShopPanels.run(JSON.stringify(panels), shop.id);
         }
       });
@@ -796,13 +802,16 @@ if (!tableExists) {
           panels = [];
         }
 
-        if (!panels.includes("customers")) {
-          panels.push("customers");
+        const beforeLength = panels.length;
+        requiredPanels.forEach((panelId) => {
+          if (!panels.includes(panelId)) panels.push(panelId);
+        });
+        if (panels.length !== beforeLength) {
           updateUserPanels.run(JSON.stringify(panels), user.id);
         }
       });
     } catch (e) {
-      console.error("Failed to enable customers panel for existing data:", e);
+      console.error("Failed to enable newer panels for existing data:", e);
     }
 
     // Migration: Add receipt settings columns to shops
@@ -973,6 +982,66 @@ if (!tableExists) {
       console.log("✅ taxes table added.");
     }
 
+    const notificationsExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='notifications'").get();
+    if (!notificationsExists) {
+      console.log("🔧 Updating database: Adding notifications table...");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shop_id INTEGER,
+          target_user_id INTEGER,
+          created_by_user_id INTEGER,
+          type TEXT NOT NULL DEFAULT 'announcement',
+          priority TEXT NOT NULL DEFAULT 'normal',
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          action_label TEXT,
+          action_url TEXT,
+          publish_at TEXT,
+          expires_at TEXT,
+          due_at TEXT,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+          FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL,
+          FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS notification_reads (
+          notification_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          read_at TEXT DEFAULT (datetime('now')),
+          PRIMARY KEY (notification_id, user_id),
+          FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_notifications_shop_id ON notifications(shop_id);
+        CREATE INDEX IF NOT EXISTS idx_notifications_target_user_id ON notifications(target_user_id);
+        CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+        CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+        CREATE INDEX IF NOT EXISTS idx_notification_reads_user_id ON notification_reads(user_id);
+      `);
+      console.log("✅ notifications table added.");
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notification_reads (
+        notification_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        read_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (notification_id, user_id),
+        FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_notifications_shop_id ON notifications(shop_id);
+      CREATE INDEX IF NOT EXISTS idx_notifications_target_user_id ON notifications(target_user_id);
+      CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+      CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+      CREATE INDEX IF NOT EXISTS idx_notification_reads_user_id ON notification_reads(user_id);
+    `);
+
   }
 }
 
@@ -1119,6 +1188,11 @@ try {
     CREATE INDEX IF NOT EXISTS idx_product_batches_shop_id ON product_batches(shop_id);
     CREATE INDEX IF NOT EXISTS idx_activity_logs_shop_id ON activity_logs(shop_id);
     CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_shop_id ON notifications(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_target_user_id ON notifications(target_user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+    CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+    CREATE INDEX IF NOT EXISTS idx_notification_reads_user_id ON notification_reads(user_id);
     
     -- Foreign Keys & Relationships
     CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);

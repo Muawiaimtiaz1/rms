@@ -356,6 +356,12 @@ const AVAILABLE_PANELS = [
     desc: "Client relationship management and credit history tracking."
   },
   {
+    id: "notifications",
+    icon: `<rect x="4" y="4" width="16" height="16" rx="4" fill="#14B8A6" opacity="0.18"/><path d="M7 8h10M7 12h7M7 16h5" stroke="#14B8A6" stroke-width="2" stroke-linecap="round"/><path d="M17 15l2 2 3-4" stroke="#14B8A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
+    label: "Notifications",
+    desc: "Platform releases, assignments, and shop notices from the owner."
+  },
+  {
     id: "settings",
     icon: `<path d="M12 15a3 3 0 100-6 3 3 0 000 6z" fill="#8B5CF6"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1h.09a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" fill="#8B5CF6" opacity="0.3"/>`,
     label: "Settings",
@@ -411,7 +417,7 @@ const AVAILABLE_PANELS = [
   },
 ];
 
-const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions", "settings", "users", "logs"];
+const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions", "notifications", "settings", "users", "logs"];
 
 function canCurrentUserAccessRegister() {
   return canCurrentUserManageRegister() || !!currentShift;
@@ -433,11 +439,48 @@ function getAllowedPanelsForCurrentUser() {
   return AVAILABLE_PANELS.filter((panel) => isPanelAllowedForCurrentUser(panel.id));
 }
 
+async function updateNotificationTopbarBadge() {
+  const button = document.getElementById("topbar-notification-btn");
+  const badge = document.getElementById("topbar-notification-count");
+  if (!button || !badge || !currentUser) return;
+
+  if (!isPanelAllowedForCurrentUser("notifications")) {
+    button.classList.add("hidden");
+    badge.classList.add("hidden");
+    return;
+  }
+
+  button.classList.remove("hidden");
+  try {
+    const data = await api("/api/notifications/unread-count");
+    const count = Number(data.count || 0);
+    if (count > 0) {
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.classList.remove("hidden");
+    } else {
+      badge.textContent = "";
+      badge.classList.add("hidden");
+    }
+  } catch (error) {
+    badge.classList.add("hidden");
+  }
+}
+
+function openNotificationsPanel() {
+  if (!isPanelAllowedForCurrentUser("notifications")) {
+    toast("You do not have permission to view notifications.", "error");
+    return false;
+  }
+  sessionStorage.setItem("lobby_selected", "true");
+  document.body.classList.remove("lobby-active");
+  return navigate("notifications");
+}
+
 const MODULE_GROUPS = [
   {
     title: "Overview",
     desc: "Daily command center and performance visibility.",
-    panels: ["dashboard", "analytics"],
+    panels: ["dashboard", "notifications", "analytics"],
   },
   {
     title: "Sales",
@@ -505,6 +548,7 @@ async function init() {
       lobbyUserDisplay.textContent = currentUser.username || currentUser.name;
     }
     updateSubscriptionQuotaUI();
+    updateNotificationTopbarBadge();
 
 
     if (currentUser.role === "superadmin") {
@@ -603,6 +647,7 @@ function navigate(page) {
     expenses: "Expenses",
     register: "Register Shift",
     customers: "Customer Ledger",
+    notifications: "Notifications",
     settings: "System Settings",
     users: "Staff Directory",
     subscriptions: "Subscription Tracking",
@@ -646,6 +691,7 @@ function navigate(page) {
     expenses: renderExpenses,
     register: renderRegister,
     customers: renderCustomers,
+    notifications: renderNotifications,
     settings: renderSettings,
     users: renderUsers,
     subscriptions: renderSubscriptions,
@@ -860,10 +906,38 @@ async function renderActiveSettingsContent() {
               </div>
             </div>
           </div>
+
+          <div class="space-y-3 sm:col-span-2">
+             <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Shop Metadata</label>
+             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+               <div class="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                 <div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mb-1">Business Type</div>
+                 <div class="text-sm font-black text-slate-700 dark:text-slate-200 uppercase">${currentUser.shop_type || 'Retail'}</div>
+               </div>
+               <div class="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                 <div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mb-1">Status</div>
+                 <div class="text-sm font-black ${currentUser.shop_status === 'active' ? 'text-emerald-500' : 'text-rose-500'} uppercase">${currentUser.shop_status || 'Active'}</div>
+               </div>
+               <div class="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                 <div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mb-1">Contact Phone</div>
+                 <div class="text-sm font-black text-slate-700 dark:text-slate-200">${currentUser.shop_phone || 'Not set'}</div>
+               </div>
+               <div class="px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                 <div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mb-1">Member Since</div>
+                 <div class="text-sm font-black text-slate-700 dark:text-slate-200">${currentUser.shop_created_at ? new Date(currentUser.shop_created_at).toLocaleDateString() : 'N/A'}</div>
+               </div>
+             </div>
+             ${currentUser.shop_address ? `
+             <div class="w-full px-6 py-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm mt-4">
+                <div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mb-1">Business Address</div>
+                <div class="text-sm font-medium text-slate-700 dark:text-slate-200">${currentUser.shop_address}</div>
+             </div>
+             ` : ''}
+          </div>
+
           <div class="space-y-3 sm:col-span-2">
              <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Internal Reference</label>
              <div class="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-900 text-slate-400 font-mono text-xs cursor-default flex items-center justify-between">
-
                <div>
                   <span class="text-slate-300 font-normal mr-2">UID:</span>${currentUser.id}
                   <span class="mx-4 text-slate-800 opacity-10">|</span>
@@ -7359,6 +7433,404 @@ function renderLobby() {
   `;
 }
 
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+let _notificationFilter = "all";
+let _notificationsData = [];
+let _notificationShops = [];
+let _notificationUsers = [];
+
+function notificationTypeMeta(type) {
+  const map = {
+    announcement: { label: "Announcement", dot: "bg-sky-500", chip: "bg-sky-50 text-sky-700 border-sky-100 dark:bg-sky-500/10 dark:text-sky-300 dark:border-sky-500/20" },
+    assignment: { label: "Assignment", dot: "bg-violet-500", chip: "bg-violet-50 text-violet-700 border-violet-100 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/20" },
+    release: { label: "Release", dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20" },
+    billing: { label: "Billing", dot: "bg-amber-500", chip: "bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20" },
+    maintenance: { label: "Maintenance", dot: "bg-orange-500", chip: "bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/20" },
+    support: { label: "Support", dot: "bg-indigo-500", chip: "bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20" },
+    system: { label: "System", dot: "bg-slate-500", chip: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700" },
+  };
+  return map[type] || map.announcement;
+}
+
+function notificationPriorityClass(priority) {
+  const map = {
+    low: "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700",
+    normal: "bg-indigo-50 text-indigo-600 border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20",
+    high: "bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20",
+    urgent: "bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20",
+  };
+  return map[priority] || map.normal;
+}
+
+function formatNotificationDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function notificationTargetLabel(notification) {
+  if (notification.target_user_name || notification.target_user_username) {
+    return `Assigned to ${notification.target_user_name || notification.target_user_username}`;
+  }
+  if (notification.shop_name) return notification.shop_name;
+  return "All shops";
+}
+
+function notificationAction(notification) {
+  if (!notification) return;
+  const url = String(notification.action_url || "").trim();
+  if (!url) return;
+  if (url.startsWith("page:")) {
+    navigate(url.slice(5));
+    return;
+  }
+  if (url.startsWith("/")) {
+    window.location.href = url;
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
+function setNotificationFilter(filter) {
+  _notificationFilter = filter;
+  renderNotifications();
+}
+
+function notificationFilterButton(id, label, count = null) {
+  const active = _notificationFilter === id;
+  return `
+    <button onclick="setNotificationFilter('${id}')" class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${active
+      ? "bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white"
+      : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500"}">
+      ${label}${count !== null ? ` <span class="ml-1 opacity-70">${count}</span>` : ""}
+    </button>
+  `;
+}
+
+function renderNotificationCards(notifications) {
+  if (!notifications.length) {
+    return `
+      <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-12 text-center">
+        <div class="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 mx-auto mb-4 flex items-center justify-center">
+          <svg class="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5M5 5h14v14H5z" />
+          </svg>
+        </div>
+        <h3 class="text-lg font-black text-slate-900 dark:text-white">No notifications found</h3>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">New platform releases, assignments, and shop notices will appear here.</p>
+      </div>
+    `;
+  }
+
+  return notifications.map((notification) => {
+    const meta = notificationTypeMeta(notification.type);
+    const unread = !notification.read_at;
+    const safeTitle = escapeOrderValue(notification.title);
+    const safeMessage = escapeOrderValue(notification.message).replace(/\n/g, "<br>");
+    const target = escapeOrderValue(notificationTargetLabel(notification));
+    const created = formatNotificationDate(notification.created_at);
+    const due = formatNotificationDate(notification.due_at);
+    const expires = formatNotificationDate(notification.expires_at);
+    const author = escapeOrderValue(notification.created_by_name || notification.created_by_username || "Platform Owner");
+    const canArchive = currentUser.role === "superadmin" && notification.status !== "archived";
+
+    return `
+      <article class="relative overflow-hidden rounded-2xl border ${unread ? "border-teal-300 dark:border-teal-500/60 bg-teal-50/40 dark:bg-teal-500/5" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"} p-5 shadow-sm">
+        <div class="flex flex-col lg:flex-row lg:items-start gap-4">
+          <div class="w-11 h-11 rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-center shrink-0">
+            <span class="w-2.5 h-2.5 rounded-full ${meta.dot}"></span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+              <span class="px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${meta.chip}">${meta.label}</span>
+              <span class="px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${notificationPriorityClass(notification.priority)}">${escapeOrderValue(notification.priority || "normal")}</span>
+              ${unread ? `<span class="px-2.5 py-1 rounded-lg bg-teal-600 text-white text-[10px] font-black uppercase tracking-widest">Unread</span>` : ""}
+              ${notification.status === "archived" ? `<span class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-500 text-[10px] font-black uppercase tracking-widest">Archived</span>` : ""}
+            </div>
+            <h3 class="text-xl font-black text-slate-950 dark:text-white tracking-tight break-words">${safeTitle}</h3>
+            <p class="text-sm text-slate-600 dark:text-slate-300 mt-2 leading-6 break-words">${safeMessage}</p>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+              <span>${target}</span>
+              <span>By ${author}</span>
+              ${created ? `<span>${created}</span>` : ""}
+              ${due ? `<span class="text-violet-500 dark:text-violet-300">Due ${due}</span>` : ""}
+              ${expires ? `<span>Expires ${expires}</span>` : ""}
+            </div>
+          </div>
+          <div class="flex lg:flex-col gap-2 shrink-0">
+            ${notification.action_url ? `<button onclick="notificationAction(_notificationsData.find(n => Number(n.id) === ${Number(notification.id)}))" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all">${escapeOrderValue(notification.action_label || "Open")}</button>` : ""}
+            ${unread ? `<button onclick="markNotificationRead(${Number(notification.id)})" class="px-4 py-2 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-black hover:border-teal-400 transition-all">Mark Read</button>` : ""}
+            ${canArchive ? `<button onclick="archiveNotification(${Number(notification.id)})" class="px-4 py-2 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs font-black hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-all">Archive</button>` : ""}
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function renderNotifications() {
+  const content = document.getElementById("page-content");
+  content.innerHTML = `
+    <div class="flex items-center justify-center h-52 text-slate-400 font-bold">
+      Loading notifications...
+    </div>
+  `;
+
+  const params = new URLSearchParams({ limit: "150" });
+  if (_notificationFilter === "unread") params.set("unread_only", "1");
+  else if (_notificationFilter !== "all") params.set("type", _notificationFilter);
+  if (currentUser.role === "superadmin") params.set("include_archived", "1");
+
+  try {
+    const [notifications, unreadData] = await Promise.all([
+      api(`/api/notifications?${params.toString()}`),
+      api("/api/notifications/unread-count").catch(() => ({ count: 0 })),
+    ]);
+
+    _notificationsData = Array.isArray(notifications) ? notifications : [];
+    const unreadCount = Number(unreadData.count || 0);
+    updateNotificationTopbarBadge();
+    const assignmentCount = _notificationsData.filter((n) => n.type === "assignment").length;
+    const releaseCount = _notificationsData.filter((n) => n.type === "release").length;
+
+    content.innerHTML = `
+      <div class="space-y-6">
+        <section class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div>
+            <div class="text-xs font-black uppercase tracking-[0.2em] text-teal-600 dark:text-teal-300">Shop Communication</div>
+            <h2 class="text-3xl font-black text-slate-950 dark:text-white tracking-tight mt-1">Notification Center</h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Platform notices, assigned work, release updates, billing reminders, and shop-specific messages.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            ${currentUser.role === "superadmin" ? `
+              <button onclick="openNotificationComposer()" class="px-5 py-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-black uppercase tracking-widest shadow-lg shadow-teal-600/20 transition-all">
+                New Notice
+              </button>
+            ` : `
+              <button onclick="markAllNotificationsRead()" class="px-5 py-3 rounded-xl bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 text-xs font-black uppercase tracking-widest transition-all">
+                Mark All Read
+              </button>
+            `}
+          </div>
+        </section>
+
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+            <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Unread</div>
+            <div class="text-3xl font-black text-slate-950 dark:text-white mt-2">${unreadCount}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+            <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Assignments</div>
+            <div class="text-3xl font-black text-slate-950 dark:text-white mt-2">${assignmentCount}</div>
+          </div>
+          <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+            <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Releases</div>
+            <div class="text-3xl font-black text-slate-950 dark:text-white mt-2">${releaseCount}</div>
+          </div>
+        </section>
+
+        <section class="flex flex-wrap gap-2">
+          ${notificationFilterButton("all", "All", _notificationsData.length)}
+          ${notificationFilterButton("unread", "Unread", unreadCount)}
+          ${notificationFilterButton("assignment", "Assignments")}
+          ${notificationFilterButton("release", "Releases")}
+          ${notificationFilterButton("announcement", "Announcements")}
+          ${notificationFilterButton("billing", "Billing")}
+          ${notificationFilterButton("maintenance", "Maintenance")}
+        </section>
+
+        <section class="space-y-3">
+          ${renderNotificationCards(_notificationsData)}
+        </section>
+      </div>
+    `;
+  } catch (error) {
+    console.error("Notifications load error:", error);
+    content.innerHTML = `
+      <div class="rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-8 text-rose-700 dark:text-rose-300 font-bold">
+        ${escapeOrderValue(error.message || "Failed to load notifications.")}
+      </div>
+    `;
+  }
+}
+
+async function openNotificationComposer() {
+  if (currentUser.role !== "superadmin") return;
+  try {
+    const [shops, users] = await Promise.all([
+      api("/api/shops"),
+      api("/api/users"),
+    ]);
+    _notificationShops = Array.isArray(shops) ? shops : [];
+    _notificationUsers = Array.isArray(users) ? users.filter((u) => u.role !== "superadmin" && u.shop_id) : [];
+
+    openModal("New Notification", `
+      <div class="space-y-5">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Type</span>
+            <select id="notif-type" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+              <option value="announcement">Announcement</option>
+              <option value="assignment">Assignment</option>
+              <option value="release">Release</option>
+              <option value="billing">Billing</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="support">Support</option>
+              <option value="system">System</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Priority</span>
+            <select id="notif-priority" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Target Shop</span>
+            <select id="notif-shop" onchange="updateNotificationTargetUsers()" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+              <option value="">All Shops</option>
+              ${_notificationShops.map((shop) => `<option value="${Number(shop.id)}">${escapeOrderValue(shop.name || `Shop #${shop.id}`)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Assign To</span>
+            <select id="notif-user" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+              <option value="">Whole selected audience</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="block">
+          <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Title</span>
+          <input id="notif-title" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white" placeholder="Example: New sales report is available">
+        </label>
+
+        <label class="block">
+          <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Message</span>
+          <textarea id="notif-message" rows="5" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-medium text-slate-800 dark:text-white" placeholder="Write the notice that shops should see."></textarea>
+        </label>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Publish At</span>
+            <input id="notif-publish" type="datetime-local" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+          </label>
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Due At</span>
+            <input id="notif-due" type="datetime-local" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+          </label>
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Expires At</span>
+            <input id="notif-expires" type="datetime-local" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white">
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Action Label</span>
+            <input id="notif-action-label" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white" placeholder="Open">
+          </label>
+          <label class="block">
+            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Action URL</span>
+            <input id="notif-action-url" class="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-800 dark:text-white" placeholder="page:analytics or https://...">
+          </label>
+        </div>
+
+        <button onclick="submitNotification()" class="w-full py-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-black uppercase tracking-widest shadow-lg shadow-teal-600/20 transition-all">
+          Publish Notification
+        </button>
+      </div>
+    `, "max-w-3xl");
+    updateNotificationTargetUsers();
+  } catch (error) {
+    toast(error.message || "Could not open notification composer", "error");
+  }
+}
+
+function updateNotificationTargetUsers() {
+  const select = document.getElementById("notif-user");
+  const shopValue = document.getElementById("notif-shop")?.value || "";
+  if (!select) return;
+
+  const users = _notificationUsers.filter((user) => !shopValue || Number(user.shop_id) === Number(shopValue));
+  select.innerHTML = `
+    <option value="">Whole selected audience</option>
+    ${users.map((user) => `<option value="${Number(user.id)}">${escapeOrderValue(user.name || user.username)} (${escapeOrderValue(user.shop_name || `Shop #${user.shop_id}`)})</option>`).join("")}
+  `;
+}
+
+async function submitNotification() {
+  const title = document.getElementById("notif-title")?.value.trim();
+  const message = document.getElementById("notif-message")?.value.trim();
+  if (!title || !message) return toast("Title and message are required.", "error");
+
+  const shopId = document.getElementById("notif-shop")?.value || "";
+  const targetUserId = document.getElementById("notif-user")?.value || "";
+  const payload = {
+    type: document.getElementById("notif-type")?.value || "announcement",
+    priority: document.getElementById("notif-priority")?.value || "normal",
+    title,
+    message,
+    action_label: document.getElementById("notif-action-label")?.value.trim() || null,
+    action_url: document.getElementById("notif-action-url")?.value.trim() || null,
+    publish_at: document.getElementById("notif-publish")?.value || null,
+    due_at: document.getElementById("notif-due")?.value || null,
+    expires_at: document.getElementById("notif-expires")?.value || null,
+    status: "active",
+  };
+  if (shopId) payload.shop_id = Number(shopId);
+  if (targetUserId) payload.target_user_id = Number(targetUserId);
+
+  try {
+    await api("/api/notifications", "POST", payload);
+    toast("Notification published");
+    closeModal();
+    updateNotificationTopbarBadge();
+    renderNotifications();
+  } catch (error) {
+    toast(error.message || "Failed to publish notification", "error");
+  }
+}
+
+async function markNotificationRead(id) {
+  try {
+    await api(`/api/notifications/${id}/read`, "PATCH");
+    updateNotificationTopbarBadge();
+    renderNotifications();
+  } catch (error) {
+    toast(error.message || "Failed to mark notification read", "error");
+  }
+}
+
+async function markAllNotificationsRead() {
+  try {
+    const res = await api("/api/notifications/read-all", "PATCH");
+    toast(`${Number(res.count || 0)} notifications marked read`);
+    updateNotificationTopbarBadge();
+    renderNotifications();
+  } catch (error) {
+    toast(error.message || "Failed to mark notifications read", "error");
+  }
+}
+
+async function archiveNotification(id) {
+  if (!confirm("Archive this notification? Shops will no longer see it.")) return;
+  try {
+    await api(`/api/notifications/${id}`, "DELETE");
+    toast("Notification archived");
+    updateNotificationTopbarBadge();
+    renderNotifications();
+  } catch (error) {
+    toast(error.message || "Failed to archive notification", "error");
+  }
+}
 
 // ─── TABLE MANAGEMENT ────────────────────────────────────────────────────────
 let _allTables = [];

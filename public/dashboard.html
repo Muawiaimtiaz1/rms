@@ -428,6 +428,17 @@
                 <div class="text-[9px] text-gray-500 uppercase font-black tracking-widest mt-0.5" id="user-role-sidebar">admin</div>
             </div>
 
+            <button onclick="openNotificationsPanel()" id="topbar-notification-btn"
+                class="relative flex items-center justify-center w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-teal-600 dark:hover:text-teal-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-800 hidden"
+                title="Notifications">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 01-6 0m6 0H9" />
+                </svg>
+                <span id="topbar-notification-count"
+                    class="hidden absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-teal-600 text-white text-[10px] font-black leading-[18px] text-center shadow-md shadow-teal-900/20"></span>
+            </button>
+
             <!-- Switch Module (Icon Only) -->
             <button onclick="sessionStorage.removeItem('lobby_selected'); location.reload()" 
                 class="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-800" title="Switch Module">
@@ -563,10 +574,10 @@
     <script src="/js/analytics/analytics-overview.js?v=1.0.9"></script>
     <script src="/js/analytics/analytics-charts.js?v=1.0.9"></script>
     <script src="/js/analytics/analytics-tabs.js?v=1.0.9"></script>
-    <script src="/js/settings.js?v=1.0.9"></script>
+    <script src="/js/settings.js?v=1.0.10"></script>
     <script src="/js/hierarchy.js?v=1.0.10"></script>
     <script src="/js/kitchen.js?v=1.0.8"></script>
     <script src="/js/products/product-image-tools.js?v=1.0.0"></script>
-    <script src="/js/app.js?v=1.0.20"></script>
+    <script src="/js/app.js?v=1.0.22"></script>
 </body>
 </html>

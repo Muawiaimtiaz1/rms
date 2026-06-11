@@ -1192,6 +1192,7 @@ function allPanels() {
     { id: "sales-history", name: "Sales History", icon: "📜", panels: ["sales-history", "pending-dues"] },
     { id: "products", name: "Products & Menu", icon: "📦", panels: ["products", "brands"] },
     { id: "customers", name: "Customer Ledger", icon: "👥", panels: ["customers"] },
+    { id: "notifications", name: "Notifications", icon: "N", panels: ["notifications"] },
     { id: "analytics", name: "Analytics & Reports", icon: "📈", panels: ["analytics"] },
     { id: "logs", name: "Logs", icon: "🧾", panels: ["logs"] },
     { id: "raw-stock", name: "Raw Stock (Inv)", icon: "🥦", panels: ["raw-stock"] },

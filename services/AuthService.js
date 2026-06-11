@@ -177,12 +177,21 @@ class AuthService {
     let shopType = 'other';
     let subscription = null;
 
+    let shopStatus = 'active';
+    let shopCreatedAt = null;
+    let shopPhone = '';
+    let shopAddress = '';
+
     if (user.role !== 'superadmin') {
       const shop = await db('shops').where({ id: user.shop_id }).first();
       if (!shop) return null;
 
       shopName = shop.name;
       shopType = shop.shop_type || 'retail';
+      shopStatus = shop.status || 'active';
+      shopCreatedAt = shop.created_at;
+      shopPhone = shop.receipt_phone || '';
+      shopAddress = shop.receipt_address || '';
 
       const shopPanels = shop.allowed_panels ? JSON.parse(shop.allowed_panels) : [];
       if (user.role === 'admin') {
@@ -197,6 +206,10 @@ class AuthService {
       ...user,
       shop_name: shopName,
       shop_type: shopType,
+      shop_status: shopStatus,
+      shop_created_at: shopCreatedAt,
+      shop_phone: shopPhone,
+      shop_address: shopAddress,
       subscription,
       allowed_panels: allowedPanels,
       can_manage_register: !!user.can_manage_register

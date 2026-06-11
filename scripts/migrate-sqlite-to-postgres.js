@@ -36,6 +36,8 @@ const tableOrder = [
   "product_recipe_links",
   "support_tickets",
   "ticket_comments",
+  "notifications",
+  "notification_reads",
   "activity_logs",
 ];
 
