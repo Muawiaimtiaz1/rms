@@ -158,6 +158,8 @@ let _posSelectedCustomer = null;
 let _posCheckoutCloseTimer = null;
 let _editingOrderId = null; // ID of the sale being edited in the POS
 let _posCheckoutSubmitting = false;
+let _posDiscountPresets = [];
+let _posTaxPresets = [];
 let _tempEditCart = []; // Temporary cart for the edit modal
 let _tempEditSaleDetails = null; // Temporary sale details for the edit modal
 let _currentPage = "dashboard";
@@ -204,6 +206,76 @@ function updateShiftStatusUI() {
         `;
     }
   }
+}
+
+function formatSubscriptionDate(value) {
+  if (!value) return "-";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return date.toLocaleDateString("en-GB");
+}
+
+function getSubscriptionQuotaTone(subscription) {
+  if (!subscription || subscription.status === "expired") {
+    return {
+      badge: "bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20",
+      progress: "bg-rose-500",
+      card: "border-rose-100 dark:border-rose-500/20 bg-rose-50/70 dark:bg-rose-500/10",
+    };
+  }
+
+  if (subscription.is_lifetime || Number(subscription.remaining_days || 0) > 7) {
+    return {
+      badge: "bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20",
+      progress: "bg-emerald-500",
+      card: "border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/70 dark:bg-emerald-500/10",
+    };
+  }
+
+  return {
+    badge: "bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20",
+    progress: "bg-amber-500",
+    card: "border-amber-100 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/10",
+  };
+}
+
+function getSubscriptionQuotaLabel(subscription) {
+  if (!subscription) return "No active subscription";
+  return subscription.label || (subscription.is_lifetime ? "Lifetime access" : "Subscription active");
+}
+
+function getSubscriptionTimelineLabel(subscription) {
+  if (!subscription) return "No subscription timeline available";
+  if (subscription.is_lifetime) return "Unlimited access";
+  const remaining = Number(subscription.remaining_days || 0);
+  const total = Number(subscription.total_days || 0);
+  if (!total) return getSubscriptionQuotaLabel(subscription);
+  return `${remaining} of ${total} day${total === 1 ? "" : "s"} remaining`;
+}
+
+function updateSubscriptionQuotaUI() {
+  const badge = document.getElementById("subscription-quota-badge");
+  if (!badge) return;
+
+  if (!currentUser || currentUser.role === "superadmin") {
+    badge.className = "hidden";
+    badge.innerHTML = "";
+    return;
+  }
+
+  const subscription = currentUser.subscription;
+  const tone = getSubscriptionQuotaTone(subscription);
+  const label = getSubscriptionQuotaLabel(subscription);
+  const plan = subscription?.type_label || "Subscription";
+
+  badge.className = `hidden sm:flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border shadow-sm ${tone.badge}`;
+  badge.innerHTML = `
+    <span class="w-1.5 h-1.5 rounded-full ${tone.progress}"></span>
+    ${escapeOrderValue(label)}
+  `;
+  badge.title = subscription
+    ? `${plan}: ${label}${subscription.end_date ? `, valid until ${formatSubscriptionDate(subscription.end_date)}` : ""}`
+    : "No active subscription found";
 }
 
 function canCurrentUserManageRegister() {
@@ -432,6 +504,7 @@ async function init() {
     if (lobbyUserDisplay) {
       lobbyUserDisplay.textContent = currentUser.username || currentUser.name;
     }
+    updateSubscriptionQuotaUI();
 
 
     if (currentUser.role === "superadmin") {
@@ -764,6 +837,8 @@ async function renderActiveSettingsContent() {
             </div>
           </div>
         </div>
+
+        ${renderSubscriptionQuotaCard()}
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-8">
           <div class="space-y-3">
@@ -1157,6 +1232,45 @@ function applyDashboardCustomDates() {
 
   _dashPeriod = "custom";
   renderDashboard("custom", document.getElementById("dash-brand-filter")?.value, fromVal, toVal);
+}
+
+function renderSubscriptionQuotaCard() {
+  if (!currentUser || currentUser.role === "superadmin") return "";
+
+  const subscription = currentUser.subscription;
+  const tone = getSubscriptionQuotaTone(subscription);
+  const label = getSubscriptionQuotaLabel(subscription);
+  const timelineLabel = getSubscriptionTimelineLabel(subscription);
+  const plan = subscription?.type_label || "No Plan";
+  const percent = subscription?.is_lifetime
+    ? 100
+    : Math.max(0, Math.min(100, Number(subscription?.remaining_percent || 0)));
+  const validity = subscription
+    ? subscription.is_lifetime
+      ? "No expiry date"
+      : `Valid until ${formatSubscriptionDate(subscription.end_date)}`
+    : "Contact administrator to renew access";
+
+  return `
+    <div class="mb-6 p-4 rounded-2xl border ${tone.card}">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Subscription Timeline</div>
+          <div class="mt-1 text-xl font-black text-slate-900 dark:text-white">${escapeOrderValue(label)}</div>
+          <div class="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">${escapeOrderValue(plan)} · ${escapeOrderValue(timelineLabel)} · ${escapeOrderValue(validity)}</div>
+        </div>
+        <div class="w-full md:w-64">
+          <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2">
+            <span>Remaining</span>
+            <span>${subscription?.is_lifetime ? "Unlimited" : `${percent}% left`}</span>
+          </div>
+          <div class="h-2 rounded-full bg-white/80 dark:bg-slate-950/60 overflow-hidden border border-white/80 dark:border-slate-800">
+            <div class="h-full rounded-full ${tone.progress}" style="width: ${subscription?.is_lifetime ? 100 : percent}%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function renderDashboard(period, brandId, from, to) {
@@ -2525,15 +2639,19 @@ async function submitRecovery(productId) {
 
 // ─── POS ─────────────────────────────────────────────────────────────
 async function renderPOS() {
-  const [products, tables, waiters, floors] = await Promise.all([
+  const [products, tables, waiters, floors, discounts, taxes] = await Promise.all([
     api("/api/products"),
     api("/api/tables").catch(() => []),
     api("/api/users").catch(() => []),
-    api("/api/tables/floors").catch(() => [])
+    api("/api/tables/floors").catch(() => []),
+    api("/api/shop-settings/discounts").catch(() => []),
+    api("/api/shop-settings/taxes").catch(() => [])
   ]);
   allProducts = products;
   _posFloors = floors;
   _posAllTables = tables;
+  _posDiscountPresets = Array.isArray(discounts) ? discounts : [];
+  _posTaxPresets = Array.isArray(taxes) ? taxes : [];
   syncProductMap(products);
   updateLowStockBadge(products);
 
@@ -2727,19 +2845,37 @@ async function renderPOS() {
             </div>
 
             <div class="grid grid-cols-2 gap-4 text-base bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800">
-               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Discount (Rs)</label>
+               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Discount</label>
+                 <select id="pos-discount-preset" onchange="applyPOSDiscountPreset()" class="w-full mb-2 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-xs font-black shadow-sm">
+                   <option value="">Manual discount</option>
+                   ${_posDiscountPresets.map(p => {
+                     const type = p.type === 'amount' ? 'amount' : 'percentage';
+                     const value = Number(p.value || 0);
+                     const label = type === 'percentage' ? `${value}%` : `Rs. ${value}`;
+                     return `<option value="${value}" data-type="${type}">${escapeOrderValue(p.name)} (${label})</option>`;
+                   }).join("")}
+                 </select>
                  <div class="flex items-center gap-1">
-                   <button type="button" onclick="$c('pos-discount').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
-                   <input id="pos-discount" type="number" min="0" value="" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
-                   <button type="button" onclick="$c('pos-discount').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                   <button type="button" onclick="$c('pos-discount').stepDown();clearPOSDiscountPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
+                   <input id="pos-discount" type="number" min="0" value="" placeholder="Rs." oninput="clearPOSDiscountPreset();calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <button type="button" onclick="$c('pos-discount').stepUp();clearPOSDiscountPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
                  </div>
                </div>
 
-               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Tax (%)</label>
+               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Tax</label>
+                 <select id="pos-tax-preset" onchange="applyPOSTaxPreset()" class="w-full mb-2 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-xs font-black shadow-sm">
+                   <option value="">Manual tax</option>
+                   ${_posTaxPresets.map(t => {
+                     const percentage = Number(t.percentage || 0);
+                     const method = t.linked_payment_method || "";
+                     const methodLabel = method ? ` - ${method}` : "";
+                     return `<option value="${percentage}" data-method="${escapeOrderValue(method)}">${escapeOrderValue(t.name)} (${percentage}%${methodLabel})</option>`;
+                   }).join("")}
+                 </select>
                  <div class="flex items-center gap-1">
-                   <button type="button" onclick="$c('pos-tax').stepDown();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
-                   <input id="pos-tax" type="number" min="0" value="" oninput="calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
-                   <button type="button" onclick="$c('pos-tax').stepUp();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                   <button type="button" onclick="$c('pos-tax').stepDown();clearPOSTaxPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
+                   <input id="pos-tax" type="number" min="0" value="" placeholder="%" oninput="clearPOSTaxPreset();calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                   <button type="button" onclick="$c('pos-tax').stepUp();clearPOSTaxPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
                  </div>
                </div>
             </div>
@@ -2873,6 +3009,7 @@ async function renderPOS() {
   const mainProducts = products.filter((p) => p.is_component !== 1);
   renderPOSProducts(mainProducts);
   renderCart();
+  if (!_editingOrderId) applyPOSLinkedTaxPreset($c("pos-method")?.value || "cash");
 }
 
 function syncPOSCheckoutSummary(totalOverride) {
@@ -3525,6 +3662,8 @@ function proceedToPOSUpdate(id) {
 
   // Restore checkout headers/extra info if needed
   setTimeout(() => {
+    if ($c('pos-discount-preset')) $c('pos-discount-preset').value = '';
+    if ($c('pos-tax-preset')) $c('pos-tax-preset').value = '';
     if ($c('pos-discount')) $c('pos-discount').value = _tempEditSaleDetails.discount || 0;
     if ($c('pos-tax')) $c('pos-tax').value = _tempEditSaleDetails.tax_percentage || 0;
     if ($c('pos-received')) $c('pos-received').value = _tempEditSaleDetails.amount_received || 0;
@@ -4265,9 +4404,78 @@ function showCartModal() {
   openModal("Detailed Cart Management", content, "max-w-7xl");
 }
 
+function getPOSCartSubtotal() {
+  return cart.reduce((s, c) => s + c.selling_price * c.quantity, 0);
+}
+
+function clearPOSDiscountPreset() {
+  const sel = $c("pos-discount-preset");
+  if (sel) sel.value = "";
+}
+
+function clearPOSTaxPreset() {
+  const sel = $c("pos-tax-preset");
+  if (sel) sel.value = "";
+}
+
+function syncPOSDiscountPresetAmount(subtotal = getPOSCartSubtotal()) {
+  const sel = $c("pos-discount-preset");
+  const inp = $c("pos-discount");
+  if (!inp) return 0;
+  if (!sel || sel.value === "") return parseFloat(inp.value) || 0;
+
+  const opt = sel.options[sel.selectedIndex];
+  const value = parseFloat(sel.value) || 0;
+  const discount = opt?.dataset.type === "percentage"
+    ? (subtotal * value) / 100
+    : value;
+  inp.value = discount.toFixed(2);
+  return discount;
+}
+
+function applyPOSDiscountPreset() {
+  syncPOSDiscountPresetAmount();
+  calculateCartTotal();
+}
+
+function applyPOSTaxPreset() {
+  const sel = $c("pos-tax-preset");
+  const inp = $c("pos-tax");
+  if (!sel || !inp || sel.value === "") return calculateCartTotal();
+
+  inp.value = (parseFloat(sel.value) || 0).toString();
+  calculateCartTotal();
+}
+
+function applyPOSLinkedTaxPreset(method) {
+  const sel = $c("pos-tax-preset");
+  const inp = $c("pos-tax");
+  if (!sel || !inp || !method) return false;
+
+  const options = Array.from(sel.options);
+  const matchIndex = options.findIndex((opt, index) =>
+    index > 0 && opt.dataset.method === method
+  );
+  if (matchIndex === -1) {
+    const selectedMethod = sel.options[sel.selectedIndex]?.dataset.method || "";
+    if (selectedMethod) {
+      sel.value = "";
+      inp.value = "";
+      calculateCartTotal();
+      return true;
+    }
+    return false;
+  }
+
+  sel.selectedIndex = matchIndex;
+  inp.value = (parseFloat(sel.options[matchIndex].value) || 0).toString();
+  calculateCartTotal();
+  return true;
+}
+
 function calculateCartTotal() {
-  const subtotal = cart.reduce((s, c) => s + c.selling_price * c.quantity, 0);
-  const discount = parseFloat($c("pos-discount").value) || 0;
+  const subtotal = getPOSCartSubtotal();
+  const discount = syncPOSDiscountPresetAmount(subtotal);
   const taxPct = parseFloat($c("pos-tax").value) || 0;
 
   const taxable = subtotal - discount;
@@ -4465,12 +4673,15 @@ function toggleQuotationMode(isQuotation) {
  * Auto-fills Amount Received if method is Card or Online
  */
 function handlePOSMethodChange(method) {
+  const linkedTaxApplied = applyPOSLinkedTaxPreset(method);
   if (method === "card" || method === "online") {
     const total = parseFloat($c("cart-total").dataset.total) || 0;
     if (total > 0) {
       $c("pos-received").value = total.toFixed(2);
       calculateRemaining();
     }
+  } else if (!linkedTaxApplied) {
+    calculateRemaining();
   }
 }
 
@@ -6350,8 +6561,44 @@ let _customersStatus = "active";
 let _customersFrom = "";
 let _customersTo = "";
 let _customersSort = "purchase_desc";
+let _customersSearchTimer = null;
 
-async function renderCustomers() {
+function captureCustomersFocusState(options = {}) {
+  const active = document.activeElement;
+  const filterIds = ["cust-search", "cust-from", "cust-to", "cust-status", "cust-sort"];
+  const id = options.restoreFocusId || (filterIds.includes(active?.id) ? active.id : "");
+  if (!id) return null;
+
+  const state = { id, start: null, end: null };
+  if (active?.id === id && typeof active.selectionStart === "number") {
+    state.start = active.selectionStart;
+    state.end = active.selectionEnd;
+  }
+  return state;
+}
+
+function restoreCustomersFocusState(state) {
+  if (!state?.id) return;
+  requestAnimationFrame(() => {
+    const el = $c(state.id);
+    if (!el) return;
+    el.focus();
+    if (typeof el.setSelectionRange === "function" && state.start !== null) {
+      el.setSelectionRange(state.start, state.end ?? state.start);
+    }
+  });
+}
+
+function handleCustomerSearchInput(value) {
+  _customersSearch = value;
+  if (_customersSearchTimer) clearTimeout(_customersSearchTimer);
+  _customersSearchTimer = setTimeout(() => {
+    renderCustomers({ restoreFocusId: "cust-search" });
+  }, 250);
+}
+
+async function renderCustomers(options = {}) {
+  const focusState = captureCustomersFocusState(options);
   try {
     const params = new URLSearchParams();
     params.set("status", _customersStatus);
@@ -6397,8 +6644,8 @@ async function renderCustomers() {
 
         <!-- Filters -->
         <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
-          <input id="cust-search" type="text" value="${_customersSearch}" placeholder="Search by name or phone…"
-            oninput="_customersSearch=this.value; renderCustomers()"
+          <input id="cust-search" type="text" value="${escapeOrderValue(_customersSearch)}" placeholder="Search by name or phone…"
+            oninput="handleCustomerSearchInput(this.value)"
             class="md:col-span-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-all shadow-sm text-sm" />
           <input id="cust-from" type="date" value="${_customersFrom}" onchange="_customersFrom=this.value; renderCustomers()"
             class="px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm text-sm" />
@@ -6490,6 +6737,7 @@ async function renderCustomers() {
           </div>
         </div>
       </div>`;
+    restoreCustomersFocusState(focusState);
   } catch (err) {
     $c("page-content").innerHTML =
       `<div class="p-10 text-center text-rose-500 font-bold">Failed to load customers: ${err.message}</div>`;

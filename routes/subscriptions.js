@@ -26,15 +26,20 @@ router.get('/', requireSuperAdmin, async (req, res) => {
 // POST /api/subscriptions — record a payment
 router.post('/', requireSuperAdmin, async (req, res) => {
     const { shop_id, amount, month, type } = req.body;
-    if (!shop_id || !amount || !month) return res.status(400).json({ error: 'Missing payment details' });
+    if (!shop_id || amount === undefined || amount === null || !month) return res.status(400).json({ error: 'Missing payment details' });
 
     const subType = type || '1_month';
-    const durationMap = { '1_month': 1, '3_months': 3, '6_months': 6, '1_year': 12, '2_years': 24 };
-    const monthsToAdd = durationMap[subType] || 1;
 
     const startDate = req.body.start_date ? new Date(req.body.start_date) : new Date();
-    const endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth() + monthsToAdd);
+    let endDate;
+    if (subType === 'lifetime') {
+        endDate = new Date('2099-12-31T00:00:00');
+    } else {
+        const durationMap = { '1_month': 1, '3_months': 3, '6_months': 6, '1_year': 12, '2_years': 24 };
+        const monthsToAdd = durationMap[subType] || 1;
+        endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + monthsToAdd);
+    }
 
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];

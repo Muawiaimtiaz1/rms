@@ -135,7 +135,9 @@ router.get("/", requireAuth, async (req, res) => {
     purchase_asc: "total_purchase_amount ASC, c.name ASC",
     due_desc: "c.current_balance DESC, c.name ASC",
     due_asc: "c.current_balance ASC, c.name ASC",
-    recent_desc: "CASE WHEN last_purchase_at IS NULL THEN 1 ELSE 0 END ASC, last_purchase_at DESC, c.name ASC",
+    recent_desc: isPostgres
+      ? "last_purchase_at DESC NULLS LAST, c.name ASC"
+      : "CASE WHEN last_purchase_at IS NULL THEN 1 ELSE 0 END ASC, last_purchase_at DESC, c.name ASC",
   };
 
   query += ` ORDER BY ${sortMap[sort] || sortMap.name_asc}`;

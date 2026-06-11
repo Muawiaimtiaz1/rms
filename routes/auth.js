@@ -33,6 +33,7 @@ router.get('/me', async (req, res) => {
         allowed_panels: freshUser.allowed_panels,
         shop_name: freshUser.shop_name,
         shop_type: freshUser.shop_type,
+        subscription: freshUser.subscription,
         name: freshUser.name,
         role: freshUser.role,
         can_manage_register: freshUser.can_manage_register
