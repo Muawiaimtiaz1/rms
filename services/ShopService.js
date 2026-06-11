@@ -92,11 +92,18 @@ class ShopService {
         }
       }
 
-      // 5. Log activity
+      // 5. Update counts
+      let totalUsers = 1; // Start with 1 for the admin
+      if (data.employees) totalUsers += data.employees.length;
+      if (data.kitchens) totalUsers += data.kitchens.length;
+
+      await trx('shops').where({ id: sid }).update({ user_count: totalUsers });
+
+      // 6. Log activity
       await trx('activity_logs').insert({
         shop_id: sid,
         action: 'Store Created',
-        details: `Store ${data.name} created with initial staff.`
+        details: `Store ${data.name} created with ${totalUsers} initial staff.`
       });
 
       return sid;

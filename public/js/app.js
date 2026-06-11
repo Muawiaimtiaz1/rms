@@ -27,7 +27,14 @@ async function api(url, method = "GET", body) {
       redirectToLoginForSession();
       throw new Error(data.error || "Session expired");
     }
-    if (!res.ok) throw new Error(data.error || `API Error: ${res.status}`);
+    if (!res.ok) {
+      const message = formatApiErrorMessage(data, res.status);
+      toast(message, "error");
+      const error = new Error(message);
+      error.status = res.status;
+      error.details = data.details;
+      throw error;
+    }
     return data;
   } else {
     const text = await res.text();
@@ -36,17 +43,42 @@ async function api(url, method = "GET", body) {
       redirectToLoginForSession();
       throw new Error("Session expired");
     }
-    if (!res.ok) throw new Error(`Server Error (${res.status}): ${text.substring(0, 100)}...`);
+    if (!res.ok) {
+      const message = `Server Error (${res.status}): ${text.substring(0, 100)}...`;
+      toast(message, "error");
+      throw new Error(message);
+    }
     return text;
   }
 }
 
+function formatApiErrorMessage(data, status) {
+  const base = data?.error || `API Error: ${status}`;
+  if (Array.isArray(data?.details) && data.details.length) {
+    return `${base} ${data.details.join(" ")}`;
+  }
+  if (typeof data?.details === "string" && data.details.trim()) {
+    return `${base} ${data.details.trim()}`;
+  }
+  return base;
+}
+
+let _lastToast = { key: "", at: 0 };
 const toast = (msg, type = "success") => {
+  const key = `${type}:${msg}`;
+  const now = Date.now();
+  if (_lastToast.key === key && now - _lastToast.at < 1000) return;
+  _lastToast = { key, at: now };
+
   const el = document.createElement("div");
   const base =
     "fixed top-8 right-8 z-[100] px-6 py-3 rounded-2xl shadow-2xl text-sm font-bold animate-in fade-in slide-in-from-right-10 duration-300 transform flex items-center gap-3";
   el.className = `${base} ${type === "success" ? "bg-emerald-600 text-white" : "bg-rose-600 text-white"}`;
-  el.innerHTML = `<span>${type === "success" ? "✓" : "✕"}</span><span>${msg}</span>`;
+  const icon = document.createElement("span");
+  icon.textContent = type === "success" ? "✓" : "✕";
+  const label = document.createElement("span");
+  label.textContent = msg;
+  el.append(icon, label);
   document.body.appendChild(el);
   setTimeout(() => {
     el.classList.add("animate-out", "fade-out", "slide-out-to-right-10");
@@ -165,10 +197,67 @@ let _tempEditSaleDetails = null; // Temporary sale details for the edit modal
 let _currentPage = "dashboard";
 let currentShift = null;
 
+function isPlatformOwner() {
+  return currentUser?.role === "superadmin";
+}
+
+function returnToNavigationHome() {
+  sessionStorage.removeItem("lobby_selected");
+  if (isPlatformOwner()) {
+    window.location.href = "/admin/store-monitoring";
+    return;
+  }
+  location.reload();
+}
+
+function openSaasCommandCenter(tab = "overview") {
+  const validTabs = ["overview", "activity", "health", "ledger"];
+  const targetTab = validTabs.includes(tab) ? tab : "overview";
+  const hash = targetTab === "overview" ? "" : `#${targetTab}`;
+  window.location.href = `/admin/store-monitoring${hash}`;
+}
+
+function openPlatformModule(page) {
+  if (!PLATFORM_OWNER_PANELS.includes(page)) {
+    toast("That platform area is not available.", "error");
+    return;
+  }
+  sessionStorage.setItem("lobby_selected", "true");
+  localStorage.setItem("pos_page", page);
+  window.location.href = `/dashboard?platform_page=${encodeURIComponent(page)}`;
+}
+
+function setPlatformShellActive(page) {
+  document
+    .querySelectorAll("#saas-command-sidebar .rail-btn")
+    .forEach((button) => button.classList.remove("active"));
+
+  const activeButton = Array.from(
+    document.querySelectorAll("#saas-command-sidebar [data-platform-page]")
+  ).find((button) => button.dataset.platformPage === page);
+
+  if (activeButton) activeButton.classList.add("active");
+}
+
+function configurePlatformOwnerShell(activePage) {
+  if (!isPlatformOwner()) {
+    document.body.classList.remove("platform-owner-shell");
+    return;
+  }
+  document.body.classList.add("platform-owner-shell");
+  setPlatformShellActive(activePage);
+}
+
 /**
  * ─── Shift Management ──────────────────────────────────────────────────
  */
 async function fetchActiveShift() {
+  if (isPlatformOwner()) {
+    currentShift = null;
+    updateShiftStatusUI();
+    return;
+  }
+
   try {
     const shift = await api("/api/shifts/active");
     currentShift = shift && shift.status === 'open' ? shift : null;
@@ -182,6 +271,15 @@ function updateShiftStatusUI() {
   const badge = document.getElementById("shift-status-badge");
   if (!badge) return;
 
+  if (isPlatformOwner()) {
+    badge.classList.add("hidden");
+    badge.innerHTML = "";
+    badge.title = "";
+    return;
+  }
+
+  badge.classList.remove("hidden");
+
   if (currentShift) {
     badge.className = "header-status-badge !bg-emerald-500 !text-white !shadow-emerald-500/20";
     badge.innerHTML = `
@@ -190,7 +288,7 @@ function updateShiftStatusUI() {
     `;
     badge.title = `Shift started at ${new Date(currentShift.start_time).toLocaleTimeString()}`;
   } else {
-    const canManage = currentUser && (currentUser.can_manage_register || currentUser.role === 'admin' || currentUser.role === 'superadmin');
+    const canManage = canCurrentUserManageRegister();
     
     if (canManage) {
         badge.className = "header-status-badge !bg-rose-500 !text-white !shadow-rose-500/20 cursor-pointer";
@@ -279,10 +377,16 @@ function updateSubscriptionQuotaUI() {
 }
 
 function canCurrentUserManageRegister() {
-  return !!(currentUser && (currentUser.can_manage_register || currentUser.role === 'admin' || currentUser.role === 'superadmin'));
+  if (!currentUser || isPlatformOwner()) return false;
+  return !!(currentUser.can_manage_register || currentUser.role === 'admin' || currentUser.role === 'manager');
 }
 
 async function ensureOpenShiftForPayment() {
+  if (isPlatformOwner()) {
+    toast("Platform owners do not open shop registers or collect POS payments.", "error");
+    return false;
+  }
+
   await fetchActiveShift();
   if (currentShift) return true;
 
@@ -296,6 +400,10 @@ async function ensureOpenShiftForPayment() {
 }
 
 async function openShiftManagement() {
+  if (isPlatformOwner()) {
+    toast("Platform owners do not use shop register shifts.", "error");
+    return false;
+  }
   navigate("register");
 }
 
@@ -382,8 +490,8 @@ const AVAILABLE_PANELS = [
   {
     id: "subscriptions",
     icon: `<rect x="3" y="4" width="18" height="16" rx="2" fill="#F59E0B"/><path d="M3 10h18" stroke="white" stroke-width="2"/><path d="M7 15h3M14 15h3" stroke="white" stroke-width="2" stroke-linecap="round"/>`,
-    label: "Subscription Tracking",
-    desc: "Manage shop limits, payment plans, and active licenses."
+    label: "Platform Payments",
+    desc: "Central place for setup fees, advances, repairs, subscriptions, and platform income."
   },
   {
     id: "tables",
@@ -420,6 +528,7 @@ const AVAILABLE_PANELS = [
 const PLATFORM_OWNER_PANELS = ["dashboard", "hierarchy", "subscriptions", "notifications", "settings", "users", "logs"];
 
 function canCurrentUserAccessRegister() {
+  if (isPlatformOwner()) return false;
   return canCurrentUserManageRegister() || !!currentShift;
 }
 
@@ -521,6 +630,20 @@ async function init() {
     currentUser = data.user;
     currentUser.total_users = data.total_users || 1;
     currentUser.total_brands = data.total_brands || 1;
+    const requestedPlatformPage = new URLSearchParams(window.location.search).get("platform_page");
+
+    if (currentUser.role === "superadmin") {
+      if (!requestedPlatformPage || !PLATFORM_OWNER_PANELS.includes(requestedPlatformPage)) {
+        window.location.replace("/admin/store-monitoring");
+        return;
+      }
+      sessionStorage.setItem("lobby_selected", "true");
+      localStorage.setItem("pos_page", requestedPlatformPage);
+      configurePlatformOwnerShell(requestedPlatformPage);
+    } else {
+      configurePlatformOwnerShell(null);
+    }
+
     const nameSidebar = document.getElementById("user-name-sidebar");
     const roleSidebar = document.getElementById("user-role-sidebar");
     const avatarHeader = document.getElementById("user-avatar");
@@ -535,6 +658,8 @@ async function init() {
     const shopNameHeader = document.getElementById("header-shop-name");
     const shopMgmtHeader = document.getElementById("header-shop-mgmt");
     const lobbyUserDisplay = document.getElementById("header-username-display");
+    const switchModuleButton = document.getElementById("switch-module-btn");
+    const navigationHomeLabel = document.getElementById("navigation-home-label");
 
     if (shopNameHeader)
       shopNameHeader.textContent = currentUser.shop_name || "POS System";
@@ -546,6 +671,10 @@ async function init() {
     }
     if (lobbyUserDisplay) {
       lobbyUserDisplay.textContent = currentUser.username || currentUser.name;
+    }
+    if (currentUser.role === "superadmin") {
+      if (switchModuleButton) switchModuleButton.title = "SaaS Command Center";
+      if (navigationHomeLabel) navigationHomeLabel.textContent = "Return to Command Center";
     }
     updateSubscriptionQuotaUI();
     updateNotificationTopbarBadge();
@@ -561,7 +690,9 @@ async function init() {
 
 
     if (!sessionStorage.getItem("lobby_selected")) return renderLobby();
-    let startPage = localStorage.getItem("pos_page") || "dashboard";
+    let startPage = currentUser.role === "superadmin"
+      ? requestedPlatformPage
+      : localStorage.getItem("pos_page") || "dashboard";
     if (!isPanelAllowedForCurrentUser(startPage)) {
       startPage = getAllowedPanelsForCurrentUser()[0]?.id || "dashboard";
     }
@@ -596,7 +727,7 @@ function navigate(page) {
     return false;
   }
 
-  if (currentUser.role === "superadmin" && !PLATFORM_OWNER_PANELS.includes(page) && page !== "register") {
+  if (currentUser.role === "superadmin" && !PLATFORM_OWNER_PANELS.includes(page)) {
     // Superadmins can only access platform-level pages
     return false;
   }
@@ -632,6 +763,7 @@ function navigate(page) {
   localStorage.setItem("pos_page", page);
   sessionStorage.setItem("lobby_selected", "true");
   document.body.classList.remove("lobby-active");
+  if (isPlatformOwner()) setPlatformShellActive(page);
 
   document
     .querySelectorAll(".nav-link")
@@ -650,7 +782,7 @@ function navigate(page) {
     notifications: "Notifications",
     settings: "System Settings",
     users: "Staff Directory",
-    subscriptions: "Subscription Tracking",
+    subscriptions: "Platform Payments",
     hierarchy: "Master Platform Hierarchy",
     tables: "Table Management",
     kds: "Kitchen Display System",
@@ -762,10 +894,29 @@ async function fetchCategories() {
 
 let _activeSettingsTab = localStorage.getItem("active_settings_tab") || "profile";
 
+const PLATFORM_OWNER_HIDDEN_SETTINGS_TABS = new Set(["receipt", "printer-routing"]);
+
+function getSettingsNavItems() {
+  const items = [
+    { id: 'profile', label: 'Account Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+    { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    { id: 'printer-routing', label: 'Printers & Routing', icon: 'M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z' }
+  ];
+
+  if (!isPlatformOwner()) return items;
+  return items.filter((item) => !PLATFORM_OWNER_HIDDEN_SETTINGS_TABS.has(item.id));
+}
+
 async function renderSettings(tab) {
   if (tab) {
     _activeSettingsTab = tab;
     localStorage.setItem("active_settings_tab", tab);
+  }
+
+  const navItems = getSettingsNavItems();
+  if (!navItems.some((item) => item.id === _activeSettingsTab)) {
+    _activeSettingsTab = navItems[0]?.id || "profile";
+    localStorage.setItem("active_settings_tab", _activeSettingsTab);
   }
 
   // Fetch receipt settings if on receipt tab
@@ -774,12 +925,6 @@ async function renderSettings(tab) {
   }
 
   // Populate the Sidebar/Drawer content
-  const navItems = [
-    { id: 'profile', label: 'Account Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-    { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-    { id: 'printer-routing', label: 'Printers & Routing', icon: 'M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z' }
-  ];
-
   const navHtml = navItems.map(item => `
     <button onclick="renderSettings('${item.id}'); if(!document.getElementById('settings-nav-drawer').classList.contains('-translate-x-full')) toggleSettingsNav();" class="w-full flex items-center justify-between px-6 py-5 rounded-2xl text-sm font-black transition-all group ${_activeSettingsTab === item.id
       ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30"
@@ -1587,12 +1732,12 @@ function renderGlobalDashboard(data) {
           <button onclick="window.location.href = '/admin/store-monitoring'" class="flex flex-col items-start p-6 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-all group shadow-sm hover:shadow-md h-full text-left">
             <svg class="w-8 h-8 text-indigo-500 mb-4 bg-indigo-100 dark:bg-indigo-900/30 p-1.5 rounded-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
             <span class="block text-base font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-widest mb-2">SaaS Command Center</span>
-            <span class="block text-sm text-slate-500 dark:text-slate-400">Monitor all stores, view growth charts, and manage tenants and statuses</span>
+            <span class="block text-sm text-slate-500 dark:text-slate-400">Monitor all shops, view growth charts, and manage platform status</span>
           </button>
            <button onclick="navigate('subscriptions')" class="flex flex-col items-start p-6 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/10 transition-all group shadow-sm hover:shadow-md h-full text-left">
             <svg class="w-8 h-8 text-emerald-500 mb-4 bg-emerald-100 dark:bg-emerald-900/30 p-1.5 rounded-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             <span class="block text-base font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-2">Track Payments</span>
-            <span class="block text-sm text-slate-500 dark:text-slate-400">Manage shop subscriptions, view due payments and update plans</span>
+            <span class="block text-sm text-slate-500 dark:text-slate-400">Manage setup fees, advances, repairs, subscriptions, and platform income</span>
           </button>
         </div>
       </div>

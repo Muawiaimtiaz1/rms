@@ -8,14 +8,20 @@ function isShiftAdmin(user) {
   return ['admin', 'superadmin', 'manager'].includes(user?.role);
 }
 
+function isShopRegisterUser(user) {
+  return !!user && user.role !== 'superadmin';
+}
+
 function shiftAdminShopScope(user) {
   return user?.role === 'superadmin' ? null : user?.shop_id;
 }
 
 async function loadShiftForAccess(req, shiftId, options = {}) {
-  const shift = await db('shifts')
-    .where({ id: shiftId, shop_id: req.session.user.shop_id })
-    .first();
+  let query = db('shifts').where({ id: shiftId });
+  if (req.session.user.role !== 'superadmin') {
+    query = query.andWhere({ shop_id: req.session.user.shop_id });
+  }
+  const shift = await query.first();
 
   if (!shift) {
     const err = new Error('Shift not found');
@@ -41,6 +47,9 @@ async function loadShiftForAccess(req, shiftId, options = {}) {
 // GET /api/shifts/active
 // Get the current user's active shift
 router.get('/active', requireAuth, async (req, res) => {
+  if (!isShopRegisterUser(req.session.user)) {
+    return res.json({ status: 'none' });
+  }
   const shift = await shiftService.getActiveShift(req.session.user.shop_id, req.session.user.id);
   res.json(shift || { status: 'none' });
 });
@@ -48,6 +57,10 @@ router.get('/active', requireAuth, async (req, res) => {
 // POST /api/shifts/open
 // Start a new shift
 router.post('/open', requireAuth, async (req, res) => {
+  if (!isShopRegisterUser(req.session.user)) {
+    return res.status(403).json({ error: 'Platform owners do not open shop registers.' });
+  }
+
   const { opening_balance, terminal_id } = req.body;
   const balance = parseFloat(opening_balance);
   
@@ -66,6 +79,9 @@ router.post('/open', requireAuth, async (req, res) => {
 // GET /api/shifts/summary/:id
 // Get expected totals for a specific shift
 router.get('/summary/:id', requireAuth, async (req, res) => {
+  if (!isShopRegisterUser(req.session.user)) {
+    return res.status(403).json({ error: 'Platform owners do not manage shop registers.' });
+  }
   await loadShiftForAccess(req, req.params.id);
   const summary = await shiftService.calculateShiftSummary(req.params.id, req.session.user.shop_id);
   res.json(summary);
@@ -74,6 +90,10 @@ router.get('/summary/:id', requireAuth, async (req, res) => {
 // POST /api/shifts/close
 // End current shift with cash count
 router.post('/close', requireAuth, async (req, res) => {
+  if (!isShopRegisterUser(req.session.user)) {
+    return res.status(403).json({ error: 'Platform owners do not close shop registers.' });
+  }
+
   const { shift_id, actual_balance, note, shortage_reason } = req.body;
   const balance = parseFloat(actual_balance);
 
@@ -95,6 +115,10 @@ router.post('/close', requireAuth, async (req, res) => {
 // POST /api/shifts/cash-drop
 // Record managerial cash removal
 router.post('/cash-drop', requireAuth, async (req, res) => {
+  if (!isShopRegisterUser(req.session.user)) {
+    return res.status(403).json({ error: 'Platform owners do not manage shop register cash.' });
+  }
+
   const { shift_id, amount, note } = req.body;
   const val = parseFloat(amount);
   
@@ -133,6 +157,10 @@ router.post('/cash-drops/:id/verify', requireAuth, async (req, res) => {
 // POST /api/shifts/handover
 // Initiate handover to another user
 router.post('/handover', requireAuth, async (req, res) => {
+  if (!isShopRegisterUser(req.session.user)) {
+    return res.status(403).json({ error: 'Platform owners do not manage shop register cash.' });
+  }
+
   const { shift_id, receiver_id, amount, note } = req.body;
   const val = parseFloat(amount);
 
@@ -196,7 +224,10 @@ router.get('/history', requireAuth, async (req, res) => {
 // Full Z-report/audit details for a shift.
 router.get('/:id/details', requireAuth, async (req, res) => {
   const shift = await loadShiftForAccess(req, req.params.id);
-  const details = await shiftService.getShiftDetails(req.session.user.shop_id, req.params.id);
+  const details = await shiftService.getShiftDetails(
+    req.session.user.role === 'superadmin' ? shift.shop_id : req.session.user.shop_id,
+    req.params.id
+  );
   if (shift.status === 'open' && !isShiftAdmin(req.session.user)) {
     delete details.summary.expected_balance;
   }

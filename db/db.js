@@ -845,6 +845,8 @@ if (!tableExists) {
       { name: "auto_calculate_damage_to_loss", type: "INTEGER DEFAULT 1" },
       { name: "customer_bill_printer", type: "TEXT" },
       { name: "unpaid_bill_printer", type: "TEXT" },
+      { name: "user_count", type: "INTEGER DEFAULT 0" },
+      { name: "product_count", type: "INTEGER DEFAULT 0" },
     ];
 
     receiptColumns.forEach((col) => {
@@ -854,6 +856,12 @@ if (!tableExists) {
         console.log(`✅ ${col.name} column added to shops.`);
       }
     });
+    db.exec(`
+      UPDATE shops
+      SET
+        user_count = COALESCE((SELECT COUNT(*) FROM users u WHERE u.shop_id = shops.id AND u.role != 'superadmin'), 0),
+        product_count = COALESCE((SELECT COUNT(*) FROM products p WHERE p.shop_id = shops.id AND COALESCE(p.is_deleted, 0) = 0), 0);
+    `);
 
     if (!shopCols.some((c) => c.name === "shop_type")) {
       console.log("🔧 Updating database: Adding shop_type to shops...");
@@ -1043,6 +1051,57 @@ if (!tableExists) {
     `);
 
   }
+}
+
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS saas_financial_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop_id INTEGER,
+      subscription_id INTEGER,
+      amount REAL NOT NULL DEFAULT 0,
+      category TEXT NOT NULL DEFAULT 'other',
+      description TEXT,
+      payment_method TEXT DEFAULT 'Cash',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE SET NULL,
+      FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_shop_id ON saas_financial_logs(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_subscription_id ON saas_financial_logs(subscription_id);
+    CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_category ON saas_financial_logs(category);
+    CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_created_at ON saas_financial_logs(created_at);
+  `);
+
+  const financialLogCols = db.prepare("PRAGMA table_info(saas_financial_logs)").all();
+  if (!financialLogCols.some((col) => col.name === "subscription_id")) {
+    db.exec("ALTER TABLE saas_financial_logs ADD COLUMN subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL;");
+  }
+  if (!financialLogCols.some((col) => col.name === "updated_at")) {
+    db.exec("ALTER TABLE saas_financial_logs ADD COLUMN updated_at TEXT;");
+    db.exec("UPDATE saas_financial_logs SET updated_at = COALESCE(updated_at, created_at, datetime('now'));");
+  }
+
+  db.exec(`
+    INSERT INTO saas_financial_logs (shop_id, subscription_id, amount, category, description, payment_method, created_at, updated_at)
+    SELECT s.shop_id, s.id, s.amount, 'subscription', 'Subscription payment: ' || s.type, 'Cash', s.paid_at, s.paid_at
+    FROM subscriptions s
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM saas_financial_logs l
+      WHERE l.subscription_id = s.id
+         OR (
+           l.subscription_id IS NULL
+           AND l.category = 'subscription'
+           AND l.shop_id = s.shop_id
+           AND ABS(COALESCE(l.amount, 0) - COALESCE(s.amount, 0)) < 0.01
+           AND DATE(l.created_at) = DATE(s.paid_at)
+         )
+    );
+  `);
+} catch (e) {
+  console.error("⚠️ Failed to ensure platform financial ledger:", e.message);
 }
 
 // Shift management tables and columns

@@ -49,20 +49,30 @@ class UserService {
     const hash = bcrypt.hashSync(payload.password, 10);
     const targetShopId = data.shop_id || null; // Super admin can assign any shop
 
-    const [idObj] = await db('users').insert({
-      name: data.name,
-      email: data.email,
-      phone: data.phone,
-      username: data.username,
-      password_hash: hash,
-      role: data.role,
-      status: data.status,
-      allowed_panels: JSON.stringify(data.allowed_panels || []),
-      shop_id: targetShopId,
-      can_manage_register: data.can_manage_register || false
-    }).returning('id');
+    const [idObj] = await db.transaction(async (trx) => {
+      const [newId] = await trx('users').insert({
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        username: data.username,
+        password_hash: hash,
+        role: data.role,
+        status: data.status,
+        allowed_panels: JSON.stringify(data.allowed_panels || []),
+        shop_id: targetShopId,
+        can_manage_register: data.can_manage_register || false
+      }).returning('id');
 
-    return typeof idObj === 'object' ? idObj.id : idObj;
+      const uid = typeof newId === 'object' ? newId.id : newId;
+
+      if (targetShopId) {
+        await trx('shops').where({ id: targetShopId }).increment('user_count', 1);
+      }
+
+      return [uid];
+    });
+
+    return idObj;
   }
 
   async updateUser(userId, payload, currentUser) {
@@ -114,7 +124,17 @@ class UserService {
       updateData.password_hash = bcrypt.hashSync(payload.password, 10);
     }
 
-    await db('users').where({ id: userId }).update(updateData);
+    await db.transaction(async (trx) => {
+      const oldShopId = userToEdit.shop_id;
+      const newShopId = updateData.shop_id;
+
+      await trx('users').where({ id: userId }).update(updateData);
+
+      if (oldShopId !== newShopId) {
+        if (oldShopId) await trx('shops').where({ id: oldShopId }).decrement('user_count', 1);
+        if (newShopId) await trx('shops').where({ id: newShopId }).increment('user_count', 1);
+      }
+    });
   }
 
   async deleteUser(userId, currentUser) {
@@ -125,7 +145,12 @@ class UserService {
     if (!userToDelete) throw new Error('User not found');
     if (userToDelete.role === 'superadmin') throw new Error('The Master Owner account cannot be deleted');
 
-    await db('users').where({ id: userId }).delete();
+    await db.transaction(async (trx) => {
+      await trx('users').where({ id: userId }).delete();
+      if (userToDelete.shop_id) {
+        await trx('shops').where({ id: userToDelete.shop_id }).decrement('user_count', 1);
+      }
+    });
   }
 }
 

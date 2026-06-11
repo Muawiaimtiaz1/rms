@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS shops (
   customer_bill_printer TEXT,
   unpaid_bill_printer TEXT,
   logo_data TEXT,
+  user_count INTEGER DEFAULT 0,
+  product_count INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -23,6 +25,25 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   paid_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS saas_financial_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER,
+  subscription_id INTEGER,
+  amount REAL NOT NULL DEFAULT 0,
+  category TEXT NOT NULL DEFAULT 'other',
+  description TEXT,
+  payment_method TEXT DEFAULT 'Cash',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE SET NULL,
+  FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_shop_id ON saas_financial_logs(shop_id);
+CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_subscription_id ON saas_financial_logs(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_category ON saas_financial_logs(category);
+CREATE INDEX IF NOT EXISTS idx_saas_financial_logs_created_at ON saas_financial_logs(created_at);
 
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -982,7 +982,7 @@ async function renderShopManagement(shopId) {
              <span class="text-xl">👨‍🍳</span> Kitchen Terminals
            </button>
            ` : ''}
-           <button onclick="switchShopTab('brands')" id="tab-btn-brands" class="w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-880/50 text-slate-600 dark:text-slate-400 border border-transparent animate-all duration-300">
+           <button onclick="switchShopTab('brands')" id="tab-btn-brands" class="w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 border border-transparent animate-all duration-300">
              <span class="text-xl">🤝</span> Partner Brands
            </button>
         </div>
@@ -1063,7 +1063,7 @@ async function renderShopManagement(shopId) {
                 ${shopBrands.length === 0 ? `<div class="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800"><p class="text-slate-500 text-sm font-medium italic">No brands found.</p></div>` : ''}
              </div>
           </div>
-          
+
         </div>
       </div>
     </div>

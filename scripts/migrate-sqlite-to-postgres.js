@@ -11,6 +11,7 @@ const schemaPath = path.join(__dirname, "..", "db", "postgres-schema.sql");
 const tableOrder = [
   "shops",
   "subscriptions",
+  "saas_financial_logs",
   "users",
   "brands",
   "product_categories",

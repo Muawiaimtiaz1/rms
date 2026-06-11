@@ -5,6 +5,7 @@ const session = require("express-session");
 const path = require("path");
 const fs = require('fs');
 const db = require("./db/knex");
+const { formatErrorResponse } = require("./utils/error-response");
 
 const app = express();
 
@@ -192,10 +193,8 @@ app.use((err, req, res, next) => {
     console.error("Failed to write to error_debug.log", e);
   }
   console.error("[SERVER ERROR]", err);
-  res.status(err.status || 500).json({ 
-    error: err.message || 'Internal Server Error',
-    stack: err.stack
-  });
+  const { status, body } = formatErrorResponse(err, "Internal Server Error");
+  res.status(status).json(body);
 });
 
 if (require.main === module) {

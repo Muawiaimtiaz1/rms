@@ -3,6 +3,8 @@ const { getSqlite, getPostgres, usePostgres } = require('../db/runtime');
 const { requireSuperAdmin } = require('../middleware/auth');
 const os = require('os');
 const bcrypt = require('bcryptjs');
+const platformPaymentService = require('../services/PlatformPaymentService');
+const { sendError } = require('../utils/error-response');
 const router = express.Router();
 
 // Helper for logging actions
@@ -22,32 +24,93 @@ router.get('/store-stats', requireSuperAdmin, async (req, res) => {
     try {
         const isPostgres = usePostgres();
         const stats = {
-            totalStores: 0, activeStores: 0, suspendedStores: 0, totalUsers: 0, totalProducts: 0, globalRevenue: 0,
+            totalStores: 0, activeStores: 0, suspendedStores: 0,
+            totalUsers: 0, totalProducts: 0,
+            globalSales: 0, // What shops are making
+            platformRevenue: 0, // What System Owner is making (SaaS Profit)
+            mrr: 0, // Monthly Recurring Revenue
             serverStatus: { cpu: Math.floor(Math.random() * 40) + 10, dbSize: '5.2 MB', activeSessions: Math.floor(Math.random() * 100) + 20 }
         };
 
+        const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+        await platformPaymentService.ensureLedgerReady();
+
         if (isPostgres) {
             const pg = getPostgres();
+
+            // Shop Counts
             const shops = (await pg.query("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) as suspended FROM shops")).rows[0];
             stats.totalStores = parseInt(shops.total) || 0;
             stats.activeStores = parseInt(shops.active) || 0;
             stats.suspendedStores = parseInt(shops.suspended) || 0;
-            stats.globalRevenue = parseFloat((await pg.query("SELECT SUM(total) as revenue FROM sales")).rows[0].revenue) || 0;
-            stats.totalUsers = parseInt((await pg.query("SELECT COUNT(*) as total FROM users WHERE role != 'superadmin'")).rows[0].total) || 0;
-            stats.totalProducts = parseInt((await pg.query("SELECT COUNT(*) as total FROM products")).rows[0].total) || 0;
-            stats.growth = (await pg.query("SELECT TO_CHAR(created_at, 'YYYY-MM') as month, COUNT(*) as count FROM shops GROUP BY month ORDER BY month ASC LIMIT 12")).rows.map(r => ({ month: r.month, count: parseInt(r.count) }));
-            stats.topStoresByUsers = (await pg.query("SELECT s.name, COUNT(u.id) as user_count FROM shops s LEFT JOIN users u ON s.id = u.shop_id GROUP BY s.id, s.name ORDER BY user_count DESC LIMIT 5")).rows.map(r => ({ name: r.name, user_count: parseInt(r.user_count) }));
+
+            // Financials
+            stats.globalSales = parseFloat((await pg.query("SELECT SUM(total) as revenue FROM sales")).rows[0].revenue) || 0;
+            const subRevenue = parseFloat((await pg.query("SELECT SUM(amount) as revenue FROM saas_financial_logs WHERE category = 'subscription'")).rows[0].revenue) || 0;
+            const setupFees = parseFloat((await pg.query("SELECT SUM(amount) as fee FROM saas_financial_logs WHERE category = 'setup'")).rows[0].fee) || 0;
+            const otherIncome = parseFloat((await pg.query("SELECT SUM(amount) as extra FROM saas_financial_logs WHERE category NOT IN ('subscription', 'setup')")).rows[0].extra) || 0;
+
+            stats.subRevenueTotal = subRevenue;
+            stats.setupFeesTotal = setupFees;
+            stats.platformRevenue = subRevenue + setupFees + otherIncome;
+            stats.mrr = parseFloat((await pg.query("SELECT SUM(amount) as revenue FROM subscriptions WHERE month = $1", [currentMonth])).rows[0].revenue) || 0;
+
+            // Totals
+            stats.totalUsers = parseInt((await pg.query("SELECT SUM(user_count) as total FROM shops")).rows[0].total) || 0;
+            stats.totalProducts = parseInt((await pg.query("SELECT SUM(product_count) as total FROM shops")).rows[0].total) || 0;
+
+            // Growth Trend (Last 12 Months)
+            stats.growth = (await pg.query(`
+                SELECT TO_CHAR(paid_at, 'YYYY-MM') as month,
+                       COUNT(DISTINCT shop_id) as store_count,
+                       SUM(amount) as revenue
+                FROM subscriptions
+                GROUP BY TO_CHAR(paid_at, 'YYYY-MM')
+                ORDER BY month ASC
+                LIMIT 12
+            `)).rows.map(r => ({
+                month: r.month,
+                count: parseInt(r.store_count),
+                revenue: parseFloat(r.revenue) || 0
+            }));
+
+            stats.topStoresByUsers = (await pg.query("SELECT name, user_count FROM shops ORDER BY user_count DESC LIMIT 5")).rows;
         } else {
             const db = getSqlite();
+
             const shops = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) as suspended FROM shops").get();
             stats.totalStores = shops.total || 0;
             stats.activeStores = shops.active || 0;
             stats.suspendedStores = shops.suspended || 0;
-            stats.globalRevenue = db.prepare("SELECT SUM(total) as revenue FROM sales").get().revenue || 0;
-            stats.totalUsers = db.prepare("SELECT COUNT(*) as total FROM users WHERE role != 'superadmin'").get().total || 0;
-            stats.totalProducts = db.prepare("SELECT COUNT(*) as total FROM products").get().total || 0;
-            stats.growth = db.prepare("SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM shops GROUP BY month ORDER BY month ASC LIMIT 12").all();
-            stats.topStoresByUsers = db.prepare("SELECT s.name, COUNT(u.id) as user_count FROM shops s LEFT JOIN users u ON s.id = u.shop_id GROUP BY s.id ORDER BY user_count DESC LIMIT 5").all();
+
+            stats.globalSales = db.prepare("SELECT SUM(total) as revenue FROM sales").get().revenue || 0;
+            const subRevenue = db.prepare("SELECT SUM(amount) as revenue FROM saas_financial_logs WHERE category = 'subscription'").get().revenue || 0;
+            const setupFees = db.prepare("SELECT SUM(amount) as fee FROM saas_financial_logs WHERE category = 'setup'").get().fee || 0;
+            const otherIncome = db.prepare("SELECT SUM(amount) as extra FROM saas_financial_logs WHERE category NOT IN ('subscription', 'setup')").get().extra || 0;
+
+            stats.subRevenueTotal = subRevenue;
+            stats.setupFeesTotal = setupFees;
+            stats.platformRevenue = subRevenue + setupFees + otherIncome;
+            stats.mrr = db.prepare("SELECT SUM(amount) as revenue FROM subscriptions WHERE month = ?").get(currentMonth).revenue || 0;
+
+            stats.totalUsers = db.prepare("SELECT SUM(user_count) as total FROM shops").get().total || 0;
+            stats.totalProducts = db.prepare("SELECT SUM(product_count) as total FROM shops").get().total || 0;
+
+            stats.growth = db.prepare(`
+                SELECT strftime('%Y-%m', paid_at) as month,
+                       COUNT(DISTINCT shop_id) as store_count,
+                       SUM(amount) as revenue
+                FROM subscriptions
+                GROUP BY month
+                ORDER BY month ASC
+                LIMIT 12
+            `).all().map(r => ({
+                month: r.month,
+                count: r.store_count,
+                revenue: r.revenue || 0
+            }));
+
+            stats.topStoresByUsers = db.prepare("SELECT name, user_count FROM shops ORDER BY user_count DESC LIMIT 5").all();
         }
         res.json(stats);
     } catch (e) {
@@ -60,29 +123,55 @@ router.get('/store-stats', requireSuperAdmin, async (req, res) => {
 router.get('/stores', requireSuperAdmin, async (req, res) => {
     try {
         const isPostgres = usePostgres();
-        const query = isPostgres ? `
-            SELECT s.id, s.name as store_name, s.status, s.created_at,
-                   (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id) as user_count,
-                   (SELECT COUNT(*) FROM products p WHERE p.shop_id = s.id) as product_count,
-                   u.name as owner_name, u.username as owner_email, sub.type as subscription_plan
-            FROM shops s
-            LEFT JOIN users u ON s.id = u.shop_id AND u.role = 'admin'
-            LEFT JOIN subscriptions sub ON s.id = sub.shop_id AND (sub.end_date IS NULL OR sub.end_date >= CURRENT_DATE)
-            ORDER BY s.created_at DESC
-        ` : `
-            SELECT s.id, s.name as store_name, s.status, s.created_at,
-                   (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id) as user_count,
-                   (SELECT COUNT(*) FROM products p WHERE p.shop_id = s.id) as product_count,
-                   u.name as owner_name, u.username as owner_email, sub.type as subscription_plan
-            FROM shops s
-            LEFT JOIN users u ON s.id = u.shop_id AND u.role = 'admin'
-            LEFT JOIN subscriptions sub ON s.id = sub.shop_id AND (sub.end_date IS NULL OR sub.end_date >= date('now'))
-            GROUP BY s.id ORDER BY s.created_at DESC
-        `;
+        const limit = parseInt(req.query.limit) || 100;
+        const offset = parseInt(req.query.offset) || 0;
+        const search = req.query.search || '';
+
+        let query;
+        if (isPostgres) {
+            query = `
+                SELECT s.id, s.name as store_name, s.status, s.created_at,
+                       s.user_count, s.product_count,
+                       u.name as owner_name, u.username as owner_email, sub.type as subscription_plan
+                FROM shops s
+                LEFT JOIN users u ON s.id = u.shop_id AND u.role = 'admin'
+                LEFT JOIN subscriptions sub ON s.id = sub.shop_id AND (sub.end_date IS NULL OR sub.end_date >= CURRENT_DATE)
+                WHERE s.name ILIKE $1
+                ORDER BY s.created_at DESC
+                LIMIT $2 OFFSET $3
+            `;
+        } else {
+            query = `
+                SELECT s.id, s.name as store_name, s.status, s.created_at,
+                       s.user_count, s.product_count,
+                       u.name as owner_name, u.username as owner_email, sub.type as subscription_plan
+                FROM shops s
+                LEFT JOIN users u ON s.id = u.shop_id AND u.role = 'admin'
+                LEFT JOIN subscriptions sub ON s.id = sub.shop_id AND (sub.end_date IS NULL OR sub.end_date >= date('now'))
+                WHERE s.name LIKE ?
+                GROUP BY s.id ORDER BY s.created_at DESC
+                LIMIT ? OFFSET ?
+            `;
+        }
+
         let stores;
-        if (isPostgres) stores = (await getPostgres().query(query)).rows;
-        else stores = getSqlite().prepare(query).all();
-        res.json(stores);
+        const searchParam = `%${search}%`;
+        if (isPostgres) {
+            stores = (await getPostgres().query(query, [searchParam, limit, offset])).rows;
+        } else {
+            stores = getSqlite().prepare(query).all(searchParam, limit, offset);
+        }
+
+        // Also get total count for pagination UI
+        const countQuery = isPostgres
+            ? 'SELECT COUNT(*) as count FROM shops WHERE name ILIKE $1'
+            : 'SELECT COUNT(*) as count FROM shops WHERE name LIKE ?';
+
+        let total;
+        if (isPostgres) total = parseInt((await getPostgres().query(countQuery, [searchParam])).rows[0].count);
+        else total = getSqlite().prepare(countQuery).get(searchParam).count;
+
+        res.json({ stores, total, limit, offset });
     } catch (e) {
         console.error('Stores fetch error:', e);
         res.status(500).json({ error: 'Database error fetching stores' });
@@ -139,17 +228,7 @@ router.get('/system-health', requireSuperAdmin, (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Failed to fetch health' }); }
 });
 
-// GET /api/admin/support-tickets
-router.get('/support-tickets', requireSuperAdmin, async (req, res) => {
-    try {
-        const isPostgres = usePostgres();
-        const q = 'SELECT t.id, t.issue_type, t.status, t.assigned_to, t.created_at, s.name as store_name FROM support_tickets t LEFT JOIN shops s ON t.shop_id = s.id ORDER BY t.status DESC, t.created_at DESC';
-        let tickets;
-        if (isPostgres) tickets = (await getPostgres().query(q)).rows;
-        else tickets = getSqlite().prepare(q).all();
-        res.json(tickets);
-    } catch (e) { res.status(500).json({ error: 'Database error' }); }
-});
+
 
 // PATCH /api/admin/store/:id/reset-password
 router.patch('/store/:id/reset-password', requireSuperAdmin, async (req, res) => {
@@ -167,7 +246,7 @@ router.patch('/store/:id/reset-password', requireSuperAdmin, async (req, res) =>
         const qUpd = isPostgres ? 'UPDATE users SET password_hash = $1 WHERE id = $2' : 'UPDATE users SET password_hash = ? WHERE id = ?';
         if (isPostgres) await getPostgres().query(qUpd, [hash, adminUser.id]);
         else getSqlite().prepare(qUpd).run(hash, adminUser.id);
-        
+
         await logAdminAction(shopId, 'Password Reset', `Password reset for user ${adminUser.username}`);
         res.json({ ok: true, newPassword: newPass, username: adminUser.username });
     } catch (e) {
@@ -178,31 +257,9 @@ router.patch('/store/:id/reset-password', requireSuperAdmin, async (req, res) =>
 
 // PATCH /api/admin/store/:id/plan
 router.patch('/store/:id/plan', requireSuperAdmin, async (req, res) => {
-    const shopId = req.params.id;
-    const { plan, price } = req.body;
-    if (!plan || isNaN(price)) return res.status(400).json({ error: 'Invalid plan or price' });
-
-    try {
-        const isPostgres = usePostgres();
-        const monthStr = new Date().toISOString().slice(0, 7);
-        if (isPostgres) {
-            await getPostgres().withTransaction(async (client) => {
-                await client.query("UPDATE subscriptions SET end_date = CURRENT_DATE WHERE shop_id = $1 AND (end_date IS NULL OR end_date >= CURRENT_DATE)", [shopId]);
-                await client.query('INSERT INTO subscriptions (shop_id, amount, type, month) VALUES ($1, $2, $3, $4)', [shopId, parseFloat(price), plan, monthStr]);
-            });
-        } else {
-            const db = getSqlite();
-            db.transaction(() => {
-                db.prepare("UPDATE subscriptions SET end_date = date('now') WHERE shop_id = ? AND (end_date IS NULL OR end_date >= date('now'))").run(shopId);
-                db.prepare('INSERT INTO subscriptions (shop_id, amount, type, month) VALUES (?, ?, ?, ?)').run(shopId, parseFloat(price), plan, monthStr);
-            })();
-        }
-        await logAdminAction(shopId, 'Plan Updated', `Plan to ${plan} @ ${price}`);
-        res.json({ ok: true });
-    } catch (e) {
-        console.error('Plan update error:', e);
-        res.status(500).json({ error: 'Failed' });
-    }
+    res.status(410).json({
+        error: 'Subscription payments are now managed from Settings > Platform Payments.'
+    });
 });
 
 // GET /api/admin/hierarchy-data
@@ -237,6 +294,50 @@ router.get('/hierarchy-data', requireSuperAdmin, async (req, res) => {
     } catch (e) {
         console.error('Hierarchy data error:', e);
         res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// GET /api/admin/financial-logs
+router.get('/financial-logs', requireSuperAdmin, async (req, res) => {
+    try {
+        const logs = await platformPaymentService.list();
+        res.json({ ok: true, logs });
+    } catch (e) {
+        console.error('Logs fetch error:', e);
+        sendError(res, e, 'Failed to fetch platform payments');
+    }
+});
+
+// POST /api/admin/financial-logs
+router.post('/financial-logs', requireSuperAdmin, async (req, res) => {
+    try {
+        const id = await platformPaymentService.create(req.body);
+        res.json({ ok: true, id });
+    } catch (e) {
+        console.error('Logs insert error:', e);
+        sendError(res, e, 'Failed to record platform payment');
+    }
+});
+
+// PATCH /api/admin/financial-logs/:id
+router.patch('/financial-logs/:id', requireSuperAdmin, async (req, res) => {
+    try {
+        await platformPaymentService.update(req.params.id, req.body);
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('Logs patch error:', e);
+        sendError(res, e, 'Failed to update platform payment');
+    }
+});
+
+// DELETE /api/admin/financial-logs/:id
+router.delete('/financial-logs/:id', requireSuperAdmin, async (req, res) => {
+    try {
+        await platformPaymentService.delete(req.params.id);
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('Logs delete error:', e);
+        sendError(res, e, 'Failed to delete platform payment');
     }
 });
 

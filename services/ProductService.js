@@ -169,14 +169,23 @@ class ProductService {
         }
       }
 
+      await trx('shops').where({ id: shopId }).increment('product_count', 1);
+
       return productId;
     });
   }
 
   async setDeleted(productId, shopId) {
-    return await db('products')
-      .where({ id: productId, shop_id: shopId })
-      .update({ is_deleted: 1 });
+    return await db.transaction(async (trx) => {
+      const affected = await trx('products')
+        .where({ id: productId, shop_id: shopId, is_deleted: 0 })
+        .update({ is_deleted: 1 });
+      
+      if (affected > 0) {
+        await trx('shops').where({ id: shopId }).decrement('product_count', 1);
+      }
+      return affected;
+    });
   }
 
   /**
