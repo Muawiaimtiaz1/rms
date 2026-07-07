@@ -154,17 +154,51 @@ function renderSpecificSubTab(tabId, data) {
   } else if (tabId === "profit") {
     // ─── PROFIT ANALYTICS ───
     const brandRows = Array.isArray(data.brandPerformance) ? data.brandPerformance : [];
+    const partnerShares = Array.isArray(data.partnerProfitShares) ? data.partnerProfitShares : [];
+    const shopProfitValue = Number(data.shopProfit ?? data.partnerProfitPool ?? s.shopProfit ?? s.grossProfit ?? 0);
+    const shopProfitMargin = Number(s.shopProfitMargin ?? (Number(data.totalRevenue || 0) > 0 ? (shopProfitValue / Number(data.totalRevenue || 0)) * 100 : 0));
+    const selectedPartnerAudit = data.selectedPartnerAudit || null;
+    const selectedPartnerType = selectedPartnerAudit?.partner_type === "product_based" ? "product_based" : "share_based";
+    const selectedPartnerAuditHtml = selectedPartnerAudit
+      ? `
+        <div class="mb-4 p-4 rounded-2xl bg-teal-50/80 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/50">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="text-[10px] font-black uppercase tracking-widest text-teal-600 dark:text-teal-400">Selected Partner Audit</div>
+              <div class="text-sm font-black text-slate-900 dark:text-white mt-0.5">${selectedPartnerAudit.brand_name}</div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-right">
+              <div>
+                <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">Type</div>
+                <div class="text-xs font-black text-slate-800 dark:text-slate-100">${selectedPartnerType === "product_based" ? "Product Based" : "Share Based"}</div>
+              </div>
+              <div>
+                <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">${selectedPartnerType === "product_based" ? "Product Profit" : "Share Pool"}</div>
+                <div class="text-xs font-black text-slate-800 dark:text-slate-100">${formatCurrency(Number(selectedPartnerAudit.profit_pool || 0))}</div>
+              </div>
+              <div>
+                <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">Partner Share</div>
+                <div class="text-xs font-black ${Number(selectedPartnerAudit.profit_share || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}">${formatCurrency(Number(selectedPartnerAudit.profit_share || 0))}</div>
+              </div>
+              <div>
+                <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">${selectedPartnerType === "product_based" ? "Product Orders" : "Business Orders"}</div>
+                <div class="text-xs font-black text-slate-800 dark:text-slate-100">${formatNum(Number(selectedPartnerType === "product_based" ? (selectedPartnerAudit.product_brand_orders || 0) : (selectedPartnerAudit.business_orders || 0)))}</div>
+              </div>
+            </div>
+          </div>
+        </div>`
+      : "";
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            ${renderMetricLabel("Adjusted Gross Profit", "Gross Profit = revenue - COGS. Revenue = bill subtotal - discount + tax - refunds; returns reduce both revenue and COGS.")}
-            <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(s.grossProfit)}</h4>
-            <span class="text-[10px] font-bold text-emerald-500 block mt-1">Revenue minus total buying cost (COGS)</span>
+            ${renderMetricLabel("Shop Profit", "Shop Profit = revenue - COGS - damage/loss. Partner shares add up to this amount.")}
+            <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(shopProfitValue)}</h4>
+            <span class="text-[10px] font-bold text-emerald-500 block mt-1">Sum of configured partner shares</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
-            ${renderMetricLabel("Net Profit Margin", "Gross profit divided by net revenue for the selected period.")}
-            <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${s.profitMargin.toFixed(2)}%</h4>
+            ${renderMetricLabel("Shop Profit Margin", "Shop profit divided by net revenue for the selected period.")}
+            <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${shopProfitMargin.toFixed(2)}%</h4>
             <span class="text-[10px] font-bold text-slate-500 block mt-1">Percentage of retainable gross yield</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
@@ -175,14 +209,55 @@ function renderSpecificSubTab(tabId, data) {
         </div>
 
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
+          <div class="mb-4 flex items-center justify-between gap-3">
+            ${analyticsPanelTitle("Whole Business Partner Split", "Shop profit allocated across partners. Product-based partners use assigned product profit; share-based partners split the remaining shop profit by percentage.")}
+            <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${formatCurrency(Number(data.totalPartnerProfit ?? shopProfitValue))} allocated</span>
+          </div>
+          ${selectedPartnerAuditHtml}
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead>
+                <tr class="border-b border-slate-100 dark:border-slate-800 text-slate-400 uppercase tracking-widest text-[9px] font-black">
+                  <th class="py-3 pl-2">Partner</th>
+                  <th class="py-3">Type</th>
+                  <th class="py-3 text-right">Ownership</th>
+                  <th class="py-3 text-right">Profit Basis</th>
+                  <th class="py-3 text-right">Partner Profit</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50 dark:divide-slate-800/40">
+                ${partnerShares.map((share) => {
+                  const amount = Number(share.profit_share || 0);
+                  const tone = amount >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+                  const type = share.partner_type === "product_based" ? "product_based" : "share_based";
+                  return `
+                    <tr class="${share.is_selected ? "bg-teal-50/70 dark:bg-teal-950/20" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"} transition-all font-semibold">
+                      <td class="py-3 pl-2 font-black text-slate-800 dark:text-white">
+                        ${share.brand_name}
+                        ${share.is_selected ? `<span class="ml-2 align-middle text-[9px] font-black uppercase tracking-widest text-teal-600 dark:text-teal-400">Selected</span>` : ""}
+                      </td>
+                      <td class="py-3 text-slate-700 dark:text-slate-300 font-bold">${type === "product_based" ? "Product Based" : "Share Based"}</td>
+                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${type === "product_based" ? "Products" : `${Number(share.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}%`}</td>
+                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${formatCurrency(Number(share.profit_pool || 0))}</td>
+                      <td class="py-3 text-right ${tone} font-extrabold">${formatCurrency(amount)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+                ${partnerShares.length === 0 ? `<tr><td colspan="5" class="py-6 text-center text-slate-400 italic">No partner split configured.</td></tr>` : ''}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
           <div class="mb-4">
-            ${analyticsPanelTitle("Partner / Brand Profit & Loss", "Per-brand net revenue, COGS, gross profit, stock damage/loss, and margin for the selected analytics period.")}
+            ${analyticsPanelTitle("Product Brand Sales & Cost", "Product-assignment breakdown by brand. Partner profit is calculated from shop profit in the partner split table.")}
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-xs text-left">
               <thead>
                 <tr class="border-b border-slate-100 dark:border-slate-800 text-slate-400 uppercase tracking-widest text-[9px] font-black">
-                  <th class="py-3 pl-2">Partner / Brand</th>
+                  <th class="py-3 pl-2">Product Brand</th>
                   <th class="py-3 text-right">Net Revenue</th>
                   <th class="py-3 text-right">COGS</th>
                   <th class="py-3 text-right">Gross Profit</th>

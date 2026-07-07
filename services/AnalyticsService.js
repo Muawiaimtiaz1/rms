@@ -1,4 +1,5 @@
 const db = require('../db/knex');
+const brandService = require('./BrandService');
 
 class AnalyticsService {
   /**
@@ -106,16 +107,15 @@ class AnalyticsService {
     try {
       const bounds = this.getPeriodBounds(period, from, to);
       const prevBounds = this.getPreviousPeriodBounds(period, bounds);
-      const isSqlite = db.client.config.client === 'sqlite3';
-      const brands = shopId
-        ? await db('brands').where({ shop_id: shopId }).orderBy('name', 'asc')
-        : [];
+      const isSqlite = db.client.config.client !== 'pg';
+      const brands = shopId ? await brandService.listBrands(shopId) : [];
       const requestedBrandId = parseInt(brandId, 10);
       const selectedBrand = Number.isFinite(requestedBrandId)
         ? brands.find(b => Number(b.id) === requestedBrandId)
         : null;
       const selectedBrandId = selectedBrand ? Number(selectedBrand.id) : null;
-      const hasBrandFilter = Boolean(selectedBrandId);
+      // Partner selection highlights ownership share; shop profit stays shop-wide.
+      const hasBrandFilter = false;
 
       const applyShopScope = (qb, column) => {
         if (shopId) qb.where(column, shopId);
@@ -130,11 +130,11 @@ class AnalyticsService {
         .select(db.raw('SUM(quantity * price_at_sale) as item_subtotal'))
         .groupBy('sale_id')
         .as('item_totals');
-      const itemSubtotalExpr = 'si.quantity * si.price_at_sale';
-      const itemTotalExpr = 'COALESCE(item_totals.item_subtotal, 0)';
-      const allocatedSalesExpr = `CASE WHEN ${itemTotalExpr} > 0 THEN (${itemSubtotalExpr}) * COALESCE(s.total, 0) / ${itemTotalExpr} ELSE 0 END`;
-      const allocatedDiscountExpr = `CASE WHEN ${itemTotalExpr} > 0 THEN (${itemSubtotalExpr}) * COALESCE(s.discount, 0) / ${itemTotalExpr} ELSE 0 END`;
-      const allocatedDueExpr = `CASE WHEN (COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) > 0.01 AND ${itemTotalExpr} > 0 THEN (${itemSubtotalExpr}) * (COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) / ${itemTotalExpr} ELSE 0 END`;
+      const itemCogsExpr = `si.quantity * si.buying_price_at_sale`;
+      const returnCogsExpr = `ri.quantity * ri.buying_price_at_sale`;
+      const allocatedSalesExpr = `CASE WHEN COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * COALESCE(s.total, 0) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
+      const allocatedDiscountExpr = `CASE WHEN COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * COALESCE(s.discount, 0) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
+      const allocatedDueExpr = `CASE WHEN (COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) > 0.01 AND COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * (COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
       const pendingDueCondition = '(COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) > 0.01';
       const brandSalesQuery = (rangeBounds) => db('sale_items as si')
         .join('sales as s', 'si.sale_id', 's.id')
@@ -233,15 +233,19 @@ class AnalyticsService {
         .modify(qb => applyBrandScope(qb))
         .where('s.order_status', 'completed')
         .whereBetween('s.created_at', [bounds.start, bounds.end])
-        .select(db.raw('SUM(si.quantity * si.buying_price_at_sale) as val')).first();
+        .select(db.raw(`SUM(${itemCogsExpr}) as val`)).first();
 
       const returnedCogs = await db('return_items as ri')
         .join('returns as r', 'ri.return_id', 'r.id')
+        .leftJoin('sale_items as si', 'ri.sale_item_id', 'si.id')
         .leftJoin('products as p', 'ri.product_id', 'p.id')
         .modify(qb => applyShopScope(qb, 'r.shop_id'))
         .modify(qb => applyBrandScope(qb))
         .whereBetween('r.created_at', [bounds.start, bounds.end])
-        .select(db.raw('SUM(ri.quantity * ri.buying_price_at_sale) as val')).first();
+        .select(db.raw(`SUM(${returnCogsExpr}) as val`)).first();
+
+      const commissionIncomeStats = { val: 0 };
+      const returnedCommissionStats = { val: 0 };
 
       const stockValueResult = await db('products as p')
         .modify(qb => applyShopScope(qb, 'p.shop_id'))
@@ -516,6 +520,63 @@ class AnalyticsService {
         .modify(qb => applyShopScope(qb, 'p.shop_id'))
         .modify(qb => applyBrandScope(qb))
         .sum('p.manual_damage_loss as val').first();
+      const totalDamageLoss = Number(damageTotalResult ? (damageTotalResult.val || 0) : 0);
+
+      let businessAdjustedRevenue = adjustedRevenue;
+      let businessAdjustedCOGS = adjustedCOGS;
+      let businessGrossProfit = grossProfit;
+      let businessDamageLoss = totalDamageLoss;
+      let businessOrderCount = totalOrderCount;
+
+      if (hasBrandFilter) {
+        const businessSalesStats = await db('sales as s')
+          .modify(qb => applyShopScope(qb, 's.shop_id'))
+          .where({ 's.order_status': 'completed' })
+          .whereBetween('s.created_at', [bounds.start, bounds.end])
+          .select(
+            db.raw('COALESCE(SUM(s.total), 0) as total_sales'),
+            db.raw('COUNT(s.id) as total_orders')
+          ).first();
+
+        const businessReturnsStats = await db('returns as r')
+          .modify(qb => applyShopScope(qb, 'r.shop_id'))
+          .whereBetween('r.created_at', [bounds.start, bounds.end])
+          .select(db.raw('COALESCE(SUM(r.total_refund), 0) as total_refunds'))
+          .first();
+
+        const businessCogsStats = await db('sale_items as si')
+          .join('sales as s', 'si.sale_id', 's.id')
+          .leftJoin('products as p', 'si.product_id', 'p.id')
+          .modify(qb => applyShopScope(qb, 's.shop_id'))
+          .where('s.order_status', 'completed')
+          .whereBetween('s.created_at', [bounds.start, bounds.end])
+          .select(db.raw(`SUM(${itemCogsExpr}) as val`))
+          .first();
+
+        const businessReturnedCogs = await db('return_items as ri')
+          .join('returns as r', 'ri.return_id', 'r.id')
+          .leftJoin('sale_items as si', 'ri.sale_item_id', 'si.id')
+          .leftJoin('products as p', 'ri.product_id', 'p.id')
+          .modify(qb => applyShopScope(qb, 'r.shop_id'))
+          .whereBetween('r.created_at', [bounds.start, bounds.end])
+          .select(db.raw(`SUM(${returnCogsExpr}) as val`))
+          .first();
+
+        const businessDamageResult = await db('products as p')
+          .modify(qb => applyShopScope(qb, 'p.shop_id'))
+          .where({ 'p.is_deleted': 0 })
+          .sum('p.manual_damage_loss as val')
+          .first();
+
+        businessAdjustedRevenue = Number(businessSalesStats.total_sales || 0) - Number(businessReturnsStats.total_refunds || 0);
+        businessAdjustedCOGS = Number(businessCogsStats ? businessCogsStats.val : 0) - Number(businessReturnedCogs ? businessReturnedCogs.val : 0);
+        businessGrossProfit = businessAdjustedRevenue - businessAdjustedCOGS;
+        businessDamageLoss = Number(businessDamageResult ? (businessDamageResult.val || 0) : 0);
+        businessOrderCount = parseInt(businessSalesStats.total_orders || 0, 10) || 0;
+      }
+
+      const shopProfit = businessGrossProfit - businessDamageLoss;
+      const shopProfitMargin = businessAdjustedRevenue > 0 ? (shopProfit / businessAdjustedRevenue) * 100 : 0;
 
       const brandRevenueRows = await db('sale_items as si')
         .join('sales as s', 'si.sale_id', 's.id')
@@ -527,18 +588,19 @@ class AnalyticsService {
         .whereBetween('s.created_at', [bounds.start, bounds.end])
         .select('p.brand_id', 'b.name as brand_name')
         .select(db.raw(`COALESCE(SUM(${allocatedSalesExpr}), 0) as revenue`))
-        .select(db.raw('COALESCE(SUM(si.quantity * si.buying_price_at_sale), 0) as cogs'))
+        .select(db.raw(`COALESCE(SUM(${itemCogsExpr}), 0) as cogs`))
         .select(db.raw('COUNT(DISTINCT s.id) as orders'))
         .groupBy('p.brand_id', 'b.name');
       const brandRefundRows = await db('return_items as ri')
         .join('returns as r', 'ri.return_id', 'r.id')
+        .leftJoin('sale_items as si', 'ri.sale_item_id', 'si.id')
         .leftJoin('products as p', 'ri.product_id', 'p.id')
         .leftJoin('brands as b', 'p.brand_id', 'b.id')
         .modify(qb => applyShopScope(qb, 'r.shop_id'))
         .whereBetween('r.created_at', [bounds.start, bounds.end])
         .select('p.brand_id', 'b.name as brand_name')
         .select(db.raw('COALESCE(SUM(ri.quantity * ri.refund_price), 0) as refunds'))
-        .select(db.raw('COALESCE(SUM(ri.quantity * ri.buying_price_at_sale), 0) as returned_cogs'))
+        .select(db.raw(`COALESCE(SUM(${returnCogsExpr}), 0) as returned_cogs`))
         .groupBy('p.brand_id', 'b.name');
       const brandDamageRows = await db('products as p')
         .leftJoin('brands as b', 'p.brand_id', 'b.id')
@@ -551,6 +613,8 @@ class AnalyticsService {
         brandMap.set(Number(brand.id), {
           brand_id: Number(brand.id),
           brand_name: brand.name,
+          partner_type: brand.partner_type === 'product_based' ? 'product_based' : 'share_based',
+          ownership_percent: Number(brand.ownership_percent || 0),
           revenue: 0,
           refunds: 0,
           cogs: 0,
@@ -565,6 +629,8 @@ class AnalyticsService {
           brandMap.set(id, {
             brand_id: id,
             brand_name: row.brand_name || 'Unassigned',
+            partner_type: 'product_based',
+            ownership_percent: 0,
             revenue: 0,
             refunds: 0,
             cogs: 0,
@@ -600,9 +666,70 @@ class AnalyticsService {
           netCogs,
           grossProfit: grossProfitValue,
           netAfterDamage: grossProfitValue - row.damageLoss,
+          businessProfitShare: 0,
           profitMargin: netRevenue > 0 ? (grossProfitValue / netRevenue) * 100 : 0
         };
       }).sort((a, b) => b.netRevenue - a.netRevenue);
+
+      const performanceByBrandId = new Map(brandPerformance.map((row) => [Number(row.brand_id), row]));
+      const productBasedProfitTotal = brands
+        .filter((brand) => brand.partner_type === 'product_based')
+        .reduce((sum, brand) => {
+          const performance = performanceByBrandId.get(Number(brand.id));
+          return sum + Number(performance ? performance.netAfterDamage : 0);
+        }, 0);
+      const shareBasedProfitPool = shopProfit - productBasedProfitTotal;
+      const shareBasedPartners = brands.filter((brand) => brand.partner_type !== 'product_based');
+      const totalOwnershipPercent = shareBasedPartners.reduce((sum, brand) => sum + Number(brand.ownership_percent || 0), 0);
+      const partnerProfitShares = brands.map((brand) => {
+        const partnerType = brand.partner_type === 'product_based' ? 'product_based' : 'share_based';
+        const ownershipPercent = partnerType === 'share_based' ? Number(brand.ownership_percent || 0) : 0;
+        const performance = performanceByBrandId.get(Number(brand.id));
+        const productProfit = Number(performance ? performance.netAfterDamage : 0);
+        const profitPool = partnerType === 'product_based' ? productProfit : shareBasedProfitPool;
+        const profitShare = partnerType === 'product_based'
+          ? productProfit
+          : shareBasedProfitPool * (ownershipPercent / 100);
+        return {
+          brand_id: Number(brand.id),
+          brand_name: brand.name,
+          partner_type: partnerType,
+          allocation_method: partnerType,
+          is_selected: selectedBrandId ? Number(brand.id) === selectedBrandId : false,
+          ownership_percent: ownershipPercent,
+          profit_pool: profitPool,
+          profit_share: profitShare,
+          product_profit: productProfit
+        };
+      });
+      const partnerShareMap = new Map(partnerProfitShares.map((share) => [Number(share.brand_id), share]));
+      brandPerformance.forEach((row) => {
+        const share = partnerShareMap.get(Number(row.brand_id));
+        row.businessProfitShare = share ? Number(share.profit_share || 0) : 0;
+      });
+      const selectedPartnerShare = selectedBrand
+        ? partnerProfitShares.find((share) => Number(share.brand_id) === selectedBrandId)
+        : null;
+      const selectedBrandPerformance = selectedBrandId ? performanceByBrandId.get(selectedBrandId) : null;
+      const selectedPartnerAudit = selectedPartnerShare
+        ? {
+          ...selectedPartnerShare,
+          business_revenue: businessAdjustedRevenue,
+          business_cogs: businessAdjustedCOGS,
+          business_gross_profit: businessGrossProfit,
+          business_damage_loss: businessDamageLoss,
+          business_orders: businessOrderCount,
+          shop_profit: shopProfit,
+          share_based_profit_pool: shareBasedProfitPool,
+          product_based_profit_total: productBasedProfitTotal,
+          product_brand_revenue: Number(selectedBrandPerformance ? selectedBrandPerformance.netRevenue : 0),
+          product_brand_cogs: Number(selectedBrandPerformance ? selectedBrandPerformance.netCogs : 0),
+          product_brand_gross_profit: Number(selectedBrandPerformance ? selectedBrandPerformance.grossProfit : 0),
+          product_brand_damage_loss: Number(selectedBrandPerformance ? selectedBrandPerformance.damageLoss : 0),
+          product_brand_orders: Number(selectedBrandPerformance ? selectedBrandPerformance.orders : 0)
+        }
+        : null;
+      const totalPartnerProfit = partnerProfitShares.reduce((sum, share) => sum + Number(share.profit_share || 0), 0);
 
       return {
         bounds,
@@ -611,6 +738,14 @@ class AnalyticsService {
         selectedBrandId,
         selectedBrandName: selectedBrand ? selectedBrand.name : '',
         brandPerformance,
+        partnerProfitShares,
+        selectedPartnerAudit,
+        totalOwnershipPercent,
+        partnerProfitPool: shopProfit,
+        shopProfit,
+        shareBasedProfitPool,
+        productBasedProfitTotal,
+        totalPartnerProfit,
         kpi: { 
           totalSales: adjustedRevenue, 
           totalOrders: totalOrderCount,
@@ -633,6 +768,8 @@ class AnalyticsService {
           totalReturns: Number(returnsStats ? (returnsStats.return_count || 0) : 0),
           totalRefunds: Number(returnsStats ? (returnsStats.total_refunds || 0) : 0),
           grossProfit: grossProfit,
+          shopProfit,
+          shopProfitMargin,
           profitMargin: profitMargin,
           stockValue: Number(stockValueResult ? (stockValueResult.val || 0) : 0)
         },
@@ -649,9 +786,9 @@ class AnalyticsService {
         totalPendingDues: Number(kpi.total_pending_dues || 0),
         pendingDuesCount: parseInt(kpi.pending_dues_count || 0),
         totalCOGS: adjustedCOGS,
-        netProfit: grossProfit,
+        netProfit: shopProfit,
         totalSales: totalOrderCount,
-        damageTotal: Number(damageTotalResult ? (damageTotalResult.val || 0) : 0)
+        damageTotal: totalDamageLoss
       };
     } catch (e) {
       console.error("Critical Analytics Service Error:", e);
@@ -661,6 +798,7 @@ class AnalyticsService {
 
   async getGlobalStats() {
     const stats = {};
+    const isSqlite = db.client.config.client !== 'pg';
     const totalShops = await db('shops').count('* as c').first();
     stats.totalShops = totalShops.c;
     
@@ -674,8 +812,8 @@ class AnalyticsService {
     stats.totalRevenue = Number(totalRevenueResult.v || 0);
     
     const revDayRaw = await db('sales')
-      .where('created_at', '>=', db.raw(db.client.config.client === 'sqlite3' ? "date('now', '-7 days')" : "CURRENT_DATE - INTERVAL '7 days'"))
-      .select(db.raw(db.client.config.client === 'sqlite3' ? "date(created_at) as day" : "TO_CHAR(created_at, 'YYYY-MM-DD') as day"))
+      .where('created_at', '>=', db.raw(isSqlite ? "date('now', '-7 days')" : "CURRENT_DATE - INTERVAL '7 days'"))
+      .select(db.raw(isSqlite ? "date(created_at) as day" : "TO_CHAR(created_at, 'YYYY-MM-DD') as day"))
       .sum('total as revenue').groupBy('day').orderBy('day', 'asc');
     stats.revenueByDay = revDayRaw.map(r => ({ ...r, revenue: Number(r.revenue || 0) }));
 

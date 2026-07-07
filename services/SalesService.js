@@ -182,6 +182,7 @@ class SalesService {
     return this.getItemPrintRoute(item, categoryRouteMap, fallbackRoute).station;
   }
 
+
   buildPrintJobItem(item) {
     const parseList = (value, fallback = []) => {
       if (!value) return fallback;
@@ -504,7 +505,8 @@ class SalesService {
             await trx('sale_items').insert({
               sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
               quantity: item.quantity, price_at_sale: priceAtSale, buying_price_at_sale: item.product.buying_price || 0,
-              special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+              special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json,
+              ...this.getCommissionSnapshot(item.product, item.quantity, priceAtSale)
             });
 
             for (const link of activeLinks) {

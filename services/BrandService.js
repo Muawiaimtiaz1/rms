@@ -1,55 +1,170 @@
 const db = require('../db/knex');
 const { z } = require('zod');
 
+function normalizePercent(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(100, num));
+}
+
+function normalizePartnerType(value) {
+  return value === 'product_based' ? 'product_based' : 'share_based';
+}
+
+function sameId(a, b) {
+  return String(a) === String(b);
+}
+
+function extractInsertedId(idObj) {
+  return typeof idObj === 'object' ? idObj.id : idObj;
+}
+
 class BrandService {
-  async listBrands(shopId) {
-    let brands = await db('brands').where({ shop_id: shopId }).orderBy('name', 'asc');
-    
-    // Auto-create 'owner' brand if none exist
-    if (brands.length === 0 && shopId) {
-      const adminUser = await db('users').where({ shop_id: shopId, role: 'admin' }).first();
-      const ownerId = adminUser ? adminUser.id : null;
-      
-      const [idObj] = await db('brands').insert({ 
-        name: 'owner', 
-        user_id: ownerId, 
-        shop_id: shopId 
-      }).returning('id');
-      
-      const newId = typeof idObj === 'object' ? idObj.id : idObj;
-      brands = await db('brands').where({ id: newId });
+  pickOwnerBrand(brands, adminUser = null) {
+    if (!brands.length) return null;
+    if (adminUser) {
+      const adminBrand = brands.find((brand) => sameId(brand.user_id, adminUser.id));
+      if (adminBrand) return adminBrand;
     }
-    return brands;
+    const namedOwner = brands.find((brand) => ['owner', 'admin'].includes(String(brand.name || '').trim().toLowerCase()));
+    return namedOwner || brands[0];
   }
 
-  async createBrand(name, targetShopId, creatorId) {
-    const [idObj] = await db('brands').insert({ 
-      name, 
-      user_id: creatorId, 
-      shop_id: targetShopId 
-    }).returning('id');
-    return typeof idObj === 'object' ? idObj.id : idObj;
+  async ensureOwnerBrand(shopId, trx = db) {
+    let brands = await trx('brands').where({ shop_id: shopId }).orderBy('id', 'asc');
+    const adminUser = await trx('users').where({ shop_id: shopId, role: 'admin' }).orderBy('id', 'asc').first();
+    let owner = this.pickOwnerBrand(brands, adminUser);
+
+    if (!owner && shopId && adminUser) {
+      const [idObj] = await trx('brands').insert({
+        name: 'owner',
+        partner_type: 'share_based',
+        ownership_percent: 100,
+        user_id: adminUser.id,
+        shop_id: shopId
+      }).returning('id');
+
+      const newId = extractInsertedId(idObj);
+      brands = await trx('brands').where({ shop_id: shopId }).orderBy('id', 'asc');
+      owner = brands.find((brand) => sameId(brand.id, newId)) || this.pickOwnerBrand(brands, adminUser);
+    }
+
+    return { owner, brands, adminUser };
   }
 
-  async updateBrand(id, name, targetShopId) {
-    await db('brands').where({ id, shop_id: targetShopId }).update({ name });
+  async rebalanceOwnerShare(shopId, trx = db, { strict = true } = {}) {
+    let { owner, brands } = await this.ensureOwnerBrand(shopId, trx);
+    if (!owner) return null;
+
+    await trx('brands')
+      .where({ id: owner.id, shop_id: shopId })
+      .update({ partner_type: 'share_based' });
+
+    await trx('brands')
+      .where({ shop_id: shopId, partner_type: 'product_based' })
+      .update({ ownership_percent: 0 });
+
+    brands = await trx('brands').where({ shop_id: shopId }).orderBy('id', 'asc');
+
+    const partnerTotal = brands
+      .filter((brand) => !sameId(brand.id, owner.id) && normalizePartnerType(brand.partner_type) === 'share_based')
+      .reduce((sum, brand) => sum + normalizePercent(brand.ownership_percent), 0);
+
+    if (strict && partnerTotal > 100.0001) {
+      throw new Error('Partner business shares cannot be more than 100%. Reduce another partner share first.');
+    }
+
+    const ownerPercent = Math.max(0, 100 - partnerTotal);
+    await trx('brands')
+      .where({ id: owner.id, shop_id: shopId })
+      .update({ ownership_percent: ownerPercent });
+
+    return { ownerId: owner.id, ownerPercent, partnerTotal };
+  }
+
+  async listBrands(shopId) {
+    const ownerShare = shopId ? await this.rebalanceOwnerShare(shopId, db, { strict: false }) : null;
+    const brands = await db('brands').where({ shop_id: shopId }).orderBy('name', 'asc');
+    return brands.map((brand) => ({
+      ...brand,
+      partner_type: normalizePartnerType(brand.partner_type),
+      is_owner_partner: ownerShare ? sameId(brand.id, ownerShare.ownerId) : false
+    }));
+  }
+
+  async createBrand(name, targetShopId, creatorId, ownershipPercent = null, partnerType = 'share_based') {
+    return db.transaction(async (trx) => {
+      await this.ensureOwnerBrand(targetShopId, trx);
+      const normalizedPartnerType = normalizePartnerType(partnerType);
+      const [idObj] = await trx('brands').insert({
+        name,
+        partner_type: normalizedPartnerType,
+        ownership_percent: normalizedPartnerType === 'share_based' ? normalizePercent(ownershipPercent, 0) : 0,
+        user_id: creatorId,
+        shop_id: targetShopId
+      }).returning('id');
+
+      await this.rebalanceOwnerShare(targetShopId, trx, { strict: true });
+      return extractInsertedId(idObj);
+    });
+  }
+
+  async updateBrand(id, name, targetShopId, ownershipPercent = null, partnerType = null) {
+    return db.transaction(async (trx) => {
+      const brand = await trx('brands').where({ id, shop_id: targetShopId }).first();
+      if (!brand) throw new Error('Brand not found');
+
+      const { owner } = await this.ensureOwnerBrand(targetShopId, trx);
+      const isOwnerBrand = owner && sameId(brand.id, owner.id);
+      const updates = { name };
+      const nextPartnerType = isOwnerBrand ? 'share_based' : normalizePartnerType(partnerType || brand.partner_type);
+      updates.partner_type = nextPartnerType;
+
+      if (nextPartnerType === 'product_based') {
+        updates.ownership_percent = 0;
+      } else if (!isOwnerBrand && ownershipPercent !== null && ownershipPercent !== undefined) {
+        updates.ownership_percent = normalizePercent(ownershipPercent);
+      }
+
+      await trx('brands').where({ id, shop_id: targetShopId }).update(updates);
+      await this.rebalanceOwnerShare(targetShopId, trx, { strict: true });
+    });
   }
 
   async deleteBrand(id, targetShopId) {
-    await db('brands').where({ id, shop_id: targetShopId }).delete();
+    return db.transaction(async (trx) => {
+      const brand = await trx('brands').where({ id, shop_id: targetShopId }).first();
+      if (!brand) throw new Error('Brand not found');
+
+      const { owner } = await this.ensureOwnerBrand(targetShopId, trx);
+      if (owner && sameId(brand.id, owner.id)) {
+        throw new Error('Owner/admin partner cannot be deleted. Adjust partner shares instead.');
+      }
+
+      await trx('brands').where({ id, shop_id: targetShopId }).delete();
+      await this.rebalanceOwnerShare(targetShopId, trx, { strict: false });
+    });
   }
 
   async getExpenseShares(shopId, month) {
+    await this.rebalanceOwnerShare(shopId, db, { strict: false });
+    const isSqlite = db.client.config.client !== 'pg';
     const totalExpRes = await db('expenses')
       .where({ shop_id: shopId })
-      .andWhereRaw(db.client.config.client === 'sqlite3' ? "strftime('%Y-%m', date) = ?" : "TO_CHAR(date, 'YYYY-MM') = ?", [month])
+      .andWhereRaw(isSqlite ? "strftime('%Y-%m', date) = ?" : "TO_CHAR(date, 'YYYY-MM') = ?", [month])
       .sum('amount as val')
       .first();
     
     const totalExp = parseFloat(totalExpRes.val || 0);
-    const brands = await db('brands').where({ shop_id: shopId });
+    const brands = await db('brands').where({ shop_id: shopId, partner_type: 'share_based' });
     const brandCount = brands.length;
-    const sharePerBrand = brandCount > 0 ? (totalExp / brandCount) : 0;
+    const totalOwnershipPercent = brands.reduce((sum, brand) => sum + normalizePercent(brand.ownership_percent), 0);
+    const useWeightedSplit = totalOwnershipPercent > 0.0001;
+    const shareForBrand = (brand) => {
+      if (useWeightedSplit) return totalExp * (normalizePercent(brand.ownership_percent) / 100);
+      return brandCount > 0 ? (totalExp / brandCount) : 0;
+    };
 
     const payments = await db('brand_expense_payments as bep')
       .join('brands as b', 'b.id', 'bep.brand_id')
@@ -65,12 +180,13 @@ class BrandService {
     const shares = brands.map(b => ({
       brand_id: b.id,
       brand_name: b.name,
-      total_share: sharePerBrand,
+      ownership_percent: normalizePercent(b.ownership_percent),
+      total_share: shareForBrand(b),
       paid: paymentMap[b.id] || 0,
-      due: sharePerBrand - (paymentMap[b.id] || 0)
+      due: shareForBrand(b) - (paymentMap[b.id] || 0)
     }));
 
-    return { month, totalExpenses: totalExp, brandCount, shares };
+    return { month, totalExpenses: totalExp, brandCount, totalOwnershipPercent, weightedSplit: useWeightedSplit, shares };
   }
 
   async recordPayment(brandId, userId, amount, month, shopId) {
@@ -112,10 +228,11 @@ class BrandService {
   }
 
   async getAllMonthsDues(shopId) {
+    const isSqlite = db.client.config.client !== 'pg';
     // 1. Get all unique months from expenses and payments for this shop
     const expMonths = await db('expenses')
       .where({ shop_id: shopId })
-      .select(db.raw(db.client.config.client === 'sqlite3' ? "strftime('%Y-%m', date) as m" : "TO_CHAR(date, 'YYYY-MM') as m"))
+      .select(db.raw(isSqlite ? "strftime('%Y-%m', date) as m" : "TO_CHAR(date, 'YYYY-MM') as m"))
       .distinct();
     
     const payMonths = await db('brand_expense_payments as bep')

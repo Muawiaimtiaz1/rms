@@ -893,8 +893,10 @@ async function fetchCategories() {
 }
 
 let _activeSettingsTab = localStorage.getItem("active_settings_tab") || "profile";
+let _thirdPartyReportMonth = new Date().toISOString().slice(0, 7);
+let _thirdPartyReportPersonId = "";
 
-const PLATFORM_OWNER_HIDDEN_SETTINGS_TABS = new Set(["receipt", "printer-routing"]);
+const PLATFORM_OWNER_HIDDEN_SETTINGS_TABS = new Set(["receipt", "printer-routing", "third-parties"]);
 
 function getSettingsNavItems() {
   const items = [
@@ -1106,9 +1108,9 @@ async function renderActiveSettingsContent() {
     return await renderPrinterRouting();
   }
 
+
   return "";
 }
-
 
 function toggleAddCategoryMenu() {
   const el = document.getElementById("add-category-menu");
@@ -1547,8 +1549,8 @@ async function renderDashboard(period, brandId, from, to) {
       ? `
     <select id="dash-brand-filter" onchange="renderDashboard(undefined, this.value)"
       class="text-sm border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer transition-all">
-      <option value="">All Brands</option>
-      ${brands.map((b) => `<option value="${b.id}" ${String(_dashBrandId) === String(b.id) ? "selected" : ""}>${b.name}</option>`).join("")}
+      <option value="">All Partners</option>
+      ${brands.map((b) => `<option value="${b.id}" ${String(_dashBrandId) === String(b.id) ? "selected" : ""}>${b.name} (${b.partner_type === "product_based" ? "Product" : "Share"})</option>`).join("")}
     </select>`
       : "";
 
@@ -1558,22 +1560,98 @@ async function renderDashboard(period, brandId, from, to) {
     (_dashBrandId !== "" && _dashBrandId !== null) ||
     (_dashPeriod === "custom" && (_dashFrom !== "" || _dashTo !== ""));
   const brandPerformance = Array.isArray(data.brandPerformance) ? data.brandPerformance : [];
+  const partnerProfitShares = Array.isArray(data.partnerProfitShares) ? data.partnerProfitShares : [];
+  const shopProfitValue = Number(data.shopProfit ?? data.partnerProfitPool ?? data.netProfit ?? 0);
+  const selectedPartnerAudit = data.selectedPartnerAudit || null;
+  const selectedPartnerType = selectedPartnerAudit?.partner_type === "product_based" ? "product_based" : "share_based";
+  const selectedPartnerAuditHtml = selectedPartnerAudit
+    ? `
+      <div class="px-6 py-4 bg-teal-50/70 dark:bg-teal-950/20 border-b border-teal-100 dark:border-teal-900/40">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] font-black uppercase tracking-widest text-teal-600 dark:text-teal-400">Selected Partner Audit</div>
+            <div class="text-sm font-black text-slate-900 dark:text-white mt-0.5">${selectedPartnerAudit.brand_name}</div>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-right">
+            <div>
+              <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">Type</div>
+              <div class="text-xs font-black text-slate-800 dark:text-slate-100">${selectedPartnerType === "product_based" ? "Product Based" : "Share Based"}</div>
+            </div>
+            <div>
+              <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">${selectedPartnerType === "product_based" ? "Product Profit" : "Share Pool"}</div>
+              <div class="text-xs font-black text-slate-800 dark:text-slate-100">Rs. ${Number(selectedPartnerAudit.profit_pool || 0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">Partner Share</div>
+              <div class="text-xs font-black ${Number(selectedPartnerAudit.profit_share || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}">Rs. ${Number(selectedPartnerAudit.profit_share || 0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div class="text-[9px] uppercase font-black tracking-widest text-slate-400">${selectedPartnerType === "product_based" ? "Product Orders" : "Business Orders"}</div>
+              <div class="text-xs font-black text-slate-800 dark:text-slate-100">${Number(selectedPartnerType === "product_based" ? (selectedPartnerAudit.product_brand_orders || 0) : (selectedPartnerAudit.business_orders || 0)).toLocaleString()}</div>
+            </div>
+          </div>
+        </div>
+      </div>`
+    : "";
+  const partnerSplitHtml = partnerProfitShares.length
+    ? `
+    <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300 overflow-hidden mb-8">
+      <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a5 5 0 00-10 0v2m-2 0h14l-1 11H6L5 9z"/></svg>
+          <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Whole Business Partner Split</h3>
+          ${statInfoIcon("Shop profit allocated across partners. Product-based partners use their assigned product profit; share-based partners split the remaining shop profit by percentage. Partner profits add up to shop profit.")}
+        </div>
+        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">Rs. ${Number(data.totalPartnerProfit ?? shopProfitValue).toLocaleString()} allocated</span>
+      </div>
+      ${selectedPartnerAuditHtml}
+      <div class="overflow-x-auto">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
+              <th class="px-6 py-3">Partner</th>
+              <th class="px-6 py-3">Type</th>
+              <th class="px-6 py-3 text-right">Ownership</th>
+              <th class="px-6 py-3 text-right">Profit Basis</th>
+              <th class="px-6 py-3 text-right">Partner Profit</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+            ${partnerProfitShares.map((share) => {
+              const type = share.partner_type === "product_based" ? "product_based" : "share_based";
+              return `
+              <tr class="${share.is_selected ? "bg-teal-50/60 dark:bg-teal-950/20" : ""}">
+                <td class="px-6 py-3 text-sm font-black text-slate-800 dark:text-slate-100">
+                  ${share.brand_name}
+                  ${share.is_selected ? `<span class="ml-2 align-middle text-[9px] font-black uppercase tracking-widest text-teal-600 dark:text-teal-400">Selected</span>` : ""}
+                </td>
+                <td class="px-6 py-3 text-xs font-bold text-slate-600 dark:text-slate-300">${type === "product_based" ? "Product Based" : "Share Based"}</td>
+                <td class="px-6 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">${type === "product_based" ? "Products" : `${Number(share.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}%`}</td>
+                <td class="px-6 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">Rs. ${Number(share.profit_pool || 0).toLocaleString()}</td>
+                <td class="px-6 py-3 text-right text-xs font-black ${Number(share.profit_share || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}">Rs. ${Number(share.profit_share || 0).toLocaleString()}</td>
+              </tr>
+            `}).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`
+    : "";
   const brandProfitHtml = brandPerformance.length
     ? `
     <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 transition-colors duration-300 overflow-hidden mb-8">
       <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2">
           <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V7m0 10v-1m9-4a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Partner / Brand Profit & Loss</h3>
-          ${statInfoIcon("Per-brand net revenue, COGS, gross profit, stock damage/loss, and margin for the selected dashboard period.")}
+          <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Product Brand Sales & Cost</h3>
+          ${statInfoIcon("Product-assignment breakdown by brand. Partner profit is calculated from shop profit in the partner split table.")}
         </div>
-        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${data.selectedBrandName || "All Brands"}</span>
+        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${data.selectedBrandName || "All Partners"}</span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-left">
           <thead>
             <tr class="bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
-              <th class="px-6 py-3">Partner / Brand</th>
+              <th class="px-6 py-3">Product Brand</th>
               <th class="px-6 py-3 text-right">Net Revenue</th>
               <th class="px-6 py-3 text-right">COGS</th>
               <th class="px-6 py-3 text-right">Gross Profit</th>
@@ -1622,7 +1700,7 @@ async function renderDashboard(period, brandId, from, to) {
         <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
         </svg>
-        <span class="text-sm font-semibold text-gray-700 dark:text-gray-200">Filter Sales</span>
+        <span class="text-sm font-semibold text-gray-700 dark:text-gray-200">Dashboard View</span>
         ${isFiltered ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800">ACTIVE</span>' : ""}
       </div>
       <div class="flex flex-wrap items-center gap-3">
@@ -1633,7 +1711,7 @@ async function renderDashboard(period, brandId, from, to) {
         </div>
         ${brandSelect
       ? `<div class="flex items-center gap-2">
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Partner / Brand</span>
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Profit Partner</span>
           ${brandSelect}
         </div>`
       : ""
@@ -1647,11 +1725,12 @@ async function renderDashboard(period, brandId, from, to) {
       ${statCard("Total Revenue", "Rs. " + Number(data.totalRevenue).toLocaleString(), `${data.totalSales} transaction${data.totalSales !== 1 ? "s" : ""}`, "blue", "Completed orders only. Revenue = bill subtotal - discount + tax - refunds. Includes both received money and pending dues.")}
       ${statCard("Pending Dues", "Rs. " + Number(data.totalPendingDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), `${data.pendingDuesCount || 0} bill${Number(data.pendingDuesCount || 0) !== 1 ? "s" : ""} pending`, "amber", "Completed bills where final total minus amount received is still greater than zero. Shows only the unpaid balance.")}
       ${statCard("Cost of Goods Sold", "Rs. " + Number(data.totalCOGS).toLocaleString(), "Sum of buying prices", "purple", "Buying cost of sold items from completed orders, reduced by the buying cost of returned items.")}
-      ${statCard("Gross Profit", "Rs. " + Number(data.netProfit).toLocaleString(), "Revenue − COGS", "emerald", "Gross Profit = revenue - COGS. Revenue = bill subtotal - discount + tax - refunds.")}
+      ${statCard("Shop Profit", "Rs. " + shopProfitValue.toLocaleString(), "Sum of partner shares", "emerald", "Shop Profit = revenue - COGS - damage/loss. This equals the sum of partner shares.")}
       ${statCard("Damage Value", "Rs. " + Number(data.damageTotal || 0).toLocaleString(), "Inventory & Returns", "rose", "Current product damage/loss value tracked in inventory. This is separate from normal sales COGS.")}
       ${statCard("Products", data.totalProducts, "in catalog", "amber", "Count of active catalog products for this shop, excluding deleted products.")}
     </div>
 
+    ${partnerSplitHtml}
     ${brandProfitHtml}
 
     <!-- Tables -->
@@ -1781,6 +1860,10 @@ async function renderBrands(shopId = null) {
   const cardsHtml = brands
     .map((b) => {
       const { init, color } = getAvatar(b.name);
+      const ownershipPercent = Number(b.ownership_percent || 0);
+      const partnerType = b.partner_type === "product_based" ? "product_based" : "share_based";
+      const isOwnerPartner = Boolean(b.is_owner_partner);
+      const typeLabel = isOwnerPartner ? "Owner/Admin" : partnerType === "product_based" ? "Product Based" : "Share Based";
       return `
       <div class="glass rounded-2xl p-6 border border-gray-200 dark:border-gray-800 hover:shadow-xl hover:-translate-y-1 transition-all group bg-white dark:bg-gray-900">
          <div class="flex flex-col items-center text-center">
@@ -1788,7 +1871,11 @@ async function renderBrands(shopId = null) {
               ${init}
             </div>
             <h4 class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-1">${b.name}</h4>
-            <p class="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold">Verified Brand</p>
+            <p class="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold">${typeLabel}</p>
+            ${partnerType === "share_based"
+              ? `<p class="mt-3 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-widest">${ownershipPercent.toFixed(2).replace(/\.00$/, "")}% ${isOwnerPartner ? "Auto Share" : "Business Share"}</p>`
+              : `<p class="mt-3 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase tracking-widest">Product Profit</p>`
+            }
          </div>
          <div class="mt-8 pt-5 border-t border-gray-50 dark:border-gray-800 flex items-center justify-between">
             <div class="flex flex-col">
@@ -1798,12 +1885,14 @@ async function renderBrands(shopId = null) {
             ${currentUser.role === "superadmin"
           ? `
             <div class="flex gap-2">
-               <button onclick="openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}')" class="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-transparent hover:bg-indigo-100 transition-all">
+               <button onclick="openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}', ${ownershipPercent}, ${isOwnerPartner ? "true" : "false"}, '${partnerType}')" class="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-transparent hover:bg-indigo-100 transition-all">
                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                </button>
+               ${isOwnerPartner ? "" : `
                <button onclick="deleteBrand(${b.id})" class="p-2 rounded-xl bg-red-50 dark:bg-red-900/30 text-rose-600 dark:text-rose-400 border border-transparent hover:bg-red-100 transition-all">
                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                </button>
+               `}
             </div>
             `
           : ""
@@ -1844,6 +1933,17 @@ async function renderBrands(shopId = null) {
   `;
 }
 
+function toggleBrandPartnerTypeFields() {
+  const type = $c("brand-partner-type")?.value || "share_based";
+  const shareWrap = $c("brand-share-wrap");
+  const shareInput = $c("brand-ownership-percent");
+  if (shareWrap) shareWrap.classList.toggle("hidden", type === "product_based");
+  if (shareInput) {
+    shareInput.disabled = type === "product_based" || shareInput.dataset.ownerPartner === "1";
+    if (type === "product_based") shareInput.value = "0";
+  }
+}
+
 function openAddBrand() {
   openModal(
     "Add Brand",
@@ -1851,29 +1951,55 @@ function openAddBrand() {
     <div class="space-y-4">
       <div><label class="block text-xs text-slate-400 mb-1.5">Brand Name</label>
         <input id="brand-name" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="e.g. Nike" /></div>
+      <div><label class="block text-xs text-slate-400 mb-1.5">Partner Type</label>
+        <select id="brand-partner-type" onchange="toggleBrandPartnerTypeFields()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
+          <option value="share_based">Share Based</option>
+          <option value="product_based">Product Based</option>
+        </select>
+        <p class="mt-1 text-[10px] text-slate-500">Share based splits shop profit by percentage. Product based uses products assigned to this partner.</p></div>
+      <div id="brand-share-wrap"><label class="block text-xs text-slate-400 mb-1.5">Business Share (%)</label>
+        <input id="brand-ownership-percent" type="number" min="0" max="100" step="0.01" value="0" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="e.g. 50" />
+        <p class="mt-1 text-[10px] text-slate-500">Owner/admin share is recalculated as the remaining percentage.</p></div>
       <button onclick="saveBrand()" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Save Brand</button>
     </div>`,
   );
+  toggleBrandPartnerTypeFields();
   setTimeout(() => $c("brand-name").focus(), 50);
 }
 
-function openEditBrand(id, name) {
+function openEditBrand(id, name, ownershipPercent = 0, isOwnerPartner = false, partnerType = "share_based") {
+  const normalizedPartnerType = isOwnerPartner ? "share_based" : (partnerType === "product_based" ? "product_based" : "share_based");
   openModal(
     "Edit Brand",
     `
     <div class="space-y-4">
       <div><label class="block text-xs text-slate-400 mb-1.5">Brand Name</label>
         <input id="brand-name" value="${name}" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" /></div>
+      <div><label class="block text-xs text-slate-400 mb-1.5">Partner Type</label>
+        <select id="brand-partner-type" onchange="toggleBrandPartnerTypeFields()" ${isOwnerPartner ? "disabled" : ""} class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+          <option value="share_based" ${normalizedPartnerType === "share_based" ? "selected" : ""}>Share Based</option>
+          <option value="product_based" ${normalizedPartnerType === "product_based" ? "selected" : ""}>Product Based</option>
+        </select>
+        <p class="mt-1 text-[10px] text-slate-500">${isOwnerPartner ? "Owner/admin is always share based." : "Share based splits shop profit. Product based uses assigned products."}</p></div>
+      <div id="brand-share-wrap" class="${normalizedPartnerType === "product_based" ? "hidden" : ""}"><label class="block text-xs text-slate-400 mb-1.5">Business Share (%)</label>
+        <input id="brand-ownership-percent" data-owner-partner="${isOwnerPartner ? "1" : "0"}" type="number" min="0" max="100" step="0.01" value="${Number(ownershipPercent || 0)}" ${isOwnerPartner || normalizedPartnerType === "product_based" ? "disabled" : ""} class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed" />
+        <p class="mt-1 text-[10px] text-slate-500">${isOwnerPartner ? "Owner/admin share is calculated from the remaining share-based partner percentage." : "Owner/admin share is recalculated as the remaining percentage."}</p></div>
       <button onclick="saveBrand(${id})" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update Brand</button>
     </div>`,
   );
+  toggleBrandPartnerTypeFields();
 }
 
 async function saveBrand(id) {
   const name = $c("brand-name").value.trim();
   if (!name) return toast("Brand name required", "error");
+  const partnerType = $c("brand-partner-type")?.value === "product_based" ? "product_based" : "share_based";
+  const ownershipPercent = partnerType === "product_based" ? 0 : parseFloat($c("brand-ownership-percent")?.value);
+  if (partnerType === "share_based" && (!Number.isFinite(ownershipPercent) || ownershipPercent < 0 || ownershipPercent > 100)) {
+    return toast("Business share must be between 0 and 100", "error");
+  }
 
-  const payload = { name };
+  const payload = { name, partner_type: partnerType, ownership_percent: ownershipPercent };
   if (managedShopId) payload.shopId = managedShopId;
 
   if (id) {
@@ -1906,38 +2032,6 @@ async function deleteBrand(id) {
   } else {
     renderBrands(managedShopId);
   }
-}
-
-function payBrandExpense(brandId, month, dueAmount) {
-  openModal(
-    "Submit Brand Payment",
-    `
-    <div class="space-y-4">
-      <p class="text-sm text-slate-400">Total remaining due for this month: <strong>Rs. ${Number(dueAmount).toLocaleString()}</strong></p>
-      <div><label class="block text-xs text-slate-400 mb-1.5">Amount Paid (Rs.)</label>
-        <input id="brand-exp-amount" type="number" min="1" max="${dueAmount}" value="${dueAmount}" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all font-bold text-lg" /></div>
-      <button onclick="submitBrandExpensePayment(${brandId}, '${month}')" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-all shadow-lg hover:shadow-emerald-500/25">Confirm Payment</button>
-    </div>
-  `,
-  );
-}
-
-async function submitBrandExpensePayment(brandId, month) {
-  const amountInput = document.getElementById("brand-exp-amount");
-  if (!amountInput) return;
-  const amount = parseFloat(amountInput.value) || 0;
-  if (amount <= 0) return toast("Amount must be > 0", "error");
-
-  const r = await api("/api/brands/expense-payments", "POST", {
-    brand_id: brandId,
-    amount,
-    month,
-  });
-  if (r.error) return toast(r.error, "error");
-
-  toast("Payment recorded successfully!");
-  closeModal();
-  renderBrands(); // Refresh list to update UI
 }
 
 // ─── Products ────────────────────────────────────────────────────────
@@ -2037,6 +2131,7 @@ async function renderProducts(onlyLowStock = false) {
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Batches (Cost)</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Fine Stock</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Selling Price</th>
+          <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase">Damaged</th>
           <th class="px-5 py-3 text-xs font-medium text-slate-500 uppercase text-right">Actions</th>
         </tr></thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800" id="inventory-table-body">
@@ -2113,7 +2208,7 @@ async function renderProducts(onlyLowStock = false) {
             </tr>`,
         )
         .join("")
-      : `<tr><td colspan="8" class="px-6 py-12 text-center text-slate-500">No products. Add brands first, then products.</td></tr>`
+      : `<tr><td colspan="9" class="px-6 py-12 text-center text-slate-500">No products. Add brands first, then products.</td></tr>`
     }
         </tbody>
       </table>
@@ -2167,11 +2262,12 @@ function resetInventoryFilters() {
 }
 
 
+
 function productFormHtml(p = {}, brands = []) {
   const brandOptions = brands
     .map(
       (b) =>
-        `<option value="${b.id}" ${p.brand_id == b.id ? "selected" : ""}>${b.name}</option>`,
+        `<option value="${b.id}" ${p.brand_id == b.id ? "selected" : ""}>${b.name} (${b.partner_type === "product_based" ? "Product" : "Share"})</option>`,
     )
     .join("");
 
@@ -2260,6 +2356,7 @@ function productFormHtml(p = {}, brands = []) {
         <div id="pricing-min-stock-container" class="col-span-2 sm:col-span-1">
            ${numInput("pf-min-stock", "Minimum Stock Level", p.min_stock_level ?? "", "Alert threshold")}
         </div>
+
         ${compHtml}
 
         <div class="col-span-2 border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
@@ -6389,13 +6486,14 @@ async function renderExpenses() {
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-100 dark:border-gray-800">
           ${statCard("Total Month Expenses", "Rs. " + Number(sharesRes.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), "Operating costs", "rose", "All expense records dated inside the selected month, before brand payment settlement.")}
-          ${statCard("Split Per Brand", "Rs. " + (sharesRes.brandCount > 0 ? Number(sharesRes.totalExpenses / sharesRes.brandCount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"), `${sharesRes.brandCount} brands total`, "blue", "Selected month's total expenses divided evenly by the number of brands included in the split.")}
+          ${statCard("Ownership Split", `${Number(sharesRes.totalOwnershipPercent || 0).toFixed(2).replace(/\.00$/, "")}% configured`, `${sharesRes.brandCount} share partners`, "blue", "Selected month's expenses split by share-based partner percentages. Product-based partners are audited through product profit.")}
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-500 bg-gray-50/30 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-800">
                 <th class="px-6 py-3 font-semibold text-[10px] uppercase">Brand</th>
+                <th class="px-6 py-3 font-semibold text-[10px] uppercase text-right">Share %</th>
                 <th class="px-6 py-3 font-semibold text-[10px] uppercase text-right">Target Share</th>
                 <th class="px-6 py-3 font-semibold text-[10px] uppercase text-right">Paid</th>
                 <th class="px-6 py-3 font-semibold text-[10px] uppercase text-right">Due</th>
@@ -6407,6 +6505,7 @@ async function renderExpenses() {
           (s) => `
                 <tr class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                   <td class="px-6 py-4 font-medium">${s.brand_name}</td>
+                  <td class="px-6 py-4 text-right text-gray-500">${Number(s.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}%</td>
                   <td class="px-6 py-4 text-right text-gray-500">Rs. ${parseFloat(s.total_share).toFixed(2)}</td>
                   <td class="px-6 py-4 text-right">
                     <div class="flex items-center justify-end gap-2 group">

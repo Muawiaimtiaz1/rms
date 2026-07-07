@@ -18,14 +18,14 @@ router.get('/', requireAuth, async (req, res) => {
 // POST /api/brands
 router.post('/', requireAuth, async (req, res) => {
     if (req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Only Master Admins can create brands' });
-    const id = await brandService.createBrand(req.body.name, req.body.shopId, req.session.user.id);
+    const id = await brandService.createBrand(req.body.name, req.body.shopId, req.session.user.id, req.body.ownership_percent, req.body.partner_type);
     res.json({ ok: true, id });
 });
 
 // PUT /api/brands/:id
 router.put('/:id', requireAuth, async (req, res) => {
     if (req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Only Master Admins can edit brands' });
-    await brandService.updateBrand(req.params.id, req.body.name, req.body.shopId);
+    await brandService.updateBrand(req.params.id, req.body.name, req.body.shopId, req.body.ownership_percent, req.body.partner_type);
     res.json({ ok: true });
 });
 
@@ -80,8 +80,9 @@ async function generateGenericPDF(res, title, data, headers, month, user, shop) 
 router.get('/pdf/monthly-report', requireAuth, async (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
     const shopId = req.session.user.shop_id;
+    const isSqlite = db.client.config.client !== 'pg';
     
-    const expenses = await db('expenses').where({ shop_id: shopId }).andWhereRaw(db.client.config.client === 'sqlite3' ? "strftime('%Y-%m', date) = ?" : "TO_CHAR(date, 'YYYY-MM') = ?", [month]).orderBy('date', 'asc');
+    const expenses = await db('expenses').where({ shop_id: shopId }).andWhereRaw(isSqlite ? "strftime('%Y-%m', date) = ?" : "TO_CHAR(date, 'YYYY-MM') = ?", [month]).orderBy('date', 'asc');
     const payments = await brandService.listPayments(shopId, month);
     const shop = await db('shops').where({ id: shopId }).first();
     const user = req.session.user;

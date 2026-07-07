@@ -263,10 +263,10 @@ function renderAnalyticsBrandFilter() {
 
   container.innerHTML = `
     <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/40 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800">
-      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Partner / Brand:</span>
+      <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Profit Partner:</span>
       <select id="analytics-brand-select" onchange="handleAnalyticsBrandChange()" class="bg-transparent text-xs font-bold text-teal-600 dark:text-teal-400 outline-none cursor-pointer max-w-[170px]">
-        <option value="">All Brands</option>
-        ${brands.map((brand) => `<option value="${brand.id}" ${String(analyticsBrandId) === String(brand.id) ? "selected" : ""}>${brand.name}</option>`).join("")}
+        <option value="">All Partners</option>
+        ${brands.map((brand) => `<option value="${brand.id}" ${String(analyticsBrandId) === String(brand.id) ? "selected" : ""}>${brand.name} (${brand.partner_type === "product_based" ? "Product" : "Share"})</option>`).join("")}
       </select>
     </div>
   `;
@@ -288,7 +288,7 @@ function renderActiveAnalyticsTab() {
     products: { title: "Product Analytics", subtitle: "Top selling items, bundle product performance, and category summaries" },
     customers: { title: "Customer Analytics", subtitle: "Track customer lifetime value, active balances, and ledger summaries" },
     inventory: { title: "Inventory Analytics", subtitle: "Monitor stock asset valuation, alert tiers, and low stock metrics" },
-    profit: { title: "Profit Analytics", subtitle: "Evaluate Gross Profit, Cost of Goods Sold (COGS), and net margins" },
+    profit: { title: "Profit Analytics", subtitle: "Evaluate shop profit, Cost of Goods Sold (COGS), and partner splits" },
     staff: { title: "Staff Analytics", subtitle: "Top order counts and sales volume contributions by cashier/waiter" },
     channels: { title: "Channel Analytics", subtitle: "Analyze revenue streams from In-Store POS, online apps, and delivery" },
     reports: { title: "Reports", subtitle: "Download ready-made monthly performance summaries" },

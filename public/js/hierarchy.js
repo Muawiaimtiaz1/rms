@@ -1043,7 +1043,11 @@ async function renderShopManagement(shopId) {
                 <button onclick="managedShopId=${shop.id}; openAddBrand()" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md">+ Add Brand</button>
              </div>
              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                ${shopBrands.map(b => `
+                ${shopBrands.map(b => {
+                  const isOwnerPartner = Boolean(b.is_owner_partner);
+                  const partnerType = b.partner_type === "product_based" ? "product_based" : "share_based";
+                  const typeLabel = isOwnerPartner ? "Owner/Admin" : partnerType === "product_based" ? "Product Based" : "Share Based";
+                  return `
                   <div class="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col gap-4 relative group hover:border-purple-300 dark:hover:border-purple-500 transition-colors">
                     <div class="flex items-center gap-3">
                        <div class="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-xl shadow-inner border border-purple-100 dark:border-purple-800">
@@ -1051,15 +1055,16 @@ async function renderShopManagement(shopId) {
                        </div>
                        <div>
                          <h5 class="font-bold text-slate-900 dark:text-white">${b.name}</h5>
-                         <span class="text-[9px] uppercase font-black tracking-widest text-purple-600 border border-purple-200 dark:border-purple-800/50 px-1 rounded inline-block mt-1">Brand</span>
+                         <span class="text-[9px] uppercase font-black tracking-widest text-purple-600 border border-purple-200 dark:border-purple-800/50 px-1 rounded inline-block mt-1">${typeLabel}</span>
+                         <div class="text-[10px] ${partnerType === "share_based" ? "text-emerald-600 dark:text-emerald-400" : "text-blue-600 dark:text-blue-400"} font-black uppercase tracking-widest mt-1">${partnerType === "share_based" ? `${Number(b.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}% ${isOwnerPartner ? "Auto Share" : "Share"}` : "Product Profit"}</div>
                        </div>
                     </div>
                     <div class="flex items-center gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60">
-                       <button onclick="managedShopId=${b.shop_id}; openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}')" class="flex-1 py-2 text-xs font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">Edit</button>
-                       <button onclick="deleteBrand(${b.id})" class="flex-1 py-2 text-xs font-bold rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors">Delete</button>
+                       <button onclick="managedShopId=${b.shop_id}; openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}', ${Number(b.ownership_percent || 0)}, ${isOwnerPartner ? "true" : "false"}, '${partnerType}')" class="flex-1 py-2 text-xs font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">Edit</button>
+                       ${isOwnerPartner ? "" : `<button onclick="deleteBrand(${b.id})" class="flex-1 py-2 text-xs font-bold rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors">Delete</button>`}
                     </div>
                   </div>
-                `).join('')}
+                `}).join('')}
                 ${shopBrands.length === 0 ? `<div class="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800"><p class="text-slate-500 text-sm font-medium italic">No brands found.</p></div>` : ''}
              </div>
           </div>

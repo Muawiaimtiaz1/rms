@@ -8,7 +8,7 @@ const productSchema = z.object({
   category: z.string().min(1, "Category is required"),
   description: z.string().nullable().optional(),
   brand_id: z.number().int().positive("Brand is required"),
-  buying_price: z.number().nonnegative(),
+  buying_price: z.number().nonnegative().optional().default(0),
   selling_price: z.number().positive("Selling price must be greater than 0"),
   stock: z.number().int().default(0),
   min_stock_level: z.number().int().default(0),
@@ -16,6 +16,7 @@ const productSchema = z.object({
   components: z.array(z.any()).nullable().optional(),
   ingredients: z.array(z.any()).nullable().optional(),
 });
+
 
 class ProductService {
   /**
@@ -177,6 +178,7 @@ class ProductService {
 
   async setDeleted(productId, shopId) {
     return await db.transaction(async (trx) => {
+      const { components, ingredients, ...productData } = validatedData;
       const affected = await trx('products')
         .where({ id: productId, shop_id: shopId, is_deleted: 0 })
         .update({ is_deleted: 1 });
@@ -196,7 +198,6 @@ class ProductService {
     
     return await db.transaction(async (trx) => {
       const { components, ingredients, ...productData } = validatedData;
-      
       const product = await trx('products').where({ id: productId, shop_id: shopId }).first();
       if (!product) throw new Error('Product not found');
 
@@ -260,11 +261,13 @@ class ProductService {
     });
   }
 
+
   /**
    * Adjust stock manually with FIFO batch handling.
    */
   async adjustStock(productId, shopId, { delta, buying_price }) {
     return await db.transaction(async (trx) => {
+      const { components, ingredients, ...productData } = validatedData;
       const product = await trx('products').where({ id: productId, shop_id: shopId }).first();
       if (!product) throw new Error('Product not found');
 
@@ -299,6 +302,7 @@ class ProductService {
    */
   async recordLoss(productId, shopId, { damage_count, manual_loss_amount, batch_id }) {
     return await db.transaction(async (trx) => {
+      const { components, ingredients, ...productData } = validatedData;
       const product = await trx('products').where({ id: productId, shop_id: shopId }).first();
       if (!product) throw new Error('Product not found');
 
@@ -345,6 +349,7 @@ class ProductService {
    */
   async recordRecovery(productId, shopId, { recovery_count, recovery_amount, batch_id, is_restocking }) {
     return await db.transaction(async (trx) => {
+      const { components, ingredients, ...productData } = validatedData;
       const product = await trx('products').where({ id: productId, shop_id: shopId }).first();
       if (!product) throw new Error('Product not found');
 

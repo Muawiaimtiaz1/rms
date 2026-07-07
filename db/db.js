@@ -1228,6 +1228,107 @@ try {
 }
 
 // -----------------------------------------------------------------------------
+// PARTNER / THIRD-PARTY COMMISSION MIGRATION
+// Adds ownership percentages for whole-business partners and commission-owner
+// tracking for consignment/third-party products.
+// -----------------------------------------------------------------------------
+try {
+  console.log("🤝 Ensuring partner and commission schema exists...");
+
+  const ensureColumn = (table, column, definition, afterAddSql = null) => {
+    const exists = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+      .get(table);
+    if (!exists) return false;
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.some((col) => col.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+      if (afterAddSql) db.exec(afterAddSql);
+      console.log(`✅ ${table}.${column} column added.`);
+      return true;
+    }
+    return false;
+  };
+
+  ensureColumn(
+    "brands",
+    "ownership_percent",
+    "REAL NOT NULL DEFAULT 0",
+    `
+      UPDATE brands
+      SET ownership_percent = (
+        100.0 / NULLIF((SELECT COUNT(*) FROM brands b2 WHERE b2.shop_id = brands.shop_id), 0)
+      )
+      WHERE COALESCE(ownership_percent, 0) = 0;
+    `
+  );
+
+  ensureColumn(
+    "brands",
+    "partner_type",
+    "TEXT NOT NULL DEFAULT 'share_based'",
+    `
+      UPDATE brands
+      SET partner_type = CASE
+        WHEN LOWER(COALESCE(name, '')) IN ('owner', 'admin') THEN 'share_based'
+        WHEN COALESCE(ownership_percent, 0) > 0 THEN 'share_based'
+        ELSE 'product_based'
+      END
+      WHERE partner_type IS NULL OR partner_type = '';
+
+      UPDATE brands
+      SET ownership_percent = 0
+      WHERE partner_type = 'product_based';
+    `
+  );
+
+  db.exec(`
+    UPDATE brands
+    SET partner_type = 'share_based'
+    WHERE partner_type IS NULL
+       OR partner_type = ''
+       OR partner_type NOT IN ('share_based', 'product_based');
+
+    UPDATE brands
+    SET partner_type = 'share_based'
+    WHERE LOWER(COALESCE(name, '')) IN ('owner', 'admin');
+
+    UPDATE brands
+    SET ownership_percent = 0
+    WHERE partner_type = 'product_based';
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS third_party_persons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_third_party_persons_shop_id ON third_party_persons(shop_id);
+  `);
+
+  ensureColumn("products", "is_commission_based", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("products", "third_party_person_id", "INTEGER REFERENCES third_party_persons(id) ON DELETE SET NULL");
+  ensureColumn("products", "commission_percentage", "REAL NOT NULL DEFAULT 0");
+  ensureColumn("sale_items", "third_party_person_id", "INTEGER REFERENCES third_party_persons(id) ON DELETE SET NULL");
+  ensureColumn("sale_items", "commission_percentage_at_sale", "REAL NOT NULL DEFAULT 0");
+  ensureColumn("sale_items", "commission_amount_at_sale", "REAL NOT NULL DEFAULT 0");
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sale_items_third_party_person_id ON sale_items(third_party_person_id);
+  `);
+} catch (e) {
+  console.error("⚠️ Failed to ensure partner / commission schema:", e.message);
+}
+
+// -----------------------------------------------------------------------------
 // PERFORMANCE MIGRATION: Ensure all necessary secondary indices exist.
 // Running CREATE INDEX IF NOT EXISTS is very fast if they already exist,
 // and drastically speeds up the application in production environments.
@@ -1242,6 +1343,7 @@ try {
     CREATE INDEX IF NOT EXISTS idx_expenses_shop_id ON expenses(shop_id);
     CREATE INDEX IF NOT EXISTS idx_customers_shop_id ON customers(shop_id);
     CREATE INDEX IF NOT EXISTS idx_brands_shop_id ON brands(shop_id);
+    CREATE INDEX IF NOT EXISTS idx_third_party_persons_shop_id ON third_party_persons(shop_id);
     CREATE INDEX IF NOT EXISTS idx_tables_shop_id ON tables(shop_id);
     CREATE INDEX IF NOT EXISTS idx_returns_shop_id ON returns(shop_id);
     CREATE INDEX IF NOT EXISTS idx_product_batches_shop_id ON product_batches(shop_id);
@@ -1257,6 +1359,7 @@ try {
     CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
     CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id);
     CREATE INDEX IF NOT EXISTS idx_sale_items_batch_id ON sale_items(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_third_party_person_id ON sale_items(third_party_person_id);
     CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id);
     CREATE INDEX IF NOT EXISTS idx_product_batches_product_id ON product_batches(product_id);
     CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer_id ON customer_ledger(customer_id);

@@ -4,6 +4,7 @@ const { requireSuperAdmin } = require('../middleware/auth');
 const os = require('os');
 const bcrypt = require('bcryptjs');
 const platformPaymentService = require('../services/PlatformPaymentService');
+const brandService = require('../services/BrandService');
 const { sendError } = require('../utils/error-response');
 const router = express.Router();
 
@@ -277,7 +278,6 @@ router.get('/hierarchy-data', requireSuperAdmin, async (req, res) => {
                 ORDER BY s.name ASC
             `)).rows;
             users = (await pg.query("SELECT id, shop_id, name, email, phone, username, role, status, allowed_panels FROM users ORDER BY role DESC, name ASC")).rows;
-            brands = (await pg.query("SELECT id, shop_id, name, created_at FROM brands ORDER BY name ASC")).rows;
         } else {
             const db = getSqlite();
             shops = db.prepare(`
@@ -288,8 +288,42 @@ router.get('/hierarchy-data', requireSuperAdmin, async (req, res) => {
                 ORDER BY s.name ASC
             `).all();
             users = db.prepare("SELECT id, shop_id, name, email, phone, username, role, status, allowed_panels FROM users ORDER BY role DESC, name ASC").all();
-            brands = db.prepare("SELECT id, shop_id, name, created_at FROM brands ORDER BY name ASC").all();
         }
+
+
+
+        if (isPostgres) {
+            const pg = getPostgres();
+            brands = (await pg.query("SELECT id, shop_id, name, user_id, partner_type, ownership_percent, created_at FROM brands ORDER BY name ASC")).rows;
+        } else {
+            const db = getSqlite();
+            brands = db.prepare("SELECT id, shop_id, name, user_id, partner_type, ownership_percent, created_at FROM brands ORDER BY name ASC").all();
+        }
+
+        const adminsByShop = new Map();
+        users.filter(u => u.shop_id && u.role === 'admin').forEach((admin) => {
+            if (!adminsByShop.has(String(admin.shop_id))) adminsByShop.set(String(admin.shop_id), admin);
+        });
+        const brandsByShop = new Map();
+        brands.forEach((brand) => {
+            const key = String(brand.shop_id);
+            if (!brandsByShop.has(key)) brandsByShop.set(key, []);
+            brandsByShop.get(key).push(brand);
+        });
+        const ownerBrandIds = new Set();
+        for (const [shopId, shopBrands] of brandsByShop.entries()) {
+            const admin = adminsByShop.get(shopId);
+            const owner = (admin && shopBrands.find((brand) => String(brand.user_id) === String(admin.id)))
+                || shopBrands.find((brand) => ['owner', 'admin'].includes(String(brand.name || '').trim().toLowerCase()))
+                || shopBrands[0];
+            if (owner) ownerBrandIds.add(String(owner.id));
+        }
+        brands = brands.map((brand) => ({
+            ...brand,
+            partner_type: brand.partner_type === 'product_based' ? 'product_based' : 'share_based',
+            is_owner_partner: ownerBrandIds.has(String(brand.id))
+        }));
+
         res.json({ ok: true, systemUsers: users.filter(u => !u.shop_id || u.role === 'superadmin'), shops, users: users.filter(u => u.shop_id && u.role !== 'superadmin'), brands });
     } catch (e) {
         console.error('Hierarchy data error:', e);

@@ -69,6 +69,7 @@ router.post('/', requireAuth, (req, res, next) => {
       selling_price: parseFloat(req.body.selling_price),
       stock: parseInt(req.body.stock) || 0,
       min_stock_level: parseInt(req.body.min_stock_level) || 0,
+      min_stock_level: parseInt(req.body.min_stock_level) || 0,
       components: parse(components),
       ingredients: parse(ingredients),
       image_path: req.file ? "/uploads/products/" + req.file.filename : null
@@ -99,6 +100,7 @@ router.put('/:id', requireAuth, upload.single('image'), async (req, res) => {
         buying_price: parseFloat(req.body.buying_price),
         selling_price: parseFloat(req.body.selling_price),
         stock: req.body.stock !== undefined ? parseInt(req.body.stock) : undefined,
+        min_stock_level: parseInt(req.body.min_stock_level) || 0,
         min_stock_level: parseInt(req.body.min_stock_level) || 0,
         components: parse(components),
         ingredients: parse(ingredients),

@@ -66,10 +66,24 @@ CREATE TABLE IF NOT EXISTS brands (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   shop_id INTEGER NOT NULL,
   name TEXT NOT NULL,
+  partner_type TEXT NOT NULL DEFAULT 'share_based',
+  ownership_percent REAL NOT NULL DEFAULT 0,
   user_id INTEGER NOT NULL,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS third_party_persons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  phone TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -90,11 +104,15 @@ CREATE TABLE IF NOT EXISTS products (
   recovered_damage_quantity INTEGER NOT NULL DEFAULT 0,
   min_stock_level INTEGER NOT NULL DEFAULT 0,
   image_path TEXT,
+  is_commission_based INTEGER NOT NULL DEFAULT 0,
+  third_party_person_id INTEGER,
+  commission_percentage REAL NOT NULL DEFAULT 0,
   is_deleted INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
   FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (third_party_person_id) REFERENCES third_party_persons(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS floors (
@@ -161,10 +179,14 @@ CREATE TABLE IF NOT EXISTS sale_items (
   special_instructions TEXT,
   variants_json TEXT,
   addons_json TEXT,
+  third_party_person_id INTEGER,
+  commission_percentage_at_sale REAL NOT NULL DEFAULT 0,
+  commission_amount_at_sale REAL NOT NULL DEFAULT 0,
   FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id),
   FOREIGN KEY (parent_id) REFERENCES products(id),
-  FOREIGN KEY (batch_id) REFERENCES product_batches(id)
+  FOREIGN KEY (batch_id) REFERENCES product_batches(id),
+  FOREIGN KEY (third_party_person_id) REFERENCES third_party_persons(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
@@ -524,3 +546,5 @@ CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
 CREATE INDEX IF NOT EXISTS idx_cash_handovers_shift_id ON cash_handovers(shift_id);
 CREATE INDEX IF NOT EXISTS idx_cash_drops_shift_id ON cash_drops(shift_id);
 CREATE INDEX IF NOT EXISTS idx_cash_drops_status ON cash_drops(status);
+CREATE INDEX IF NOT EXISTS idx_third_party_persons_shop_id ON third_party_persons(shop_id);
+CREATE INDEX IF NOT EXISTS idx_sale_items_third_party_person_id ON sale_items(third_party_person_id);
