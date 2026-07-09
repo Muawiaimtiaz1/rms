@@ -6,6 +6,7 @@ const productSchema = z.object({
   sku: z.string().min(1, "SKU is required"),
   name: z.string().min(1, "Name is required"),
   category: z.string().min(1, "Category is required"),
+  barcode: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   brand_id: z.number().int().positive("Brand is required"),
   buying_price: z.number().nonnegative().optional().default(0),
@@ -205,8 +206,7 @@ class ProductService {
       await trx('products')
         .where({ id: productId })
         .update({
-          ...productData,
-          updated_at: db.fn.now()
+          ...productData
         });
 
       // Handle Ingredients/Recipes

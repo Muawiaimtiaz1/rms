@@ -22,6 +22,7 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
         rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <script>
         // Init theme before body renders to avoid flicker
         if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -196,11 +197,23 @@
             }
 
             #bill-content,
-            #bill-content * {
+            #bill-content *,
+            #barcode-print-area,
+            #barcode-print-area * {
                 visibility: visible;
                 font-family: 'bit array-a2' !important;
                 color: #111827 !important;
                 font-weight: 700 !important;
+            }
+
+            #barcode-print-area {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                display: flex !important;
+                justify-content: center;
+                align-items: center;
             }
 
             #bill-content {
@@ -645,6 +658,9 @@
 
     <!-- Bill Print Area -->
     <div id="bill-print-area" class="hidden"></div>
+
+    <!-- Barcode Print Area -->
+    <div id="barcode-print-area" class="hidden"></div>
 
     <!-- Quick Navigation Sidebar (Left) -->
     <div id="quick-sidebar-backdrop" onclick="toggleQuickMenu()" class="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[70] hidden opacity-0 transition-opacity duration-300"></div>

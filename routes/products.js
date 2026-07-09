@@ -64,6 +64,7 @@ router.post('/', requireAuth, (req, res, next) => {
 
     const payload = {
       ...req.body,
+      barcode: req.body.barcode || null,
       brand_id: parseInt(req.body.brand_id),
       buying_price: parseFloat(req.body.buying_price),
       selling_price: parseFloat(req.body.selling_price),
@@ -96,6 +97,7 @@ router.put('/:id', requireAuth, upload.single('image'), async (req, res) => {
     }
     const payload = {
         ...req.body,
+        barcode: req.body.barcode || null,
         brand_id: parseInt(req.body.brand_id),
         buying_price: parseFloat(req.body.buying_price),
         selling_price: parseFloat(req.body.selling_price),

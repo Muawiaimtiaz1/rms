@@ -2139,7 +2139,7 @@ async function renderProducts(onlyLowStock = false) {
       ? mainProducts
         .map(
           (p) => `
-            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group inventory-row" data-stock-status="${getInventoryStockStatus(p)}">
+            <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group inventory-row" data-stock-status="${getInventoryStockStatus(p)}" data-barcode="${p.barcode || ''}">
               <td class="px-5 py-4 text-slate-500 dark:text-slate-400 font-mono text-xs">${p.sku}</td>
               <td class="px-5 py-4">
                 <div class="font-bold text-slate-800 dark:text-slate-200 product-name">${p.name}</div>
@@ -2200,7 +2200,8 @@ async function renderProducts(onlyLowStock = false) {
               : ""
             }
                 <div class="inline-flex rounded-lg shadow-sm" role="group">
-                  <button onclick="openLossPopup(${p.id}, '${p.name.replace(/'/g, "\\'")}')" class="px-2 py-1 text-xs rounded-l-lg bg-rose-50 dark:bg-rose-900/40 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-800/50 transition-all border border-rose-200 dark:border-rose-900/50 border-r-0">Loss</button>
+                  ${p.barcode ? `<button onclick="printBarcode('${p.barcode.replace(/'/g, "\\'")}')" class="px-2 py-1 text-xs rounded-l-lg bg-slate-50 dark:bg-slate-900/40 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-slate-200 dark:border-slate-900/50">Print</button>` : ""}
+                  <button onclick="openLossPopup(${p.id}, '${p.name.replace(/'/g, "\\'")}')" class="px-2 py-1 text-xs ${p.barcode ? '' : 'rounded-l-lg'} bg-rose-50 dark:bg-rose-900/40 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-800/50 transition-all border border-rose-200 dark:border-rose-900/50 border-r-0">Loss</button>
                   <button onclick="openRecoveryPopup(${p.id}, '${p.name.replace(/'/g, "\\'")}', ${p.damage_stock})" class="px-2 py-1 text-xs rounded-r-lg bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/50 transition-all border border-emerald-200 dark:border-emerald-900/50">Recov</button>
                 </div>
                 <button onclick="openEditProduct(${p.id})" class="px-2 py-1 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 transition-all border border-indigo-200 dark:border-indigo-900/50">Edit</button>
@@ -2230,7 +2231,8 @@ function filterInventory() {
     const name = row.querySelector(".product-name").textContent.toLowerCase();
     const cat = row.querySelector(".product-category").textContent.toLowerCase();
     const status = row.dataset.stockStatus || "ok";
-    const matchesText = name.includes(q) || cat.includes(q);
+    const barcode = row.dataset.barcode ? row.dataset.barcode.toLowerCase() : "";
+    const matchesText = name.includes(q) || cat.includes(q) || barcode.includes(q);
     const matchesStock = inventoryMatchesStockFilter(status, stockFilter);
 
     if (matchesText && matchesStock) {
@@ -2324,6 +2326,12 @@ function productFormHtml(p = {}, brands = []) {
 
         <div class="col-span-2 sm:col-span-1"><label class="block text-xs text-slate-400 mb-1">SKU *</label>
           <input id="pf-sku" value="${p.sku || ""}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Unique code" /></div>
+        <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Barcode (Optional)</label>
+          <div class="flex items-center gap-2">
+            <input id="pf-barcode" value="${p.barcode || ""}" class="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Scan or enter barcode" />
+            <button type="button" onclick="document.getElementById('pf-barcode').value = Math.floor(Math.random() * 1000000000000).toString()" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-xs font-bold whitespace-nowrap">Auto</button>
+          </div>
+        </div>
         <div class="col-span-2 sm:col-span-1"><label class="block text-xs text-slate-400 mb-1">Category *</label>
           <select id="pf-category" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm">
             <option value="">Select Category</option>
@@ -2523,6 +2531,7 @@ async function saveProduct(id) {
     formData.append('category', category);
     formData.append('description', $c("pf-desc").value.trim());
     formData.append('brand_id', brand_id);
+    if (document.getElementById("pf-barcode")) formData.append('barcode', document.getElementById("pf-barcode").value.trim());
     formData.append('buying_price', parseFloat($c("pf-buy").value) || 0);
     formData.append('selling_price', parseFloat($c("pf-sell").value) || 0);
     formData.append('stock', parseInt($c("pf-stock").value) || 0);
@@ -4241,7 +4250,8 @@ var filterPOSProducts = debounce(() => {
       (p) =>
         !p.is_component &&
         (p.name.toLowerCase().includes(q) ||
-          (p.brand_name || "").toLowerCase().includes(q)),
+          (p.brand_name || "").toLowerCase().includes(q) ||
+          (p.barcode || "").toLowerCase().includes(q)),
     ),
   );
 });
@@ -4615,11 +4625,47 @@ function renderCart() {
   }
 
   cartEl.innerHTML = `
-    
-    <button onclick="showCartModal()" class="w-full py-4 px-5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 transition-all flex items-center justify-center gap-2 shadow-inner">
-      <svg class="w-5 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
-      Expand Cart Management
-    </button>`;
+    <div class="space-y-3">
+      ${cart.map((item) => `
+        <div class="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm relative group">
+          
+          <div class="flex flex-col flex-1 pr-2">
+            <span class="font-bold text-sm text-slate-800 dark:text-slate-200 leading-tight">${item.product ? item.product.name : item.name}</span>
+            <span class="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">Rs. ${item.selling_price}</span>
+            
+            ${item.product && item.product.batches && item.product.batches.length > 1
+              ? `
+                <div class="mt-2">
+                  <select onchange="updateCartBatch(${item.product_id}, this.value); renderCart();" class="text-[9px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded p-1 font-bold text-indigo-600 dark:text-indigo-400 w-full max-w-[150px]">
+                    ${item.product.batches.map(b => `<option value="${b.id}" ${item.batch_id == b.id ? 'selected' : ''}>Cost: Rs. ${b.buying_price}</option>`).join('')}
+                  </select>
+                </div>
+              `
+              : (item.product && item.product.batches && item.product.batches.length === 1)
+                ? `<span class="text-[9px] text-slate-400 font-medium mt-1">Cost: Rs. ${item.product.batches[0].buying_price}</span>`
+                : ''
+            }
+          </div>
+
+          <div class="flex flex-col items-end gap-2">
+            <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-lg p-1">
+              <button onclick="if(${item.quantity} > 1) { updateCartQty(${item.product_id}, ${item.quantity - 1}); renderCart(); } else { toast('Use delete button to remove', 'info'); }"
+                class="w-6 h-6 flex items-center justify-center rounded bg-white dark:bg-slate-700 hover:bg-rose-50 text-slate-500 hover:text-rose-500 shadow-sm transition-all text-xs font-bold">−</button>
+              <span class="w-4 text-center text-xs font-black text-slate-800 dark:text-slate-200">${item.quantity}</span>
+              <button onclick="updateCartQty(${item.product_id}, ${item.quantity + 1}); renderCart();"
+                class="w-6 h-6 flex items-center justify-center rounded bg-white dark:bg-slate-700 hover:bg-emerald-50 text-slate-500 hover:text-emerald-500 shadow-sm transition-all text-xs font-bold">+</button>
+            </div>
+            <span class="font-black text-sm text-indigo-600 dark:text-indigo-400">Rs. ${(item.selling_price * item.quantity).toFixed(0)}</span>
+          </div>
+
+          <!-- Delete Button -->
+          <button onclick="removeFromCart(${item.product_id});" class="absolute -top-2 -right-2 w-6 h-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-900 shadow-sm flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+      `).join('')}
+    </div>
+  `;
 
   calculateCartTotal();
 }
@@ -10620,3 +10666,69 @@ async function viewShiftAuditFlow(shiftId) {
 }
 
 init();
+
+function printBarcode(barcode) {
+  if (!barcode) return toast("No barcode to print", "error");
+  const container = document.getElementById("barcode-print-area");
+  if (!container) return;
+  
+  container.innerHTML = '<svg id="barcode-svg"></svg>';
+  
+  // Inject print styles for specific barcode dimensions (30mm x 15mm)
+  const printStyle = document.createElement('style');
+  printStyle.id = 'barcode-page-style';
+  printStyle.innerHTML = `
+    @media print {
+      @page {
+        size: 30mm 15mm;
+        margin: 0;
+      }
+      body > *:not(#barcode-print-area) {
+        display: none !important;
+      }
+      body { margin: 0; padding: 0; background: white; }
+      #barcode-print-area {
+        width: 30mm;
+        height: 15mm;
+        display: flex !important;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+        background: white;
+      }
+      #barcode-svg {
+        max-width: 95%;
+        max-height: 95%;
+      }
+    }
+  `;
+  document.head.appendChild(printStyle);
+  
+  try {
+    if (typeof JsBarcode === "undefined") {
+        document.head.removeChild(printStyle);
+        return toast("Barcode library not loaded yet. Please wait.", "error");
+    }
+    JsBarcode("#barcode-svg", barcode, {
+      format: "CODE128",
+      displayValue: false,
+      width: 1.5,
+      height: 40,
+      margin: 0
+    });
+  } catch(e) {
+    if (document.head.contains(printStyle)) document.head.removeChild(printStyle);
+    toast("Error generating barcode", "error");
+    console.error(e);
+    return;
+  }
+  
+  // Wait a small bit for SVG to render then print
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+        container.innerHTML = "";
+        if (document.head.contains(printStyle)) document.head.removeChild(printStyle);
+    }, 1000);
+  }, 100);
+}

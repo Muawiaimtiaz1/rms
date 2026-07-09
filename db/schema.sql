@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS products (
   sku TEXT NOT NULL,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
+  barcode TEXT,
   description TEXT,
   brand_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
