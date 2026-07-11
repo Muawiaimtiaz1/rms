@@ -26,6 +26,10 @@ async function initPostgres() {
       console.log("✅ PostgreSQL schema applied successfully.");
     }
 
+    // Keep existing deployments aligned with postgres-schema.sql. CREATE TABLE IF
+    // NOT EXISTS does not add columns that were introduced after a table existed.
+    await query("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode TEXT");
+
     // 2. Check if any user exists (to ensure we have an admin)
     const userCheck = await query("SELECT id FROM users LIMIT 1");
     if (userCheck.rows.length === 0) {

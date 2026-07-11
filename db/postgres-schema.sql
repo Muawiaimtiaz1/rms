@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS products (
   sku TEXT NOT NULL,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
+  barcode TEXT,
   description TEXT,
   brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
