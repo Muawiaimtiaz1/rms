@@ -1189,6 +1189,7 @@ function allPanels() {
   return [
     { id: "dashboard", name: "Main Dashboard", icon: "📊", panels: ["dashboard"] },
     { id: "pos", name: "POS Terminal", icon: "🛒", panels: ["pos", "product-categories", "expense-categories"] },
+    { id: "delivery", name: "Delivery Panel", icon: "🚚", panels: ["delivery"] },
     { id: "sales-history", name: "Sales History", icon: "📜", panels: ["sales-history", "pending-dues"] },
     { id: "products", name: "Products & Menu", icon: "📦", panels: ["products", "brands"] },
     { id: "customers", name: "Customer Ledger", icon: "👥", panels: ["customers"] },

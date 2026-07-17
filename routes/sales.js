@@ -1,10 +1,15 @@
 const express = require("express");
 const salesService = require("../services/SalesService");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, hasPanelAccess } = require("../middleware/auth");
 const router = express.Router();
 
 // POST /api/sales — create a sale (checkout)
 router.post("/", requireAuth, async (req, res) => {
+  const canUsePos = hasPanelAccess(req.session.user, "pos");
+  const canUseDelivery = hasPanelAccess(req.session.user, "delivery");
+  if (!canUsePos && !(canUseDelivery && req.body.order_type === "delivery")) {
+    return res.status(403).json({ error: "You do not have permission to create this order." });
+  }
   const result = await salesService.createSale(req.body, req.session.user.shop_id, req.session.user.id);
   res.json({ ok: true, ...result });
 });

@@ -301,9 +301,19 @@ function renderSpecificSubTab(tabId, data) {
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
           <div class="mb-4">
-            ${analyticsPanelTitle("Cashier & Server Contribution", "This panel is reserved for future staff-level order counts and revenue totals once cashier/server attribution is enabled in analytics.")}
+            ${analyticsPanelTitle("Sales by Payment Receiver", "Money actually received, attributed to the staff member who collected or confirmed the payment.")}
           </div>
-          <p class="text-slate-400 text-xs italic text-center py-6">Order processing logs are active. Individual server breakdowns will appear here on customer checkout.</p>
+          <div class="divide-y divide-slate-100 dark:divide-slate-800">
+            ${(data.staffPerformance || []).map((row, index) => `
+              <div class="py-4 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <span class="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-black">${index + 1}</span>
+                  <div><div class="text-sm font-black text-slate-800 dark:text-white">${row.name || row.username || 'Unknown'}</div><div class="text-[10px] font-bold text-slate-400">${formatNum(row.orders || 0)} payments</div></div>
+                </div>
+                <div class="text-sm font-black text-emerald-600 dark:text-emerald-400">${formatCurrency(row.received_sales || 0)}</div>
+              </div>`).join('')}
+            ${(data.staffPerformance || []).length === 0 ? `<p class="text-slate-400 text-xs italic text-center py-6">No received payments in this period.</p>` : ''}
+          </div>
         </div>
       </div>
     `;

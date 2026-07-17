@@ -1185,6 +1185,8 @@ try {
   };
 
   ensureColumn("sales", "shift_id", "INTEGER");
+  ensureColumn("sales", "payment_receiver_id", "INTEGER REFERENCES users(id)");
+  ensureColumn("sales", "payment_received_at", "TEXT");
   ensureColumn("expenses", "shift_id", "INTEGER");
   ensureColumn("returns", "shift_id", "INTEGER");
   ensureColumn("customer_ledger", "shift_id", "INTEGER");

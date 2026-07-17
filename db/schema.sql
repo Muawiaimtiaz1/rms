@@ -155,6 +155,8 @@ CREATE TABLE IF NOT EXISTS sales (
   rider_id INTEGER,
   kitchen_id INTEGER,
   shift_id INTEGER,
+  payment_receiver_id INTEGER,
+  payment_received_at TEXT,
   guest_count INTEGER DEFAULT 1,
   token_number TEXT,
   created_at TEXT DEFAULT (datetime('now')),
@@ -164,6 +166,7 @@ CREATE TABLE IF NOT EXISTS sales (
   FOREIGN KEY (waiter_id) REFERENCES users(id),
   FOREIGN KEY (rider_id) REFERENCES users(id),
   FOREIGN KEY (kitchen_id) REFERENCES users(id),
+  FOREIGN KEY (payment_receiver_id) REFERENCES users(id),
   FOREIGN KEY (shift_id) REFERENCES shifts(id)
 );
 

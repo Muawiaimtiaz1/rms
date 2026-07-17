@@ -121,6 +121,7 @@ app.use("/api/users", require("./routes/users"));
 app.use("/api/brands", require("./routes/brands"));
 app.use("/api/products", require("./routes/products"));
 app.use("/api/sales", require("./routes/sales"));
+app.use("/api/delivery", require("./routes/delivery"));
 app.use("/api/expenses", require("./routes/expenses"));
 app.use("/api/expense-categories", require("./routes/expense-categories"));
 app.use("/api/product-categories", require("./routes/product-categories"));

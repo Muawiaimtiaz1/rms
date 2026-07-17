@@ -273,6 +273,21 @@ async function initPostgres() {
       console.log("✅ sales.updated_at added.");
     }
 
+    const deliveryPaymentColumns = [
+      ['payment_receiver_id', 'INTEGER REFERENCES users(id)'],
+      ['payment_received_at', 'TIMESTAMPTZ']
+    ];
+    for (const [columnName, definition] of deliveryPaymentColumns) {
+      const columnCheck = await query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'sales' AND column_name = $1
+      `, [columnName]);
+      if (columnCheck.rows.length === 0) {
+        await query(`ALTER TABLE sales ADD COLUMN ${columnName} ${definition}`);
+        console.log(`✅ sales.${columnName} added.`);
+      }
+    }
+
     // Check for updated_at in expenses
     const expensesUpdateCheck = await query(`
       SELECT column_name FROM information_schema.columns 
@@ -687,6 +702,24 @@ async function initPostgres() {
     if (shopNotificationPanelUpdates || adminNotificationPanelUpdates) {
       console.log(`✅ notifications panel access added to ${shopNotificationPanelUpdates} shops and ${adminNotificationPanelUpdates} admins.`);
     }
+
+    const appendDeliveryPanelForPos = async (tableName) => {
+      if (!['shops', 'users'].includes(tableName)) return 0;
+      const rows = await query(`SELECT id, allowed_panels FROM ${tableName} WHERE allowed_panels IS NOT NULL`);
+      let updated = 0;
+      for (const row of rows.rows) {
+        let panels = [];
+        try { panels = JSON.parse(row.allowed_panels || '[]'); } catch { panels = []; }
+        if (Array.isArray(panels) && panels.includes('pos') && !panels.includes('delivery')) {
+          panels.push('delivery');
+          await query(`UPDATE ${tableName} SET allowed_panels = $1 WHERE id = $2`, [JSON.stringify(panels), row.id]);
+          updated += 1;
+        }
+      }
+      return updated;
+    };
+    const shopDeliveryUpdates = await appendDeliveryPanelForPos('shops');
+    if (shopDeliveryUpdates) console.log(`✅ delivery panel enabled for ${shopDeliveryUpdates} POS shops.`);
 
     await query(`
       INSERT INTO cash_drops (shop_id, shift_id, requested_by_user_id, amount, status, note, created_at)

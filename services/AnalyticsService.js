@@ -731,6 +731,24 @@ class AnalyticsService {
         : null;
       const totalPartnerProfit = partnerProfitShares.reduce((sum, share) => sum + Number(share.profit_share || 0), 0);
 
+      const receivedAmountExpr = `CASE WHEN COALESCE(s.amount_received, 0) > COALESCE(s.total, 0) THEN COALESCE(s.total, 0) ELSE COALESCE(s.amount_received, 0) END`;
+      const staffPerformanceRaw = await db('sales as s')
+        .leftJoin('users as u', db.raw('COALESCE(s.payment_receiver_id, s.user_id)'), 'u.id')
+        .modify(qb => applyShopScope(qb, 's.shop_id'))
+        .where('s.amount_received', '>', 0.01)
+        .whereBetween(db.raw('COALESCE(s.payment_received_at, s.created_at)'), [bounds.start, bounds.end])
+        .select('u.id as user_id', 'u.name', 'u.username')
+        .select(db.raw(`COALESCE(SUM(${receivedAmountExpr}), 0) as received_sales`))
+        .count('s.id as orders')
+        .groupBy('u.id', 'u.name', 'u.username')
+        .orderBy('received_sales', 'desc');
+      const staffPerformance = staffPerformanceRaw.map(row => ({
+        ...row,
+        received_sales: Number(row.received_sales || 0),
+        orders: Number(row.orders || 0)
+      }));
+      const totalPaymentsReceived = staffPerformance.reduce((sum, row) => sum + row.received_sales, 0);
+
       return {
         bounds,
         activePeriod: period,
@@ -781,6 +799,8 @@ class AnalyticsService {
         topProducts,
         heatmapRaw,
         recentSales,
+        staffPerformance,
+        totalPaymentsReceived,
         totalProducts: parseInt(totalProductsCount ? totalProductsCount.val : 0),
         totalRevenue: adjustedRevenue,
         totalPendingDues: Number(kpi.total_pending_dues || 0),

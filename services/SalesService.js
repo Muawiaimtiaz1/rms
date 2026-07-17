@@ -30,6 +30,7 @@ const checkoutSchema = z.object({
   delivery_address: z.string().nullable().optional(),
   kitchen_id: z.number().int().nullable().optional(),
   order_status: z.string().default('pending'),
+  money_received: z.boolean().optional().default(false),
 });
 
 class SalesService {
@@ -360,7 +361,7 @@ class SalesService {
           .first();
         if (activeShift) {
           shiftId = activeShift.id;
-        } else if (data.order_status === 'completed' || Number(data.amount_received || 0) > 0.01) {
+        } else if (data.order_status === 'completed' || (Number(data.amount_received || 0) > 0.01 && data.order_type !== 'delivery')) {
           data.order_status = 'payment_pending';
           data.amount_received = 0;
         }
@@ -465,7 +466,9 @@ class SalesService {
           guest_count: data.guest_count,
           token_number: data.token_number,
           order_status: data.order_status,
-          shift_id: shiftId
+          shift_id: shiftId,
+          payment_receiver_id: data.order_type === 'delivery' && data.money_received ? userId : null,
+          payment_received_at: data.order_type === 'delivery' && data.money_received ? trx.fn.now() : null
         })
         .returning('id');
       const saleId = typeof saleIdObj === 'object' ? saleIdObj.id : saleIdObj;
@@ -611,7 +614,7 @@ class SalesService {
           .first();
         if (activeShift) {
           shiftId = activeShift.id;
-        } else if (data.order_status === 'completed' || Number(data.amount_received || 0) > 0.01) {
+        } else if (data.order_status === 'completed' || (Number(data.amount_received || 0) > 0.01 && data.order_type !== 'delivery')) {
           data.order_status = 'payment_pending';
           data.amount_received = 0;
         }
@@ -732,6 +735,8 @@ class SalesService {
         token_number: data.token_number || sale.token_number,
         order_status: data.order_status,
         shift_id: shiftId,
+        payment_receiver_id: data.order_type === 'delivery' ? (data.money_received ? userId : null) : sale.payment_receiver_id,
+        payment_received_at: data.order_type === 'delivery' ? (data.money_received ? trx.fn.now() : null) : sale.payment_received_at,
         updated_at: trx.fn.now()
       });
 
@@ -833,9 +838,10 @@ class SalesService {
 
   async getSales(shopId, currentUser = null) {
     const query = db('sales as s')
-      .select('s.*', 'u.name as served_by_name', 'u.username as served_by_username', 'w.name as waiter_name', 'r.name as rider_name', 'k.name as kitchen_name', 't.table_number')
+      .select('s.*', 'u.name as served_by_name', 'u.username as served_by_username', 'pr.name as payment_receiver_name', 'w.name as waiter_name', 'r.name as rider_name', 'k.name as kitchen_name', 't.table_number')
       .select(db.raw('(SELECT SUM(quantity) FROM return_items WHERE return_id IN (SELECT id FROM returns WHERE sale_id = s.id)) as items_returned'))
       .leftJoin('users as u', 's.user_id', 'u.id')
+      .leftJoin('users as pr', 's.payment_receiver_id', 'pr.id')
       .leftJoin('users as w', 's.waiter_id', 'w.id')
       .leftJoin('users as r', 's.rider_id', 'r.id')
       .leftJoin('users as k', 's.kitchen_id', 'k.id')
@@ -871,7 +877,7 @@ class SalesService {
         .where({ shop_id: shopId, user_id: userId, status: 'open' })
         .first();
       
-      const updateData = { amount_received: finalAmount };
+      const updateData = { amount_received: finalAmount, payment_receiver_id: userId, payment_received_at: trx.fn.now() };
       if (activeShift) updateData.shift_id = activeShift.id;
       else throw new Error('You must open a register shift to collect payments.');
 
@@ -910,6 +916,10 @@ class SalesService {
       if (payment_method !== undefined) updateData.payment_method = payment_method;
       if (amount_received !== undefined) {
         updateData.amount_received = amount_received;
+        if (Number(amount_received) > Number(sale.amount_received || 0) + 0.01) {
+          updateData.payment_receiver_id = userId;
+          updateData.payment_received_at = trx.fn.now();
+        }
         shouldSyncSaleLedger = true;
         if (userId) {
           const activeShift = await trx('shifts')

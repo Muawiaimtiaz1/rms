@@ -136,6 +136,9 @@ let currentUser = null;
 let cart = [];
 let allProducts = [];
 let productMap = {}; // Index for O(1) lookups
+const POS_PRODUCTS_PER_PAGE = 20;
+let _posProductPage = 1;
+let _posFilteredProducts = [];
 
 function syncProductMap(products) {
   productMap = {};
@@ -422,6 +425,12 @@ const AVAILABLE_PANELS = [
     desc: "Process sales, generate bills, and manage customer checkouts."
   },
   {
+    id: "delivery",
+    icon: `<path d="M3 6h11v10H3z" fill="#2563EB"/><path d="M14 10h4l3 3v3h-7z" fill="#60A5FA"/><circle cx="7" cy="18" r="2" fill="#1D4ED8"/><circle cx="17" cy="18" r="2" fill="#1D4ED8"/>`,
+    label: "Delivery Panel",
+    desc: "Create shared delivery orders, update their status, and record who received payment."
+  },
+  {
     id: "brands",
     icon: `<path d="M12 2L2 7l10 5 10-5-10-5z" fill="#8B5CF6"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
     label: "Brand Management",
@@ -594,7 +603,7 @@ const MODULE_GROUPS = [
   {
     title: "Sales",
     desc: "Checkout, active orders, customer records, and sales history.",
-    panels: ["pos", "sales-history", "customers"],
+    panels: ["pos", "delivery", "sales-history", "customers"],
   },
   {
     title: "Inventory",
@@ -775,6 +784,7 @@ function navigate(page) {
     brands: "Brands",
     products: "Products",
     pos: "POS / Checkout",
+    delivery: "Delivery Panel",
     "sales-history": "Sales History",
     expenses: "Expenses",
     register: "Register Shift",
@@ -802,7 +812,7 @@ function navigate(page) {
 
   const container = document.querySelector('main > div');
   const pageHeader = document.getElementById('page-header-wrap');
-  if (page === 'settings' || page === 'pos' || page === 'register') {
+  if (page === 'settings' || page === 'pos' || page === 'delivery' || page === 'register') {
     container.classList.remove('container', 'mx-auto', 'px-6');
     container.classList.add('w-full', 'px-4', 'md:px-12');
     if (pageHeader) pageHeader.classList.add('hidden');
@@ -818,6 +828,7 @@ function navigate(page) {
     products: renderProducts,
     "products-low-stock": () => renderProducts(true),
     pos: renderPOS,
+    delivery: renderDeliveryPanel,
     "sales-history": renderSalesHistory,
     "sales-pending": () => renderSalesHistory(true),
     expenses: renderExpenses,
@@ -1721,14 +1732,23 @@ async function renderDashboard(period, brandId, from, to) {
     </div>
 
     <!-- Metric Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-5 mb-8">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-7 gap-5 mb-8">
       ${statCard("Total Revenue", "Rs. " + Number(data.totalRevenue).toLocaleString(), `${data.totalSales} transaction${data.totalSales !== 1 ? "s" : ""}`, "blue", "Completed orders only. Revenue = bill subtotal - discount + tax - refunds. Includes both received money and pending dues.")}
+      ${statCard("Payments Received", "Rs. " + Number(data.totalPaymentsReceived || 0).toLocaleString(), `${(data.staffPerformance || []).length} receiver${(data.staffPerformance || []).length !== 1 ? "s" : ""}`, "emerald", "Money actually marked received, attributed to the staff member who confirmed it.")}
       ${statCard("Pending Dues", "Rs. " + Number(data.totalPendingDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), `${data.pendingDuesCount || 0} bill${Number(data.pendingDuesCount || 0) !== 1 ? "s" : ""} pending`, "amber", "Completed bills where final total minus amount received is still greater than zero. Shows only the unpaid balance.")}
       ${statCard("Cost of Goods Sold", "Rs. " + Number(data.totalCOGS).toLocaleString(), "Sum of buying prices", "purple", "Buying cost of sold items from completed orders, reduced by the buying cost of returned items.")}
       ${statCard("Shop Profit", "Rs. " + shopProfitValue.toLocaleString(), "Sum of partner shares", "emerald", "Shop Profit = revenue - COGS - damage/loss. This equals the sum of partner shares.")}
       ${statCard("Damage Value", "Rs. " + Number(data.damageTotal || 0).toLocaleString(), "Inventory & Returns", "rose", "Current product damage/loss value tracked in inventory. This is separate from normal sales COGS.")}
       ${statCard("Products", data.totalProducts, "in catalog", "amber", "Count of active catalog products for this shop, excluding deleted products.")}
     </div>
+
+    ${(data.staffPerformance || []).length ? `
+    <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden mb-8">
+      <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800"><h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Sales by Payment Receiver</h3></div>
+      <div class="divide-y divide-slate-100 dark:divide-slate-800">
+        ${(data.staffPerformance || []).map(row => `<div class="px-6 py-3 flex items-center justify-between gap-4"><div><div class="text-sm font-black text-slate-800 dark:text-white">${escapeOrderValue(row.name || row.username || 'Unknown')}</div><div class="text-[10px] font-bold text-slate-400">${Number(row.orders || 0)} received payment${Number(row.orders || 0) !== 1 ? 's' : ''}</div></div><div class="text-sm font-black text-emerald-600 dark:text-emerald-400">Rs. ${Number(row.received_sales || 0).toLocaleString()}</div></div>`).join('')}
+      </div>
+    </div>` : ''}
 
     ${partnerSplitHtml}
     ${brandProfitHtml}
@@ -2963,11 +2983,69 @@ async function submitRecovery(productId) {
 }
 
 // ─── POS ─────────────────────────────────────────────────────────────
+function getPOSLayout() {
+  return localStorage.getItem("pos_layout") === "split" ? "split" : "cards";
+}
+
+function capturePOSLayoutState() {
+  const ids = [
+    "pos-floor", "pos-table", "pos-waiter", "pos-kitchen", "pos-delivery-name",
+    "pos-delivery-phone", "pos-rider", "pos-delivery-addr", "pos-takeaway-name",
+    "pos-token", "pos-discount", "pos-discount-preset", "pos-tax", "pos-tax-preset",
+    "pos-method", "pos-received", "pos-cust-name", "pos-cust-phone"
+  ];
+  const values = {};
+  ids.forEach((id) => {
+    const el = $c(id);
+    if (el) values[id] = el.value;
+  });
+  return {
+    values,
+    orderType: window._posOrderType,
+    quotation: !!$c("pos-is-quotation")?.checked,
+    deliveryMoneyReceived: !!$c("delivery-money-received")?.checked,
+    selectedCustomer: _posSelectedCustomer
+  };
+}
+
+async function setPOSLayout(layout) {
+  const nextLayout = layout === "split" ? "split" : "cards";
+  if (getPOSLayout() === nextLayout) return;
+  window._posLayoutRestore = {
+    cart: cart.slice(),
+    form: capturePOSLayoutState()
+  };
+  localStorage.setItem("pos_layout", nextLayout);
+  await renderPOS();
+}
+
+function restorePOSLayoutState(restore) {
+  if (!restore?.form) return;
+  Object.entries(restore.form.values || {}).forEach(([id, value]) => {
+    const el = $c(id);
+    if (el) el.value = value;
+  });
+  const quotation = $c("pos-is-quotation");
+  if (quotation) {
+    quotation.checked = restore.form.quotation;
+    toggleQuotationMode(quotation.checked);
+  }
+  const moneyReceived = $c("delivery-money-received");
+  if (moneyReceived) moneyReceived.checked = restore.form.deliveryMoneyReceived;
+  _posSelectedCustomer = restore.form.selectedCustomer || null;
+  renderPOSSelectedCustomerBadge();
+  calculateCartTotal();
+}
+
 async function renderPOS() {
+  const deliveryOnly = _currentPage === 'delivery';
+  const splitLayout = !deliveryOnly && getPOSLayout() === "split";
+  const layoutRestore = window._posLayoutRestore || null;
+  window._posLayoutRestore = null;
   const [products, tables, waiters, floors, discounts, taxes] = await Promise.all([
     api("/api/products"),
     api("/api/tables").catch(() => []),
-    api("/api/users").catch(() => []),
+    api("/api/users/assignable").catch(() => []),
     api("/api/tables/floors").catch(() => []),
     api("/api/shop-settings/discounts").catch(() => []),
     api("/api/shop-settings/taxes").catch(() => [])
@@ -2980,9 +3058,11 @@ async function renderPOS() {
   syncProductMap(products);
   updateLowStockBadge(products);
 
-  if (!_editingOrderId) {
+  if (!_editingOrderId && !layoutRestore) {
     cart = [];
     _posSelectedCustomer = null;
+  } else if (layoutRestore) {
+    cart = layoutRestore.cart;
   }
   _posCustomerResults = [];
   const waiterList = (waiters || []).filter(u => ['admin', 'user', 'waiter'].includes(u.role));
@@ -2996,11 +3076,44 @@ async function renderPOS() {
   const isRetail = baseShopType === 'retail';
   window._posIsRetail = isRetail;
 
+  const discountPresetOptions = _posDiscountPresets.map((preset) => {
+    const type = preset.type === 'amount' ? 'amount' : 'percentage';
+    const value = Number(preset.value || 0);
+    const label = type === 'percentage' ? `${value}%` : `Rs. ${value}`;
+    return `<option value="${value}" data-type="${type}">${escapeOrderValue(preset.name)} (${label})</option>`;
+  }).join("");
+  const taxPresetOptions = _posTaxPresets.map((preset) => {
+    const percentage = Number(preset.percentage || 0);
+    const method = preset.linked_payment_method || "";
+    const methodLabel = method ? ` - ${method}` : "";
+    return `<option value="${percentage}" data-method="${escapeOrderValue(method)}">${escapeOrderValue(preset.name)} (${percentage}%${methodLabel})</option>`;
+  }).join("");
+
   $c("page-content").innerHTML = `
+    ${splitLayout ? `<style>
+      #pos-split-scroll-body input:not([type="checkbox"]),
+      #pos-split-scroll-body select,
+      #pos-cart-controls input:not([type="checkbox"]),
+      #pos-cart-controls select { padding: 0.125rem 0.375rem !important; font-size: 0.7rem !important; min-height: 1.75rem; }
+      #pos-split-scroll-body label,
+      #pos-cart-controls label { margin-bottom: 0 !important; font-size: 0.55rem !important; }
+      #pos-cart-controls label select { padding: 0 !important; min-height: 0 !important; }
+      #pos-split-scroll-body .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem !important; }
+      #pos-split-scroll-body .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.125rem !important; }
+      #pos-split-scroll-body #pos-order-type-selector > div:first-child { display: none; }
+      #pos-split-scroll-body #pos-dine-fields:not(.hidden) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25rem; }
+      #pos-split-scroll-body #pos-dine-fields:not(.hidden) > div { margin: 0 !important; }
+      #pos-split-scroll-body #pos-dine-fields:not(.hidden) > div:last-child { grid-column: 1 / -1; }
+      #pos-split-scroll-body #pos-restaurant-fields,
+      #pos-split-scroll-body #pos-dine-fields,
+      #pos-split-scroll-body #pos-delivery-fields,
+      #pos-split-scroll-body #pos-takeaway-fields,
+      #pos-split-scroll-body #pos-kitchen-fields { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; padding-top: 0.25rem !important; }
+    </style>` : ''}
     <div class="flex flex-col gap-4">
-      <div id="pos-content-grid" class="h-full transition-all">
+      <div id="pos-content-grid" class="h-full transition-all ${splitLayout ? 'grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(360px,2fr)] gap-4 items-start' : ''}">
         <!-- Products Panel -->
-        <div class="space-y-4">
+        <div class="space-y-4 ${splitLayout ? 'min-w-0' : ''}">
           <div class="flex flex-col sm:flex-row gap-3">
             <input id="pos-search" oninput="filterPOSProducts()" placeholder="Search products…"
               class="flex-1 h-12 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" />
@@ -3009,8 +3122,14 @@ async function renderPOS() {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" d="M9 5h6M9 9h6M9 13h4m-7 8h12a2 2 0 002-2V5a2 2 0 00-2-2H8l-4 4v12a2 2 0 002 2z"/></svg>
               <span>Orders</span>
             </button>
-            <button type="button" onclick="openPOSCheckout()"
-              class="h-12 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2 shrink-0">
+            <div class="${deliveryOnly ? 'hidden' : 'flex'} h-12 items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1 shrink-0" aria-label="POS layout">
+              <button type="button" onclick="setPOSLayout('cards')" title="Card layout"
+                class="h-9 px-3 rounded-lg text-xs font-black transition-all ${!splitLayout ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}">Cards</button>
+              <button type="button" onclick="setPOSLayout('split')" title="Split table and cart layout"
+                class="h-9 px-3 rounded-lg text-xs font-black transition-all ${splitLayout ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}">Table + Cart</button>
+            </div>
+            <button type="button" id="pos-toolbar-checkout" onclick="openPOSCheckout()"
+              class="${splitLayout ? 'hidden' : 'flex'} h-12 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all items-center justify-center gap-2 shrink-0">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-1.6 1.6A1 1 0 006.1 16H18M9 20a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z"/></svg>
               <span>Checkout</span>
               <span id="pos-checkout-count" class="min-w-6 h-6 px-2 rounded-full bg-white/20 flex items-center justify-center text-[11px]">0</span>
@@ -3022,27 +3141,28 @@ async function renderPOS() {
             <button onclick="filterPOSByCategory(null)" class="cat-pill active px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-bold border border-transparent transition-all" data-cat="">All</button>
             ${(_productCategories || []).map(c => `<button onclick="filterPOSByCategory('${c.name}')" class="cat-pill px-4 py-1.5 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700 hover:border-indigo-400 transition-all" data-cat="${c.name}">${c.name}</button>`).join('')}
           </div>
-          <div id="pos-products" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 items-start min-h-[50vh] max-h-[calc(100vh-18rem)] overflow-y-auto pr-1 pb-4"></div>
+          <div id="pos-products" class="${splitLayout ? 'h-[calc(100vh-16rem)] min-h-0 overflow-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900' : 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 items-start min-h-[50vh] max-h-[calc(100vh-21rem)] overflow-y-auto pr-1 pb-4'}"></div>
+          <div id="pos-products-pagination" class="hidden"></div>
         </div>
 
         <!-- Checkout Drawer -->
-        <div id="pos-checkout-backdrop" class="hidden fixed inset-x-0 top-20 bottom-0 z-40" aria-hidden="true">
+        <div id="pos-checkout-backdrop" class="${splitLayout ? 'sticky top-20 block h-[calc(100vh-5rem)] min-h-0 z-0' : 'hidden fixed inset-x-0 top-20 bottom-0 z-40'}" aria-hidden="${splitLayout ? 'false' : 'true'}">
           <div id="pos-checkout-shade"
-            class="absolute inset-y-0 left-0 right-0 lg:right-[33.333333%] bg-slate-200/90 dark:bg-slate-950/80 backdrop-blur-sm opacity-0 transition-opacity duration-300 flex items-center justify-center p-6 text-center">
+            class="${splitLayout ? 'hidden' : 'absolute'} inset-y-0 left-0 right-0 lg:right-[33.333333%] bg-slate-200/90 dark:bg-slate-950/80 backdrop-blur-sm opacity-0 transition-opacity duration-300 flex items-center justify-center p-6 text-center">
             <div class="absolute inset-0 cursor-pointer" onclick="closePOSCheckout()"></div>
             <div class="relative z-10 w-full max-w-lg">
               <span class="block text-[11px] font-black uppercase tracking-[0.35em] text-slate-500 dark:text-slate-400 mb-3">Grand Total</span>
               <span id="pos-checkout-overlay-total" class="block text-5xl md:text-7xl font-black tracking-tighter text-slate-900 dark:text-white mb-10">Rs. 0.00</span>
               
-              <div class="grid grid-cols-1 gap-6 px-4">
-                ${isRetail ? `
-                <button onclick="checkout()" id="checkout-btn"
-                  class="py-4 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3">
-                  <span>Place Order</span>
+              <div id="pos-primary-action-wrap" class="grid grid-cols-1 gap-3 px-4">
+                ${isRetail || deliveryOnly ? `
+                <button onclick="checkout('${deliveryOnly ? 'pending' : 'completed'}')" id="checkout-btn"
+                  class="${splitLayout ? 'py-1 text-xs h-9' : 'py-4 text-xl h-20'} rounded-xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black shadow-2xl transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2">
+                  <span>${deliveryOnly ? 'Place Delivery Order' : 'Place Order'}</span>
                 </button>
                 ` : `
                 <button onclick="sendToKitchen()" id="kitchen-btn"
-                  class="py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-black text-xl border border-slate-200 dark:border-slate-700 shadow-xl transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center h-20 gap-3">
+                  class="${splitLayout ? 'py-1 text-xs h-9' : 'py-4 text-xl h-20'} rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-black border border-slate-200 dark:border-slate-700 shadow-xl transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2">
                   <span>Kitchen</span>
                 </button>
                 `}
@@ -3051,20 +3171,20 @@ async function renderPOS() {
             </div>
           </div>
           <div id="pos-checkout-drawer"
-            class="absolute right-0 top-0 h-full w-full sm:w-[440px] md:w-[480px] lg:w-1/3 bg-white dark:bg-slate-900 p-4 flex flex-col shadow-2xl border-l border-slate-200 dark:border-slate-800 transition-transform duration-300 ease-out overflow-y-auto translate-x-full">
-          <div class="mb-3 flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 class="font-black text-slate-900 dark:text-white flex items-center gap-2 uppercase tracking-tighter text-base">
+            class="${splitLayout ? 'relative w-full translate-x-0 rounded-none border overflow-hidden p-1.5' : 'absolute right-0 top-0 w-full sm:w-[440px] md:w-[480px] lg:w-1/3 translate-x-full border-l overflow-y-auto p-4'} h-full bg-white dark:bg-slate-900 flex flex-col shadow-2xl border-slate-200 dark:border-slate-800 transition-transform duration-300 ease-out">
+          <div class="${splitLayout ? 'mb-1 pb-1' : 'mb-3 pb-3'} flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800">
+            <h3 class="font-black text-slate-900 dark:text-white flex items-center gap-2 uppercase tracking-tighter ${splitLayout ? 'text-sm' : 'text-base'}">
               <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-              Current Order
+              ${splitLayout ? 'Cart' : 'Current Order'}
             </h3>
-            <button type="button" onclick="closePOSCheckout()" class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300 transition-all flex items-center justify-center" title="Close checkout">
+            <button type="button" onclick="closePOSCheckout()" class="${splitLayout ? 'hidden' : 'flex'} w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300 transition-all items-center justify-center" title="Close checkout">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
           
-          <div id="pos-order-type-selector" class="${isRetail ? 'hidden' : 'block'} mb-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-3">
+          <div id="pos-order-type-selector" class="${isRetail || deliveryOnly ? 'hidden' : 'block'} ${splitLayout ? 'mb-1 p-1' : 'mb-3 p-3'} rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40">
             <div class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Order Type</div>
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-3 ${splitLayout ? 'gap-1' : 'gap-2'}">
               <button id="otype-dine_in" onclick="switchOrderType('dine_in')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-indigo-600 text-white font-bold text-xs transition-all">
                 <span>🍽️</span><span>Dine-in</span>
               </button>
@@ -3077,7 +3197,7 @@ async function renderPOS() {
             </div>
           </div>
 
-          <div id="cart-items" class="space-y-2 min-h-20"></div>
+          <div id="cart-items" class="${splitLayout ? 'flex-1 min-h-[28vh] space-y-1 overflow-y-auto pr-1' : 'space-y-2 min-h-20'}"></div>
 
           <!-- Restaurant Fields (Hidden for Retail) -->
           <div id="pos-restaurant-fields" class="${isRetail ? 'hidden' : ''} mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
@@ -3158,54 +3278,66 @@ async function renderPOS() {
             </div>
           </div>
 
-          <div class="border-t border-slate-200 dark:border-slate-700 mt-4 pt-4 space-y-4">
-            <div class="space-y-2 text-base text-slate-600 dark:text-slate-300">
-               <div class="flex justify-between"><span>Subtotal</span><span id="cart-subtotal" class="font-bold text-slate-900 dark:text-white">Rs. 0</span></div>
-               <div class="flex justify-between text-rose-500"><span class="text-xs font-bold uppercase tracking-widest">Tax Amount</span><span id="cart-tax-amt" class="font-bold">Rs. 0.00</span></div>
+          <div id="pos-cart-controls" class="border-t border-slate-200 dark:border-slate-700 ${splitLayout ? 'mt-0.5 pt-0.5 space-y-1 shrink-0' : 'mt-4 pt-4 space-y-4'}">
+            <div class="${splitLayout ? 'grid grid-cols-2 gap-1 text-[10px]' : 'space-y-2 text-base'} text-slate-600 dark:text-slate-300">
+               <div class="flex justify-between ${splitLayout ? 'rounded-md bg-slate-50 dark:bg-slate-800 px-1.5 py-1' : ''}"><span>Subtotal</span><span id="cart-subtotal" class="font-bold text-slate-900 dark:text-white">Rs. 0</span></div>
+               <div class="flex justify-between text-rose-500 ${splitLayout ? 'rounded-md bg-rose-50 dark:bg-rose-950/20 px-1.5 py-1' : ''}"><span class="${splitLayout ? 'text-[9px]' : 'text-xs'} font-bold uppercase tracking-widest">Tax Amount</span><span id="cart-tax-amt" class="font-bold">Rs. 0.00</span></div>
             </div>
 
-            <div class="flex justify-between items-center text-2xl font-black text-indigo-600 dark:text-indigo-400 border-t border-slate-200 dark:border-slate-800 pt-4">
-              <span class="text-slate-900 dark:text-white text-lg">Grand Total</span>
+            <div id="pos-grand-total-row" class="flex justify-between items-center ${splitLayout ? 'text-base pt-0.5' : 'text-2xl pt-4'} font-black text-indigo-600 dark:text-indigo-400 border-t border-slate-200 dark:border-slate-800">
+              <span class="text-slate-900 dark:text-white ${splitLayout ? 'text-xs' : 'text-lg'}">Grand Total</span>
               <span id="cart-total" data-total="0">Rs. 0.00</span>
             </div>
 
-            <div class="grid grid-cols-2 gap-4 text-base bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800">
-               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Discount</label>
+            <div class="grid grid-cols-2 ${splitLayout ? 'gap-1 p-1.5 text-xs' : 'gap-4 p-4 text-base'} bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-800">
+               <div><label class="flex items-center gap-1 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">${splitLayout ? `
+                 <span class="relative inline-flex h-5 w-5 items-center justify-center rounded-md bg-rose-100 text-rose-600 ring-1 ring-rose-200 transition hover:bg-rose-200 focus-within:ring-2 focus-within:ring-rose-500 dark:bg-rose-950/40 dark:text-rose-400 dark:ring-rose-900" title="Choose discount preset">
+                   −
+                   <select id="pos-discount-preset" onchange="applyPOSDiscountPreset()" aria-label="Choose discount preset" class="absolute inset-0 h-full w-full cursor-pointer opacity-0">
+                     <option value="">Manual discount</option>${discountPresetOptions}
+                   </select>
+                 </span>` : ''}<span>Discount</span></label>
+                 <div>
+                 ${splitLayout ? '' : `
                  <select id="pos-discount-preset" onchange="applyPOSDiscountPreset()" class="w-full mb-2 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-xs font-black shadow-sm">
-                   <option value="">Manual discount</option>
-                   ${_posDiscountPresets.map(p => {
-                     const type = p.type === 'amount' ? 'amount' : 'percentage';
-                     const value = Number(p.value || 0);
-                     const label = type === 'percentage' ? `${value}%` : `Rs. ${value}`;
-                     return `<option value="${value}" data-type="${type}">${escapeOrderValue(p.name)} (${label})</option>`;
-                   }).join("")}
-                 </select>
+                   <option value="">Manual discount</option>${discountPresetOptions}
+                 </select>`}
+                 ${splitLayout ? `
+                 <input id="pos-discount" type="number" min="0" value="" placeholder="Rs." oninput="clearPOSDiscountPreset();calculateCartTotal()" class="w-full min-w-0 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                 ` : `
                  <div class="flex items-center gap-1">
                    <button type="button" onclick="$c('pos-discount').stepDown();clearPOSDiscountPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
                    <input id="pos-discount" type="number" min="0" value="" placeholder="Rs." oninput="clearPOSDiscountPreset();calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
                    <button type="button" onclick="$c('pos-discount').stepUp();clearPOSDiscountPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                 </div>`}
                  </div>
                </div>
 
-               <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Tax</label>
+               <div><label class="flex items-center gap-1 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">${splitLayout ? `
+                 <span class="relative inline-flex h-5 w-5 items-center justify-center rounded-md bg-indigo-100 text-[9px] text-indigo-600 ring-1 ring-indigo-200 transition hover:bg-indigo-200 focus-within:ring-2 focus-within:ring-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-400 dark:ring-indigo-900" title="Choose tax preset">
+                   %
+                   <select id="pos-tax-preset" onchange="applyPOSTaxPreset()" aria-label="Choose tax preset" class="absolute inset-0 h-full w-full cursor-pointer opacity-0">
+                     <option value="">Manual tax</option>${taxPresetOptions}
+                   </select>
+                 </span>` : ''}<span>Tax</span></label>
+                 <div>
+                 ${splitLayout ? '' : `
                  <select id="pos-tax-preset" onchange="applyPOSTaxPreset()" class="w-full mb-2 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all text-xs font-black shadow-sm">
-                   <option value="">Manual tax</option>
-                   ${_posTaxPresets.map(t => {
-                     const percentage = Number(t.percentage || 0);
-                     const method = t.linked_payment_method || "";
-                     const methodLabel = method ? ` - ${method}` : "";
-                     return `<option value="${percentage}" data-method="${escapeOrderValue(method)}">${escapeOrderValue(t.name)} (${percentage}%${methodLabel})</option>`;
-                   }).join("")}
-                 </select>
+                   <option value="">Manual tax</option>${taxPresetOptions}
+                 </select>`}
+                 ${splitLayout ? `
+                 <input id="pos-tax" type="number" min="0" value="" placeholder="%" oninput="clearPOSTaxPreset();calculateCartTotal()" class="w-full min-w-0 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
+                 ` : `
                  <div class="flex items-center gap-1">
                    <button type="button" onclick="$c('pos-tax').stepDown();clearPOSTaxPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
                    <input id="pos-tax" type="number" min="0" value="" placeholder="%" oninput="clearPOSTaxPreset();calculateCartTotal()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
                    <button type="button" onclick="$c('pos-tax').stepUp();clearPOSTaxPreset();calculateCartTotal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                 </div>`}
                  </div>
                </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-4 text-base pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div class="grid ${splitLayout ? 'grid-cols-4 gap-1 text-xs pt-0.5' : 'grid-cols-2 gap-4 text-base pt-2'} border-t border-slate-200 dark:border-slate-800">
                <!-- Customer Identity for Pending Dues -->
                <div class="col-span-1 relative">
                  <label id="pos-cust-name-label" class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Cust. Name</label>
@@ -3235,28 +3367,41 @@ async function renderPOS() {
 
                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Received</label>
                  <div class="flex items-center gap-1">
-                   <button type="button" onclick="$c('pos-received').stepDown();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">-</button>
+                   <button type="button" onclick="$c('pos-received').stepDown();calculateRemaining()" class="${splitLayout ? 'w-6 h-6 text-xs' : 'w-8 h-8 text-sm'} flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all font-bold shadow-sm">-</button>
                    <input id="pos-received" type="number" min="0" value="" oninput="calculateRemaining()" class="flex-1 min-w-0 px-2 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:border-indigo-500 transition-all text-sm font-black shadow-sm text-center" />
-                   <button type="button" onclick="$c('pos-received').stepUp();calculateRemaining()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-sm font-bold shadow-sm">+</button>
+                   <button type="button" onclick="$c('pos-received').stepUp();calculateRemaining()" class="${splitLayout ? 'w-6 h-6 text-xs' : 'w-8 h-8 text-sm'} flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all font-bold shadow-sm">+</button>
                  </div>
-               </div>
+                 </div>
             </div>
 
-            <div class="flex justify-between items-center text-lg font-black mt-2 p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
+            ${deliveryOnly ? `
+            <label class="mt-3 flex items-center justify-between gap-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 cursor-pointer">
+              <div>
+                <div class="text-xs font-black text-blue-800 dark:text-blue-300">Money received</div>
+                <div class="text-[10px] font-bold text-blue-600/70 dark:text-blue-400/70">Credits this payment to your staff sales total</div>
+              </div>
+              <input id="delivery-money-received" type="checkbox" onchange="syncDeliveryMoneyReceived()" class="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-blue-500" />
+            </label>` : ''}
+
+            <div class="flex justify-between items-center ${splitLayout ? 'text-sm mt-0.5 p-1.5' : 'text-lg mt-2 p-3'} font-black bg-emerald-50 dark:bg-emerald-950/20 rounded-lg border border-emerald-100 dark:border-emerald-900/30">
               <span class="text-emerald-700 dark:text-emerald-400 text-xs uppercase tracking-widest">Change / Dues</span>
               <span id="cart-remaining" class="text-emerald-600 dark:text-emerald-400">Rs. 0.00</span>
             </div>
 
-            <div class="flex items-center gap-2 mb-2 p-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl">
-              <input type="checkbox" id="pos-is-quotation" class="w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer" onchange="toggleQuotationMode(this.checked)" />
+            <div class="flex items-center gap-2 ${splitLayout ? 'mb-0.5 p-1' : 'mb-2 p-2'} bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-lg">
+              <input type="checkbox" id="pos-is-quotation" class="${splitLayout ? 'w-4 h-4' : 'w-5 h-5'} rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer" onchange="toggleQuotationMode(this.checked)" />
               <label for="pos-is-quotation" class="text-xs font-black text-amber-700 dark:text-amber-400 cursor-pointer select-none">
                 Generate Quotation (Estimate Only)
               </label>
             </div>
 
+            ${splitLayout ? `
+            <div id="pos-split-action-host" class="z-20 shrink-0 space-y-1 border-t border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 p-1.5 shadow-[0_-8px_20px_rgba(15,23,42,0.1)] backdrop-blur"></div>
+            ` : `
             <div class="pt-2 text-center">
               <p class="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">Actions available on left panel</p>
             </div>
+            `}
           </div>
         </div>
       </div>
@@ -3279,7 +3424,7 @@ async function renderPOS() {
                 <input type="text" id="pos-orders-search" oninput="renderPOSOrders()" placeholder="Search Order ID..." class="px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-indigo-500 w-40 transition-all" />
                 <svg class="w-3.5 h-3.5 absolute right-3 top-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
               </div>
-              <select id="pos-orders-type-filter" onchange="renderPOSOrders()" class="px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-indigo-500 transition-all">
+              <select id="pos-orders-type-filter" onchange="renderPOSOrders()" class="${deliveryOnly ? 'hidden' : ''} px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-indigo-500 transition-all">
                 <option value="">All Types</option>
                 <option value="dine_in">Dine-in</option>
                 <option value="takeaway">Takeaway</option>
@@ -3317,10 +3462,35 @@ async function renderPOS() {
       </div>
     </div>`;
 
+  if (splitLayout) {
+    const splitHost = $c("pos-split-action-host");
+    const totalRow = $c("pos-grand-total-row");
+    const actionWrap = $c("pos-primary-action-wrap");
+    const drawer = $c("pos-checkout-drawer");
+    const cartControls = $c("pos-cart-controls");
+    if (splitHost && totalRow) splitHost.appendChild(totalRow);
+    if (splitHost && actionWrap) {
+      actionWrap.classList.remove("px-4");
+      splitHost.appendChild(actionWrap);
+    }
+    if (drawer && splitHost) {
+      const scrollBody = document.createElement("div");
+      scrollBody.id = "pos-split-scroll-body";
+      scrollBody.className = "min-h-0 flex flex-1 flex-col overflow-hidden pr-1 pb-1";
+      splitHost.remove();
+      if (cartControls) cartControls.remove();
+      while (drawer.firstChild) scrollBody.appendChild(drawer.firstChild);
+      drawer.appendChild(scrollBody);
+      if (cartControls) drawer.appendChild(cartControls);
+      drawer.appendChild(splitHost);
+    }
+  }
+
   // Track current order type state
-  window._posOrderType = isRetail ? 'takeaway' : 'dine_in';
+  window._posDeliveryOnly = deliveryOnly;
+  window._posOrderType = layoutRestore?.form?.orderType || (deliveryOnly ? 'delivery' : (isRetail ? 'takeaway' : 'dine_in'));
   window._posLastOrderType = window._posOrderType;
-  switchOrderType(window._posOrderType);
+  switchOrderType(deliveryOnly ? 'orders' : window._posOrderType);
 
   // Input listener for pos-customer (legacy compatibility)
   const posCustomerInput = $c('pos-customer-input-compat');
@@ -3332,9 +3502,22 @@ async function renderPOS() {
   }
 
   const mainProducts = products.filter((p) => p.is_component !== 1);
-  renderPOSProducts(mainProducts);
+  renderPOSProducts(mainProducts, 1);
   renderCart();
-  if (!_editingOrderId) applyPOSLinkedTaxPreset($c("pos-method")?.value || "cash");
+  if (layoutRestore) restorePOSLayoutState(layoutRestore);
+  else if (!_editingOrderId) applyPOSLinkedTaxPreset($c("pos-method")?.value || "cash");
+}
+
+async function renderDeliveryPanel() {
+  return renderPOS();
+}
+
+function syncDeliveryMoneyReceived() {
+  const checkbox = $c('delivery-money-received');
+  const received = $c('pos-received');
+  const total = parseFloat($c('cart-total')?.dataset.total) || 0;
+  if (received) received.value = checkbox?.checked ? total.toFixed(2) : '0';
+  calculateRemaining();
 }
 
 function syncPOSCheckoutSummary(totalOverride) {
@@ -3354,6 +3537,10 @@ function syncPOSCheckoutSummary(totalOverride) {
 }
 
 function openPOSCheckout() {
+  if (getPOSLayout() === "split" && _currentPage === "pos") {
+    syncPOSCheckoutSummary();
+    return;
+  }
   const backdrop = $c("pos-checkout-backdrop");
   const drawer = $c("pos-checkout-drawer");
   const shade = $c("pos-checkout-shade");
@@ -3376,6 +3563,10 @@ function openPOSCheckout() {
 }
 
 function closePOSCheckout(immediate = false) {
+  if (getPOSLayout() === "split" && _currentPage === "pos") {
+    document.body.classList.remove("overflow-hidden");
+    return;
+  }
   const backdrop = $c("pos-checkout-backdrop");
   const drawer = $c("pos-checkout-drawer");
   const shade = $c("pos-checkout-shade");
@@ -3410,8 +3601,10 @@ function switchOrderType(type) {
   const activeType = type === 'orders'
     ? (window._posOrderType || (isRetail ? 'takeaway' : 'dine_in'))
     : type;
-  const activeOrderClass = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl bg-indigo-600 text-white font-bold text-xs transition-all';
-  const inactiveOrderClass = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-all';
+  const compactOrderSelector = getPOSLayout() === "split" && _currentPage === "pos";
+  const orderButtonSize = compactOrderSelector ? 'py-1.5 px-1 text-[10px]' : 'py-2.5 px-2 text-xs';
+  const activeOrderClass = `flex items-center justify-center gap-1.5 ${orderButtonSize} rounded-xl bg-indigo-600 text-white font-bold transition-all`;
+  const inactiveOrderClass = `flex items-center justify-center gap-1.5 ${orderButtonSize} rounded-xl text-slate-500 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all`;
 
   ['dine_in', 'takeaway', 'delivery'].forEach(t => {
     const btn = $c(`otype-${t}`);
@@ -3655,9 +3848,11 @@ async function renderPOSOrders() {
   const typeFilter = $c('pos-orders-type-filter')?.value || '';
 
   try {
-    const sales = await api('/api/sales');
+    const deliveryPanel = _currentPage === 'delivery';
+    const sales = await api(deliveryPanel ? '/api/delivery' : '/api/sales');
     // Show active orders (pending, preparing, ready) but hide fully completed ones
     let filteredOrders = (sales || []).filter(s => s.order_status !== 'completed');
+    if (deliveryPanel) filteredOrders = filteredOrders.filter(s => s.order_type === 'delivery');
 
     if (typeFilter) {
       filteredOrders = filteredOrders.filter(o => o.order_type === typeFilter);
@@ -3693,6 +3888,10 @@ async function renderPOSOrders() {
       if (s.order_status === 'pending') statusColor = 'bg-amber-100 text-amber-600';
       if (s.order_status === 'preparing') statusColor = 'bg-blue-100 text-blue-600';
       if (s.order_status === 'ready') statusColor = 'bg-emerald-100 text-emerald-600';
+      const paymentPaid = Number(s.amount_received || 0) >= Number(s.total || 0) - 0.01;
+      const paymentBadge = paymentPaid
+        ? '<span class="inline-flex mt-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[9px] font-black uppercase tracking-wider">Paid</span>'
+        : '<span class="inline-flex mt-1 px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 text-[9px] font-black uppercase tracking-wider">Unpaid</span>';
       const primaryAction = s.order_type === 'delivery' && s.order_status !== 'ready'
         ? `<button onclick="viewOrderItems(${s.id})" class="px-3 py-1.5 rounded-lg bg-blue-500 text-white font-bold text-[10px] uppercase hover:bg-blue-600 transition-all shadow-sm">Out</button>`
         : `<button onclick="showOrderCompleteModal(${s.id})" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold text-[10px] uppercase hover:bg-emerald-600 transition-all shadow-sm">${s.order_type === 'delivery' ? 'Delivered' : 'Complete'}</button>`;
@@ -3708,11 +3907,9 @@ async function renderPOSOrders() {
             ${s.waiter_name || '-'}
           </td>
           <td class="px-4 py-4">
-            <span class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${statusColor}">
-              ${s.order_status}
-            </span>
+            ${deliveryPanel ? `<select onchange="updateDeliveryStatus(${s.id}, this.value)" class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${statusColor} border-0 outline-none cursor-pointer"><option value="pending" ${s.order_status === 'pending' ? 'selected' : ''}>Pending</option><option value="preparing" ${s.order_status === 'preparing' ? 'selected' : ''}>Preparing</option><option value="ready" ${s.order_status === 'ready' ? 'selected' : ''}>Out for delivery</option></select>` : `<span class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${statusColor}">${s.order_status}</span>`}
           </td>
-          <td class="px-4 py-4 font-black text-slate-900 dark:text-white text-sm">PKR ${Number(s.total).toLocaleString()}</td>
+          <td class="px-4 py-4 font-black text-slate-900 dark:text-white text-sm"><div>PKR ${Number(s.total).toLocaleString()}</div>${deliveryPanel ? paymentBadge : ''}</td>
           <td class="px-4 py-4 text-xs font-medium text-slate-400">${date}</td>
           <td class="px-4 py-4 text-right">
             <div class="flex justify-end gap-2">
@@ -3736,6 +3933,17 @@ async function renderPOSOrders() {
   }
 }
 
+async function updateDeliveryStatus(id, status) {
+  try {
+    await api(`/api/delivery/${id}/status`, 'PATCH', { status });
+    toast('Delivery status updated');
+    renderPOSOrders();
+  } catch (e) {
+    toast(e.message, 'error');
+    renderPOSOrders();
+  }
+}
+
 async function viewOrderItems(id) {
   try {
     const [data, assignableUsers] = await Promise.all([
@@ -3745,6 +3953,7 @@ async function viewOrderItems(id) {
     if (!data || !data.sale) return toast("Order not found", "error");
     const sale = data.sale;
     const isDelivery = sale.order_type === 'delivery';
+    const isPaymentPaid = Number(sale.amount_received || 0) >= Number(sale.total || 0) - 0.01;
     const canEditDelivery = isDelivery && !['ready', 'completed'].includes(sale.order_status);
     const serviceLabel = sale.order_type === 'dine_in' ? 'Dine-in' : sale.order_type === 'takeaway' ? 'Takeaway' : 'Delivery';
     const currentRiderId = Number(sale.rider_id || 0);
@@ -3786,7 +3995,10 @@ async function viewOrderItems(id) {
             <h4 class="text-xs font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">Delivery Info</h4>
             <p class="text-[10px] font-bold text-slate-500 mt-0.5">Edit before marking out for delivery</p>
           </div>
-          <span class="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-[10px] font-black uppercase text-slate-500 border border-blue-100 dark:border-blue-900/40">${escapeOrderValue(sale.order_status || 'pending')}</span>
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-1 rounded-lg ${isPaymentPaid ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400'} text-[10px] font-black uppercase">${isPaymentPaid ? 'Paid' : 'Unpaid'}</span>
+            <span class="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-[10px] font-black uppercase text-slate-500 border border-blue-100 dark:border-blue-900/40">${escapeOrderValue(sale.order_status || 'pending')}</span>
+          </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
@@ -3863,7 +4075,7 @@ async function saveDeliveryOrderInfo(id, nextStatus = null) {
   try {
     await api(`/api/sales/${id}/details`, 'PATCH', payload);
     if (nextStatus) {
-      await api(`/api/kds/${id}/status`, 'PATCH', { status: nextStatus });
+      await api(_currentPage === 'delivery' ? `/api/delivery/${id}/status` : `/api/kds/${id}/status`, 'PATCH', { status: nextStatus });
       toast("Order marked out for delivery");
     } else {
       toast("Delivery info updated");
@@ -3983,7 +4195,7 @@ function proceedToPOSUpdate(id) {
   } : null;
 
   closeModal();
-  navigate('pos');
+  navigate(_currentPage === 'delivery' ? 'delivery' : 'pos');
 
   // Restore checkout headers/extra info if needed
   setTimeout(() => {
@@ -3992,6 +4204,7 @@ function proceedToPOSUpdate(id) {
     if ($c('pos-discount')) $c('pos-discount').value = _tempEditSaleDetails.discount || 0;
     if ($c('pos-tax')) $c('pos-tax').value = _tempEditSaleDetails.tax_percentage || 0;
     if ($c('pos-received')) $c('pos-received').value = _tempEditSaleDetails.amount_received || 0;
+    if ($c('delivery-money-received')) $c('delivery-money-received').checked = Number(_tempEditSaleDetails.amount_received || 0) > 0.01;
     if ($c('pos-cust-name')) $c('pos-cust-name').value = _tempEditSaleDetails.customer_name || '';
     if ($c('pos-cust-phone')) $c('pos-cust-phone').value = _tempEditSaleDetails.customer_phone || '';
     
@@ -4015,7 +4228,7 @@ function cancelEdit() {
 async function completeOrderFromPOS(id, skipConfirm = false) {
   if (!skipConfirm && !confirm('Are you sure you want to complete this order and move it to sales history?')) return;
   try {
-    await api(`/api/kds/${id}/status`, 'PATCH', { status: 'completed' });
+    await api(_currentPage === 'delivery' ? `/api/delivery/${id}/status` : `/api/kds/${id}/status`, 'PATCH', { status: 'completed' });
     toast('Order completed!');
     renderPOSOrders();
   } catch (e) {
@@ -4030,8 +4243,9 @@ function showOrderCompleteModal(id) {
   const name = s.customer_name || '';
   const phone = s.customer_phone || '';
   const method = s.payment_method || 'cash';
-  const received = s.amount_received || s.total;
   const total = s.total;
+  const isDeliveryPanel = _currentPage === 'delivery';
+  const received = isDeliveryPanel ? Number(s.amount_received || 0) : (s.amount_received || s.total);
 
   openModal('Finish Order & Payment', `
     <div class="space-y-4">
@@ -4053,6 +4267,15 @@ function showOrderCompleteModal(id) {
             class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-bold text-xl text-emerald-600" />
         </div>
       </div>
+
+      ${isDeliveryPanel ? `
+      <label class="flex items-center justify-between gap-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 cursor-pointer">
+        <div>
+          <div class="text-xs font-black text-blue-800 dark:text-blue-300">Money received</div>
+          <div class="text-[10px] font-bold text-blue-600/70 dark:text-blue-400/70">The payment is credited to the person who first confirmed receipt</div>
+        </div>
+        <input id="op-money-received" type="checkbox" ${Number(s.amount_received || 0) > 0.01 ? 'checked' : ''} onchange="$c('op-received').value=this.checked?'${Number(total)}':'0';updateCompleteOrderSummary(${Number(total)})" class="w-5 h-5 rounded border-blue-300 text-blue-600 focus:ring-blue-500" />
+      </label>` : ''}
 
       <div class="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 space-y-2">
         <div class="flex justify-between text-xs">
@@ -4110,7 +4333,8 @@ function updateCompleteOrderSummary(total) {
 async function updateAndCompleteOrder(id) {
   const nameEl = $c('op-name');
   if (!nameEl) return;
-  if (!(await ensureOpenShiftForPayment())) return;
+  const isDeliveryPanel = _currentPage === 'delivery';
+  if (!isDeliveryPanel && !(await ensureOpenShiftForPayment())) return;
 
   const s = _posActiveOrders.find(o => o.id === id);
   const data = {
@@ -4121,8 +4345,23 @@ async function updateAndCompleteOrder(id) {
   };
 
   try {
-    await api(`/api/sales/${id}/details`, 'PATCH', data);
-    await completeOrderFromPOS(id, true);
+    if (isDeliveryPanel) {
+      await api(`/api/sales/${id}/details`, 'PATCH', {
+        customer_name: data.customer_name,
+        customer_phone: data.customer_phone,
+        payment_method: data.payment_method
+      });
+      await api(`/api/delivery/${id}/status`, 'PATCH', {
+        status: 'completed',
+        money_received: !!$c('op-money-received')?.checked,
+        payment_method: data.payment_method
+      });
+      toast('Delivery completed!');
+      renderPOSOrders();
+    } else {
+      await api(`/api/sales/${id}/details`, 'PATCH', data);
+      await completeOrderFromPOS(id, true);
+    }
     await printCustomerBill(id);
     closeModal();
   } catch (e) {
@@ -4140,7 +4379,7 @@ function filterPOSByCategory(cat) {
   const filtered = cat
     ? allProducts.filter(p => p.is_component !== 1 && p.category === cat)
     : allProducts.filter(p => p.is_component !== 1);
-  renderPOSProducts(filtered);
+  renderPOSProducts(filtered, 1);
 }
 
 function onPosFloorChange() {
@@ -4159,8 +4398,63 @@ function onPosFloorChange() {
   `;
 }
 
-function renderPOSProducts(products) {
+function renderPOSProducts(products, requestedPage = 1) {
   const el = $c("pos-products");
+  if (!el) return;
+
+  _posFilteredProducts = Array.isArray(products) ? products : [];
+  const totalProducts = _posFilteredProducts.length;
+  const totalPages = Math.max(1, Math.ceil(totalProducts / POS_PRODUCTS_PER_PAGE));
+  _posProductPage = Math.min(Math.max(Number(requestedPage) || 1, 1), totalPages);
+  const pageStart = (_posProductPage - 1) * POS_PRODUCTS_PER_PAGE;
+  products = _posFilteredProducts.slice(pageStart, pageStart + POS_PRODUCTS_PER_PAGE);
+
+  if (getPOSLayout() === "split" && _currentPage === "pos") {
+    el.innerHTML = products.length ? `
+      <table class="w-full min-w-[500px] text-left border-collapse">
+        <thead class="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 shadow-sm">
+          <tr>
+            <th class="px-3 py-2 text-[9px] font-black uppercase tracking-widest text-slate-400">Product</th>
+            <th class="px-2 py-2 text-[9px] font-black uppercase tracking-widest text-slate-400">Category</th>
+            <th class="px-2 py-2 text-center text-[9px] font-black uppercase tracking-widest text-slate-400">Stock</th>
+            <th class="px-2 py-2 text-right text-[9px] font-black uppercase tracking-widest text-slate-400">Price</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          ${products.map((p) => {
+            const isRecipe = !!(p.ingredients && p.ingredients.length > 0);
+            const available = p.stock > 0 || isRecipe;
+            const cartQty = cart.filter((item) => item.product_id === p.id).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+            return `
+              <tr ${available ? `onclick="addToCart(${p.id})" onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); addToCart(${p.id}); }" tabindex="0" role="button"` : 'aria-disabled="true"'}
+                class="group ${available ? 'cursor-pointer hover:bg-indigo-50/60 dark:hover:bg-indigo-950/20 focus:bg-indigo-50 dark:focus:bg-indigo-950/20 focus:outline-none' : 'cursor-not-allowed opacity-50'} transition-colors" data-pos-product-id="${p.id}">
+                <td class="px-3 py-1.5">
+                  <div class="flex items-center gap-2">
+                    <div class="h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center justify-center">
+                      ${p.image_url
+                        ? `<img src="${escapeOrderValue(p.image_url)}" alt="" class="h-full w-full object-cover" />`
+                        : `<svg class="h-5 w-5 text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>`}
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <div class="truncate text-sm font-black text-slate-900 dark:text-white">${escapeOrderValue(p.name)}</div>
+                        <span id="pos-table-cart-qty-${p.id}" class="${cartQty ? 'flex' : 'hidden'} min-w-6 h-6 shrink-0 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-950/60 px-1.5 text-[10px] font-black text-indigo-600 dark:text-indigo-400">${cartQty}</span>
+                      </div>
+                      <div class="mt-0.5 text-[10px] font-bold ${available ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}">${available ? (isRecipe ? 'Recipe available' : 'In stock') : 'Out of stock'}</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-2 py-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">${escapeOrderValue(p.category || '-')}</td>
+                <td class="px-2 py-1.5 text-center text-xs font-black ${available ? 'text-slate-800 dark:text-slate-200' : 'text-rose-500'}">${isRecipe ? 'Recipe' : Number(p.stock || 0)}</td>
+                <td class="px-2 py-1.5 text-right text-xs font-black text-emerald-700 dark:text-emerald-400">Rs. ${Number(p.selling_price || 0).toLocaleString()}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>` : '<div class="p-12 text-center text-sm font-bold text-slate-400">No products matched your search.</div>';
+    renderPOSProductsPagination(totalProducts, totalPages, pageStart);
+    return;
+  }
+
   el.innerHTML =
     products
       .map(
@@ -4241,6 +4535,59 @@ function renderPOSProducts(products) {
       )
       .join("") ||
     '<p class="text-slate-500 dark:text-slate-400 col-span-3 py-10 text-center italic text-lg">No products matched your search.</p>';
+  renderPOSProductsPagination(totalProducts, totalPages, pageStart);
+}
+
+function renderPOSProductsPagination(totalProducts, totalPages, pageStart) {
+  const pagination = $c("pos-products-pagination");
+  if (!pagination) return;
+
+  if (!totalProducts) {
+    pagination.className = "hidden";
+    pagination.innerHTML = "";
+    return;
+  }
+
+  const firstProduct = pageStart + 1;
+  const lastProduct = Math.min(pageStart + POS_PRODUCTS_PER_PAGE, totalProducts);
+  const previousDisabled = _posProductPage <= 1;
+  const nextDisabled = _posProductPage >= totalPages;
+
+  pagination.className = "flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900";
+  pagination.innerHTML = `
+    <div class="min-w-0 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+      <span class="hidden sm:inline">Showing </span>${firstProduct}-${lastProduct} of ${totalProducts}
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" onclick="changePOSProductsPage(${_posProductPage - 1})" ${previousDisabled ? "disabled" : ""}
+        class="h-8 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:text-indigo-400">
+        Previous
+      </button>
+      <span class="min-w-[5rem] text-center text-xs font-black text-slate-700 dark:text-slate-200">${_posProductPage} / ${totalPages}</span>
+      <button type="button" onclick="changePOSProductsPage(${_posProductPage + 1})" ${nextDisabled ? "disabled" : ""}
+        class="h-8 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:text-indigo-400">
+        Next
+      </button>
+    </div>`;
+}
+
+function changePOSProductsPage(page) {
+  renderPOSProducts(_posFilteredProducts, page);
+  $c("pos-products")?.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function refreshSplitPOSCartQuantities() {
+  if (getPOSLayout() !== "split" || _currentPage !== "pos") return;
+  allProducts.forEach((product) => {
+    const badge = $c(`pos-table-cart-qty-${product.id}`);
+    if (!badge) return;
+    const quantity = cart
+      .filter((item) => item.product_id === product.id)
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    badge.textContent = quantity;
+    badge.classList.toggle("hidden", !quantity);
+    badge.classList.toggle("flex", !!quantity);
+  });
 }
 
 var filterPOSProducts = debounce(() => {
@@ -4253,6 +4600,7 @@ var filterPOSProducts = debounce(() => {
           (p.brand_name || "").toLowerCase().includes(q) ||
           (p.barcode || "").toLowerCase().includes(q)),
     ),
+    1,
   );
 });
 
@@ -4613,53 +4961,56 @@ function removeFromCart(productId) {
 
 function renderCart() {
   const cartEl = $c("cart-items");
+  if (!cartEl) return;
+  const compactCart = getPOSLayout() === "split" && _currentPage === "pos";
 
   if (!cart.length) {
     cartEl.innerHTML = `
-      <div class="flex flex-col items-center justify-center py-10 opacity-30">
-        <svg class="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+      <div class="flex flex-col items-center justify-center ${compactCart ? 'py-2' : 'py-10'} opacity-30">
+        <svg class="${compactCart ? 'w-6 h-6 mb-0.5' : 'w-12 h-12 mb-2'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
         <p class="text-[10px] font-black uppercase tracking-widest">Cart is Empty</p>
       </div>`;
     calculateCartTotal();
+    refreshSplitPOSCartQuantities();
     return;
   }
 
   cartEl.innerHTML = `
-    <div class="space-y-3">
+    <div class="${compactCart ? 'space-y-1' : 'space-y-3'}">
       ${cart.map((item) => `
-        <div class="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm relative group">
+        <div class="flex items-center justify-between ${compactCart ? 'p-1' : 'p-3'} rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm relative group">
           
-          <div class="flex flex-col flex-1 pr-2">
-            <span class="font-bold text-sm text-slate-800 dark:text-slate-200 leading-tight">${item.product ? item.product.name : item.name}</span>
-            <span class="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">Rs. ${item.selling_price}</span>
+          <div class="flex flex-col flex-1 ${compactCart ? 'pr-1' : 'pr-2'}">
+            <span class="font-bold ${compactCart ? 'text-[11px]' : 'text-sm'} text-slate-800 dark:text-slate-200 leading-tight">${item.product ? item.product.name : item.name}</span>
+            <span class="${compactCart ? 'hidden' : 'text-[10px] mt-1'} font-bold text-slate-400 uppercase tracking-tight">Rs. ${item.selling_price}</span>
             
             ${item.product && item.product.batches && item.product.batches.length > 1
               ? `
-                <div class="mt-2">
+                <div class="${compactCart ? 'mt-1' : 'mt-2'}">
                   <select onchange="updateCartBatch(${item.product_id}, this.value); renderCart();" class="text-[9px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded p-1 font-bold text-indigo-600 dark:text-indigo-400 w-full max-w-[150px]">
                     ${item.product.batches.map(b => `<option value="${b.id}" ${item.batch_id == b.id ? 'selected' : ''}>Cost: Rs. ${b.buying_price}</option>`).join('')}
                   </select>
                 </div>
               `
               : (item.product && item.product.batches && item.product.batches.length === 1)
-                ? `<span class="text-[9px] text-slate-400 font-medium mt-1">Cost: Rs. ${item.product.batches[0].buying_price}</span>`
+                ? (compactCart ? '' : `<span class="text-[9px] text-slate-400 font-medium mt-1">Cost: Rs. ${item.product.batches[0].buying_price}</span>`)
                 : ''
             }
           </div>
 
-          <div class="flex flex-col items-end gap-2">
-            <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-lg p-1">
+          <div class="flex flex-col items-end ${compactCart ? 'gap-1' : 'gap-2'}">
+            <div class="flex items-center ${compactCart ? 'gap-0.5 p-0' : 'gap-2 p-1'} bg-slate-50 dark:bg-slate-800 rounded-lg">
               <button onclick="if(${item.quantity} > 1) { updateCartQty(${item.product_id}, ${item.quantity - 1}); renderCart(); } else { toast('Use delete button to remove', 'info'); }"
-                class="w-6 h-6 flex items-center justify-center rounded bg-white dark:bg-slate-700 hover:bg-rose-50 text-slate-500 hover:text-rose-500 shadow-sm transition-all text-xs font-bold">−</button>
-              <span class="w-4 text-center text-xs font-black text-slate-800 dark:text-slate-200">${item.quantity}</span>
+                class="${compactCart ? 'w-4 h-4 text-[9px]' : 'w-6 h-6 text-xs'} flex items-center justify-center rounded bg-white dark:bg-slate-700 hover:bg-rose-50 text-slate-500 hover:text-rose-500 shadow-sm transition-all font-bold">−</button>
+              <span class="${compactCart ? 'w-3 text-[10px]' : 'w-4 text-xs'} text-center font-black text-slate-800 dark:text-slate-200">${item.quantity}</span>
               <button onclick="updateCartQty(${item.product_id}, ${item.quantity + 1}); renderCart();"
-                class="w-6 h-6 flex items-center justify-center rounded bg-white dark:bg-slate-700 hover:bg-emerald-50 text-slate-500 hover:text-emerald-500 shadow-sm transition-all text-xs font-bold">+</button>
+                class="${compactCart ? 'w-4 h-4 text-[9px]' : 'w-6 h-6 text-xs'} flex items-center justify-center rounded bg-white dark:bg-slate-700 hover:bg-emerald-50 text-slate-500 hover:text-emerald-500 shadow-sm transition-all font-bold">+</button>
             </div>
-            <span class="font-black text-sm text-indigo-600 dark:text-indigo-400">Rs. ${(item.selling_price * item.quantity).toFixed(0)}</span>
+            <span class="font-black ${compactCart ? 'text-[10px]' : 'text-sm'} text-indigo-600 dark:text-indigo-400">Rs. ${(item.selling_price * item.quantity).toFixed(0)}</span>
           </div>
 
           <!-- Delete Button -->
-          <button onclick="removeFromCart(${item.product_id});" class="absolute -top-2 -right-2 w-6 h-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-900 shadow-sm flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100">
+          <button onclick="removeFromCart(${item.product_id});" class="absolute ${compactCart ? '-top-1.5 -right-1.5 w-5 h-5' : '-top-2 -right-2 w-6 h-6'} bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-900 shadow-sm flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
@@ -4668,6 +5019,7 @@ function renderCart() {
   `;
 
   calculateCartTotal();
+  refreshSplitPOSCartQuantities();
 }
 
 /**
@@ -4861,12 +5213,13 @@ function calculateCartTotal() {
   const checkoutBtn = $c("checkout-btn");
   const kitchenBtn = $c("kitchen-btn");
   const visibleActionBtn = checkoutBtn || kitchenBtn;
+  const compactAction = getPOSLayout() === "split" && _currentPage === "pos";
 
   if (_editingOrderId && visibleActionBtn && !$c("cancel-edit-btn")) {
     const cancelBtn = document.createElement("button");
     cancelBtn.id = "cancel-edit-btn";
     cancelBtn.onclick = cancelEdit;
-    cancelBtn.className = "mt-4 w-full py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all";
+    cancelBtn.className = `${compactAction ? "mt-1 py-1.5" : "mt-4 py-3"} w-full rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-slate-200 transition-all`;
     cancelBtn.textContent = "Cancel Editing";
     visibleActionBtn.parentElement.appendChild(cancelBtn);
   } else if (!_editingOrderId) {
@@ -4876,10 +5229,10 @@ function calculateCartTotal() {
   if (checkoutBtn && !_posCheckoutSubmitting) {
     if (_editingOrderId) {
       checkoutBtn.innerHTML = `<span>Update Order #${_editingOrderId}</span>`;
-      checkoutBtn.className = "py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-white font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3 w-full";
+      checkoutBtn.className = `${compactAction ? "py-1 text-xs h-9 rounded-xl gap-2" : "py-4 text-xl h-20 rounded-2xl gap-3"} bg-amber-500 hover:bg-amber-400 text-white font-black shadow-2xl transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center w-full`;
     } else {
       checkoutBtn.innerHTML = `<span>Place Order</span>`;
-      checkoutBtn.className = "py-4 rounded-2xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black text-xl shadow-2xl transition-all active:scale-95 disabled:opacity-40 h-20 flex items-center justify-center gap-3";
+      checkoutBtn.className = `${compactAction ? "py-1 text-xs h-9 rounded-xl gap-2" : "py-4 text-xl h-20 rounded-2xl gap-3"} bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-black shadow-2xl transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center`;
     }
   }
 
@@ -4902,10 +5255,11 @@ function calculateRemaining() {
   const phoneInp = $c("pos-cust-phone");
   const nameLabel = $c("pos-cust-name-label");
   const phoneLabel = $c("pos-cust-phone-label");
+  const remainingSize = getPOSLayout() === "split" && _currentPage === "pos" ? "text-xs" : "text-xl";
 
   if (remaining <= 0) {
     el.textContent = "Change: Rs. " + Math.abs(remaining).toFixed(2);
-    el.className = "font-bold text-emerald-400 text-xl";
+    el.className = `font-bold text-emerald-400 ${remainingSize}`;
     if (nameInp) {
       nameInp.placeholder = "Optional";
       nameInp.classList.remove("border-rose-500", "bg-rose-50", "dark:bg-rose-950/20");
@@ -4918,7 +5272,7 @@ function calculateRemaining() {
     if (phoneLabel) phoneLabel.classList.remove("text-rose-500");
   } else {
     el.textContent = "Due: Rs. " + remaining.toFixed(2);
-    el.className = "font-bold text-rose-400 text-xl";
+    el.className = `font-bold text-rose-400 ${remainingSize}`;
     if (nameInp) {
       nameInp.placeholder = "REQUIRED for Dues";
       nameInp.classList.add("border-rose-500", "bg-rose-50", "dark:bg-rose-950/20");
@@ -5109,8 +5463,10 @@ async function checkout(status = 'completed') {
   const tax_percentage = parseFloat($c("pos-tax").value) || 0;
   const payment_method = $c("pos-method").value;
   let amount_received = parseFloat($c("pos-received").value) || 0;
-  if (status !== 'completed') amount_received = 0;
   const grandTotal = parseFloat($c("cart-total").dataset.total) || 0;
+  const deliveryMoneyReceived = _currentPage === 'delivery' && !!$c('delivery-money-received')?.checked;
+  if (deliveryMoneyReceived) amount_received = grandTotal;
+  else if (status !== 'completed') amount_received = 0;
 
   // Gather restaurant-specific fields
   const orderType = window._posOrderType || 'dine_in';
@@ -5128,14 +5484,6 @@ async function checkout(status = 'completed') {
     customer_phone = $c('pos-delivery-phone')?.value.trim() || '';
     delivery_address = $c('pos-delivery-addr')?.value.trim() || '';
     rider_id = parseInt($c('pos-rider')?.value) || null;
-    if (!customer_name) {
-      resetPOSCheckoutSubmission(status, isEditing);
-      return toast("Customer name required for delivery", "error");
-    }
-    if (!customer_phone) {
-      resetPOSCheckoutSubmission(status, isEditing);
-      return toast("Customer phone required for delivery", "error");
-    }
   } else if (orderType === 'takeaway') {
     token_number = $c('pos-token')?.value.trim() || `TK-${Date.now()}`;
     customer_name = $c('pos-takeaway-name')?.value.trim() || '';
@@ -5149,6 +5497,20 @@ async function checkout(status = 'completed') {
   const sidebarPhone = $c('pos-cust-phone')?.value.trim();
   if (sidebarName) customer_name = sidebarName;
   if (sidebarPhone) customer_phone = sidebarPhone;
+
+  // Validate only after both delivery-specific and shared customer fields are synchronized.
+  if (orderType === 'delivery') {
+    if (!customer_name) {
+      ($c('pos-delivery-name') || $c('pos-cust-name'))?.focus();
+      resetPOSCheckoutSubmission(status, isEditing);
+      return toast("Customer name required for delivery", "error");
+    }
+    if (!customer_phone) {
+      ($c('pos-delivery-phone') || $c('pos-cust-phone'))?.focus();
+      resetPOSCheckoutSubmission(status, isEditing);
+      return toast("Customer phone required for delivery", "error");
+    }
+  }
 
   // Validation for Pending Dues
   if (status === 'completed' && amount_received < grandTotal - 0.01) {
@@ -5194,6 +5556,7 @@ async function checkout(status = 'completed') {
     guest_count,
     token_number,
     order_status: status,
+    money_received: deliveryMoneyReceived,
   };
 
   const url = isEditing ? `/api/sales/${_editingOrderId}/items` : "/api/sales";

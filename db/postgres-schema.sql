@@ -226,7 +226,9 @@ CREATE TABLE IF NOT EXISTS sales (
   token_number TEXT,
   special_instructions TEXT,
   kitchen_id INTEGER REFERENCES users(id),
-  shift_id INTEGER
+  shift_id INTEGER,
+  payment_receiver_id INTEGER REFERENCES users(id),
+  payment_received_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
