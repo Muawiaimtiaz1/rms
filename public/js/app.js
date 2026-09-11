@@ -3945,7 +3945,7 @@ async function renderPOSOrders() {
               <button onclick="editOrder(${s.id})" class="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] uppercase hover:bg-indigo-100 transition-all">
                 Edit
               </button>
-	              <button onclick="showReceiptPrintMenu(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
+              <button onclick="showReceiptPrintMenu(${s.id}, canPrintKitchenReceipt(), '${s.order_type || ''}')" class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-[10px] uppercase hover:bg-slate-200 transition-all">
 	                Print
 	              </button>
 	              ${primaryAction}
@@ -5645,6 +5645,11 @@ async function checkout(status = 'completed') {
             </button>
             `}
           </div>
+          ${orderType === 'delivery' ? `
+          <button onclick="printDeliveryReceipts(${completedSaleId})" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all">
+            Print Delivery Copies (Recipient + Supplier)
+          </button>
+          ` : ''}
           <button onclick="closeModal();renderPOS();" class="w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm transition-all">New Order</button>
         </div>
       </div>`,
@@ -5818,6 +5823,7 @@ const RECEIPT_FORMATS = Object.freeze({
   KITCHEN: "kitchen",
   CUSTOMER: "customer",
   UNPAID: "unpaid",
+  DELIVERY: "delivery",
 });
 
 function getReceiptPrintUrl(saleId, format = RECEIPT_FORMATS.CUSTOMER, autoPrint = true) {
@@ -5896,7 +5902,11 @@ function printKitchenReceipt(saleId) {
   });
 }
 
-function showReceiptPrintMenu(saleId, includeKitchen = canPrintKitchenReceipt()) {
+function printDeliveryReceipts(saleId) {
+  return printReceipt(saleId, RECEIPT_FORMATS.DELIVERY);
+}
+
+function showReceiptPrintMenu(saleId, includeKitchen = canPrintKitchenReceipt(), orderType = "") {
   openModal("Print Receipt", `
     <div class="space-y-3">
       ${includeKitchen ? `
@@ -5910,6 +5920,13 @@ function showReceiptPrintMenu(saleId, includeKitchen = canPrintKitchenReceipt())
         <div class="font-black text-indigo-700 dark:text-indigo-300 text-sm uppercase tracking-wide">Customer Bill</div>
         <p class="text-xs text-indigo-700/70 dark:text-indigo-300/70 mt-1">Customer copy with items, totals, received amount, due, and change.</p>
       </button>
+
+      ${orderType === "delivery" ? `
+        <button onclick="printDeliveryReceipts(${saleId}); closeModal();" class="w-full text-left p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 hover:border-emerald-300 dark:hover:border-emerald-400 transition-all">
+          <div class="font-black text-emerald-700 dark:text-emerald-300 text-sm uppercase tracking-wide">Delivery Copies</div>
+          <p class="text-xs text-emerald-700/70 dark:text-emerald-300/70 mt-1">Prints recipient copy first and supplier copy second on an 80mm roll.</p>
+        </button>
+      ` : ""}
 
       <button onclick="showPrintOptionsModal(${saleId})" class="w-full text-left p-4 rounded-2xl bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/20 hover:border-rose-300 dark:hover:border-rose-400 transition-all">
         <div class="font-black text-rose-700 dark:text-rose-300 text-sm uppercase tracking-wide">Unpaid Bill</div>
@@ -6661,7 +6678,7 @@ function _renderSalesTable() {
               <button onclick="returnSaleItems(${s.id})" class="p-1.5 rounded bg-rose-100 dark:bg-rose-500/10 hover:bg-rose-200 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors" title="Return Items">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 15L12 19M12 19L8 15M12 19V9C12 5.68629 14.6863 3 18 3" /></svg>
               </button>
-              <button onclick="showReceiptPrintMenu(${s.id})" class="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-400 transition-colors" title="Print Receipt">
+              <button onclick="showReceiptPrintMenu(${s.id}, canPrintKitchenReceipt(), '${s.order_type || ''}')" class="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-400 transition-colors" title="Print Receipt">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
               </button>
             </div>
@@ -7743,7 +7760,7 @@ async function viewCustomerLedger(customerId) {
           <td class="px-4 py-2.5 text-sm text-emerald-600 dark:text-emerald-400">Rs. ${fmt(s.amount_received)}</td>
           <td class="px-4 py-2.5 text-sm font-bold ${due > 0.01 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}">Rs. ${fmt(due)}</td>
           <td class="px-4 py-2.5 text-right">
-            <button onclick="showReceiptPrintMenu(${s.id})" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Print</button>
+            <button onclick="showReceiptPrintMenu(${s.id}, canPrintKitchenReceipt(), '${s.order_type || ''}')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Print</button>
           </td>
         </tr>`;
         })

@@ -4,7 +4,7 @@ const salesService = require("../services/SalesService");
 const { renderSaleReceiptPage } = require("../services/ReceiptPrintService");
 
 const router = express.Router();
-const FORMATS = new Set(["kitchen", "customer", "unpaid"]);
+const FORMATS = new Set(["kitchen", "customer", "unpaid", "delivery"]);
 
 function getRequestBaseUrl(req) {
   return `${req.protocol}://${req.get("host")}`;
@@ -70,7 +70,7 @@ router.get("/jobs/:id", async (req, res) => {
   const content = parsePrintJobContent(job.content_json);
   if (!content?.sale_id) return res.status(400).send("Invalid print job content");
 
-  const format = ["kitchen", "customer", "unpaid"].includes(content.format)
+  const format = ["kitchen", "customer", "unpaid", "delivery"].includes(content.format)
     ? content.format
     : "kitchen";
 

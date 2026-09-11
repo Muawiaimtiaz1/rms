@@ -278,16 +278,61 @@ function renderKitchenReceipt(details) {
   `;
 }
 
+function renderDeliveryReceipt(details) {
+  const { sale, items, shop } = details;
+  const supplierName = shop?.receipt_header_text || shop?.receipt_extended_name || shop?.name || "Supplier";
+  const orderRows = items.map((item) => `
+    <tr>
+      <td>${escapeHtml(itemName(item))}</td>
+      <td class="text-right bold">${escapeHtml(item.quantity)}</td>
+    </tr>
+  `).join("");
+
+  const copy = (copyFor) => `
+    <section class="receipt delivery-receipt">
+      <div class="text-center">
+        <h1>DELIVERY ORDER</h1>
+        <div class="copy-label">${copyFor} COPY</div>
+        <div class="bold">Order #${escapeHtml(sale.id)}</div>
+      </div>
+      <hr class="divider" />
+      <div class="party-details">
+        <div><strong>Supplier:</strong> ${escapeHtml(supplierName)}</div>
+        ${shop?.receipt_phone ? `<div><strong>Supplier phone:</strong> ${escapeHtml(shop.receipt_phone)}</div>` : ""}
+        ${shop?.receipt_address ? `<div><strong>Supplier address:</strong> ${escapeHtml(shop.receipt_address)}</div>` : ""}
+      </div>
+      <hr class="divider" />
+      <div class="party-details">
+        <div><strong>Recipient:</strong> ${escapeHtml(sale.customer_name || "Not provided")}</div>
+        <div><strong>Phone:</strong> ${escapeHtml(sale.customer_phone || "Not provided")}</div>
+        <div><strong>Address:</strong> ${escapeHtml(sale.delivery_address || "Not provided")}</div>
+      </div>
+      <hr class="divider" />
+      <table>
+        <thead><tr><th>Order item</th><th class="text-right">Qty</th></tr></thead>
+        <tbody>${orderRows}</tbody>
+      </table>
+      <hr class="divider" />
+      <div class="delivery-meta">Date: ${escapeHtml(new Date(sale.created_at).toLocaleString())}</div>
+    </section>`;
+
+  return `${copy("RECIPIENT")}<div class="cut-line">CUT HERE</div>${copy("SUPPLIER")}`;
+}
+
 function renderSaleReceiptPage(details, options = {}) {
-  const format = ["kitchen", "customer", "unpaid"].includes(options.format) ? options.format : "customer";
+  const format = ["kitchen", "customer", "unpaid", "delivery"].includes(options.format) ? options.format : "customer";
   const autoPrint = options.autoPrint !== false;
   const shop = details.shop || {};
   const body = format === "kitchen"
     ? renderKitchenReceipt(details, options)
-    : renderCustomerReceipt(details, { ...options, format });
+    : format === "delivery"
+      ? renderDeliveryReceipt(details, options)
+      : renderCustomerReceipt(details, { ...options, format });
   const title = format === "kitchen"
     ? `Kitchen Order #${details.sale.id}`
-    : `${format === "unpaid" ? "Unpaid Bill" : "Customer Bill"} #${details.sale.id}`;
+    : format === "delivery"
+      ? `Delivery Receipts #${details.sale.id}`
+      : `${format === "unpaid" ? "Unpaid Bill" : "Customer Bill"} #${details.sale.id}`;
 
   return `<!DOCTYPE html>
 <html>
@@ -363,6 +408,12 @@ function renderSaleReceiptPage(details, options = {}) {
     .kitchen-receipt .special-note { font-size: 12px; color: #000; border: 1px solid #000; padding: 2px; display: inline-block; margin-top: 4px; font-weight: bold; }
     .kitchen-receipt .qty { font-size: 18px; font-weight: 900; }
     .kitchen-receipt .footer { font-size: 10px; margin-top: 15px; text-align: center; border-top: 1px dashed #000; padding-top: 10px; }
+    .delivery-receipt { padding-top: 3mm; padding-bottom: 3mm; }
+    .delivery-receipt .copy-label { margin: 3px 0; padding: 3px; border: 2px solid #000; font-size: 14px; font-weight: 900; letter-spacing: 1px; }
+    .delivery-receipt .party-details { font-size: 11px; overflow-wrap: anywhere; }
+    .delivery-receipt .delivery-meta { font-size: 10px; text-align: center; }
+    .cut-line { width: 61mm; margin: 4mm 10mm 4mm 3mm; border-top: 2px dashed #000; text-align: center; font: 700 9px 'Courier New', monospace; padding-top: 2px; box-sizing: border-box; }
+    @media print { .cut-line { break-after: avoid; page-break-after: avoid; } }
   </style>
 </head>
 <body>

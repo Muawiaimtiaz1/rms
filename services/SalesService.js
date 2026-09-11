@@ -294,7 +294,7 @@ class SalesService {
 
   async queueReceiptPrint(saleId, shopId, format = 'customer', trx) {
     const dbInstance = trx || db;
-    const normalizedFormat = ['kitchen', 'customer', 'unpaid'].includes(format) ? format : 'customer';
+    const normalizedFormat = ['kitchen', 'customer', 'unpaid', 'delivery'].includes(format) ? format : 'customer';
     const bill = await this.getBill(saleId, shopId);
     if (!bill) return { queued: 0, printer_configured: false };
 
@@ -312,7 +312,7 @@ class SalesService {
     const { resolvePrinterRoute } = await this.getPrinterRouting(dbInstance, shopId);
     let targetPrinterRouteValue = null;
 
-    if (normalizedFormat === 'customer' && shopSettings?.customer_bill_printer) {
+    if (['customer', 'delivery'].includes(normalizedFormat) && shopSettings?.customer_bill_printer) {
       targetPrinterRouteValue = shopSettings.customer_bill_printer;
     } else if (normalizedFormat === 'unpaid' && shopSettings?.unpaid_bill_printer) {
       targetPrinterRouteValue = shopSettings.unpaid_bill_printer;
