@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS shops (
   auto_calculate_damage_to_loss INTEGER DEFAULT 1,
   use_logo_on_receipt INTEGER DEFAULT 1,
   use_text_on_receipt INTEGER DEFAULT 1,
+  currency_code TEXT NOT NULL DEFAULT 'PKR',
   customer_bill_printer TEXT,
   unpaid_bill_printer TEXT,
   logo_data TEXT,

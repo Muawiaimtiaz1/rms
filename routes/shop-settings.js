@@ -44,7 +44,7 @@ router.get("/", requireAuth, async (req, res) => {
                 contact_font_size, contact_align, contact_padding,
                 footer_font_size, footer_font_style, footer_margin,
                 divider_style, divider_width, section_gap, auto_calculate_damage_to_loss,
-                customer_bill_printer, unpaid_bill_printer
+                customer_bill_printer, unpaid_bill_printer, currency_code
          FROM shops WHERE id = ${isPostgres ? '$1' : '?'}`;
 
     let shop;
@@ -85,7 +85,7 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), async (req, r
       "header_spacing", "extended_name_font_size", "extended_name_font_weight", "extended_name_spacing",
       "contact_font_size", "contact_align", "contact_padding", "footer_font_size", "footer_font_style",
       "footer_margin", "divider_style", "divider_width", "section_gap", "auto_calculate_damage_to_loss",
-      "customer_bill_printer", "unpaid_bill_printer", "logo_data"
+      "customer_bill_printer", "unpaid_bill_printer", "logo_data", "currency_code"
     ];
 
     const updates = [];
@@ -94,7 +94,10 @@ router.post("/", requireAuth, requireAdmin, upload.single("logo"), async (req, r
     fields.forEach(f => {
         if (req.body[f] !== undefined) {
             let val = req.body[f];
-            if (["use_logo_on_receipt", "use_text_on_receipt", "auto_calculate_damage_to_loss"].includes(f)) {
+            if (f === "currency_code") {
+                const allowed = ["PKR", "USD", "INR", "EUR", "GBP", "AED", "SAR", "BDT", "CAD", "AUD"];
+                val = allowed.includes(String(val).toUpperCase()) ? String(val).toUpperCase() : "PKR";
+            } else if (["use_logo_on_receipt", "use_text_on_receipt", "auto_calculate_damage_to_loss"].includes(f)) {
                 val = (val === "true" || val === true || val === 1) ? 1 : 0;
             }
             updates.push(`${f} = ${isPostgres ? '$' + (values.push(val)) : '?'}`);

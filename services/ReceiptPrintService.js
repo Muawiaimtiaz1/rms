@@ -26,8 +26,8 @@ function parseJson(value, fallback) {
   }
 }
 
-function formatMoney(value) {
-  return Number(value || 0).toFixed(0);
+function formatMoney(value, currencyCode = "PKR") {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: currencyCode || "PKR", maximumFractionDigits: 2 }).format(Number(value || 0));
 }
 
 function formatOrderType(type) {
@@ -170,8 +170,8 @@ function renderCustomerReceipt(details, options) {
             <tr>
               <td>${escapeHtml(itemName(item))}</td>
               <td class="text-center">${escapeHtml(item.quantity)}</td>
-              <td class="text-right">${formatMoney(item.price_at_sale)}</td>
-              <td class="text-right">${formatMoney(Number(item.quantity || 0) * Number(item.price_at_sale || 0))}</td>
+              <td class="text-right">${formatMoney(item.price_at_sale, shop.currency_code)}</td>
+              <td class="text-right">${formatMoney(Number(item.quantity || 0) * Number(item.price_at_sale || 0), shop.currency_code)}</td>
             </tr>
           `).join("")}
         </tbody>
@@ -180,10 +180,10 @@ function renderCustomerReceipt(details, options) {
       <hr class="divider" />
 
       <div class="text-right">
-        <div>Subtotal: Rs. ${formatMoney(subtotal)}</div>
-        ${discount > 0 ? `<div>Discount: -Rs. ${formatMoney(discount)}</div>` : ""}
-        ${taxPct > 0 ? `<div>Tax (${escapeHtml(taxPct)}%): Rs. ${formatMoney(taxAmt)}</div>` : ""}
-        <div class="bold total-row" style="margin-top: 4px;">GRAND TOTAL: Rs. ${formatMoney(grandTotal)}</div>
+        <div>Subtotal: ${formatMoney(subtotal, shop.currency_code)}</div>
+        ${discount > 0 ? `<div>Discount: -${formatMoney(discount, shop.currency_code)}</div>` : ""}
+        ${taxPct > 0 ? `<div>Tax (${escapeHtml(taxPct)}%): ${formatMoney(taxAmt, shop.currency_code)}</div>` : ""}
+        <div class="bold total-row" style="margin-top: 4px;">GRAND TOTAL: ${formatMoney(grandTotal, shop.currency_code)}</div>
       </div>
 
       <hr class="divider" />
@@ -192,14 +192,14 @@ function renderCustomerReceipt(details, options) {
         ${isUnpaid ? `
           <div style="text-align: center; border: 1px dashed #111827; padding: 5px; margin-top: 5px; font-weight: bold;">
             *** UNPAID BILL ***<br>
-            Total: Rs. ${formatMoney(grandTotal)}<br>
-            Balance Due: Rs. ${formatMoney(remaining)}
+            Total: ${formatMoney(grandTotal, shop.currency_code)}<br>
+            Balance Due: ${formatMoney(remaining, shop.currency_code)}
           </div>
         ` : `
           <div><strong>Method:</strong> ${escapeHtml(method)}</div>
-          <div><strong>Received:</strong> Rs. ${formatMoney(received)}</div>
-          ${remaining > 0 ? `<div class="bold"><strong>Due:</strong> Rs. ${formatMoney(remaining)}</div>` : ""}
-          ${remaining < 0 ? `<div class="bold"><strong>Change:</strong> Rs. ${formatMoney(Math.abs(remaining))}</div>` : ""}
+          <div><strong>Received:</strong> ${formatMoney(received, shop.currency_code)}</div>
+          ${remaining > 0 ? `<div class="bold"><strong>Due:</strong> ${formatMoney(remaining, shop.currency_code)}</div>` : ""}
+          ${remaining < 0 ? `<div class="bold"><strong>Change:</strong> ${formatMoney(Math.abs(remaining), shop.currency_code)}</div>` : ""}
         `}
       </div>
 

@@ -37,6 +37,7 @@ router.get('/me', async (req, res) => {
         shop_created_at: freshUser.shop_created_at,
         shop_phone: freshUser.shop_phone,
         shop_address: freshUser.shop_address,
+        currency_code: freshUser.currency_code,
         subscription: freshUser.subscription,
         name: freshUser.name,
         role: freshUser.role,

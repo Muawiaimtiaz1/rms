@@ -818,6 +818,7 @@ class AnalyticsService {
 
   async getReportsData(shopId, filters = {}) {
     const bounds = this.getPeriodBounds(filters.period || '30days', filters.from, filters.to);
+    const shopSettings = await db('shops').where({ id: shopId }).select('currency_code').first();
     const allowedChannels = new Set(['dine_in', 'takeaway', 'delivery']);
     const allowedPayments = new Set(['cash', 'card', 'online']);
     const channel = allowedChannels.has(filters.channel) ? filters.channel : null;
@@ -840,7 +841,7 @@ class AnalyticsService {
 
     const [sales, sold, refunds, returnedCost, expenses, expenseCategories, channelRows, channelRefunds, paymentRows, paymentRefunds, productRows, returnedProducts, dailyRows, dailyRefunds] = await Promise.all([
       salesBase().select(db.raw('COUNT(s.id) as orders'), db.raw('COALESCE(SUM(s.total), 0) as revenue'), db.raw('COALESCE(SUM(s.discount), 0) as discounts'), db.raw('COALESCE(SUM(s.amount_received), 0) as received'), db.raw('COALESCE(SUM(CASE WHEN s.total > COALESCE(s.amount_received, 0) THEN s.total - COALESCE(s.amount_received, 0) ELSE 0 END), 0) as outstanding')).first(),
-      salesBase().join('sale_items as si', 's.id', 'si.sale_id').select(db.raw('COALESCE(SUM(si.quantity), 0) as units'), db.raw('COALESCE(SUM(si.quantity * si.buying_price_at_sale), 0) as cogs')).first(),
+      salesBase().join('sale_items as si', 's.id', 'si.sale_id').select(db.raw('COALESCE(SUM(si.quantity), 0) as units'), db.raw('COALESCE(SUM(si.quantity * si.buying_price_at_sale), 0) as cogs'), db.raw('COUNT(*) as cost_lines'), db.raw('SUM(CASE WHEN COALESCE(si.buying_price_at_sale, 0) > 0 THEN 1 ELSE 0 END) as costed_lines')).first(),
       returnsBase().select(db.raw('COUNT(DISTINCT r.id) as count'), db.raw('COALESCE(SUM(r.total_refund), 0) as amount')).first(),
       returnsBase().join('return_items as ri', 'r.id', 'ri.return_id').select(db.raw('COALESCE(SUM(ri.quantity * ri.buying_price_at_sale), 0) as cogs'), db.raw('COALESCE(SUM(CASE WHEN ri.is_damage = 1 THEN ri.quantity * ri.buying_price_at_sale ELSE 0 END), 0) as damage')).first(),
       db('expenses').where({ shop_id: shopId }).whereBetween('date', [bounds.start.slice(0, 10), bounds.end.slice(0, 10)]).sum('amount as amount').first(),
@@ -849,7 +850,7 @@ class AnalyticsService {
       returnsBase().select('s.order_type as label').sum('r.total_refund as refunds').groupBy('s.order_type'),
       salesBase().select('s.payment_method as label').sum('s.total as revenue').sum('s.amount_received as received').count('s.id as orders').groupBy('s.payment_method').orderBy('revenue', 'desc'),
       returnsBase().select('s.payment_method as label').sum('r.total_refund as refunds').groupBy('s.payment_method'),
-      salesBase().join('sale_items as si', 's.id', 'si.sale_id').leftJoin(itemTotals, 's.id', 'item_totals.sale_id').leftJoin('products as p', 'si.product_id', 'p.id').select('p.id as product_id', db.raw("COALESCE(p.name, si.custom_name, 'Item') as name"), db.raw("COALESCE(p.category, 'General') as category"), db.raw('SUM(si.quantity) as units'), db.raw('SUM(CASE WHEN COALESCE(item_totals.subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * s.total / item_totals.subtotal ELSE 0 END) as sales'), db.raw('SUM(si.quantity * si.buying_price_at_sale) as cost')).groupBy('p.id', 'p.name', 'p.category', 'si.custom_name').orderBy('sales', 'desc').limit(100),
+      salesBase().join('sale_items as si', 's.id', 'si.sale_id').leftJoin(itemTotals, 's.id', 'item_totals.sale_id').leftJoin('products as p', 'si.product_id', 'p.id').select('p.id as product_id', db.raw("COALESCE(p.name, si.custom_name, 'Item') as name"), db.raw("COALESCE(p.category, 'General') as category"), db.raw('SUM(si.quantity) as units'), db.raw('COUNT(*) as cost_lines'), db.raw('SUM(CASE WHEN COALESCE(si.buying_price_at_sale, 0) > 0 THEN 1 ELSE 0 END) as costed_lines'), db.raw('SUM(CASE WHEN COALESCE(item_totals.subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * s.total / item_totals.subtotal ELSE 0 END) as sales'), db.raw('SUM(si.quantity * si.buying_price_at_sale) as cost')).groupBy('p.id', 'p.name', 'p.category', 'si.custom_name').orderBy('sales', 'desc').limit(100),
       returnsBase().join('return_items as ri', 'r.id', 'ri.return_id').leftJoin('products as p', 'ri.product_id', 'p.id').select('ri.product_id', 'p.name', 'p.category', db.raw('SUM(ri.quantity) as units'), db.raw('SUM(ri.quantity * ri.refund_price) as refunds'), db.raw('SUM(ri.quantity * ri.buying_price_at_sale) as returned_cost')).groupBy('ri.product_id', 'p.name', 'p.category'),
       salesBase().select(db.raw("substr(CAST(s.created_at AS TEXT), 1, 10) as date")).sum('s.total as revenue').count('s.id as orders').groupByRaw("substr(CAST(s.created_at AS TEXT), 1, 10)").orderBy('date', 'asc'),
       returnsBase().select(db.raw("substr(CAST(r.created_at AS TEXT), 1, 10) as date")).sum('r.total_refund as refunds').groupByRaw("substr(CAST(r.created_at AS TEXT), 1, 10)")
@@ -859,14 +860,17 @@ class AnalyticsService {
     const refundAmount = Number(refunds?.amount || 0);
     const netRevenue = grossRevenue - refundAmount;
     const netCogs = Number(sold?.cogs || 0) - Number(returnedCost?.cogs || 0);
-    const grossProfit = netRevenue - netCogs;
+    const costCoveragePct = Number(sold?.cost_lines || 0) ? Number(sold.costed_lines || 0) / Number(sold.cost_lines) * 100 : 100;
+    const isCostDataComplete = costCoveragePct === 100;
+    const grossProfit = isCostDataComplete ? netRevenue - netCogs : null;
     const operatingExpenses = Number(expenses?.amount || 0);
     const damageLoss = Number(returnedCost?.damage || 0);
-    const segmentContribution = grossProfit - damageLoss;
-    const netProfit = isSegmented ? null : segmentContribution - operatingExpenses;
+    const segmentContribution = grossProfit === null ? null : grossProfit - damageLoss;
+    const netProfit = isSegmented || segmentContribution === null ? null : segmentContribution - operatingExpenses;
 
     return {
       bounds,
+      currencyCode: shopSettings?.currency_code || 'PKR',
       filters: { channel: channel || 'all', payment_method: payment || 'all' },
       kpis: {
         orders: Number(sales?.orders || 0), unitsSold: Number(sold?.units || 0), grossRevenue,
@@ -874,7 +878,8 @@ class AnalyticsService {
         damageLoss, netProfit, segmentContribution, isSegmented, received: Number(sales?.received || 0),
         outstanding: Number(sales?.outstanding || 0),
         averageOrderValue: Number(sales?.orders || 0) ? netRevenue / Number(sales.orders) : 0,
-        grossMargin: netRevenue ? grossProfit / netRevenue * 100 : 0,
+        costCoveragePct, isCostDataComplete,
+        grossMargin: isCostDataComplete && netRevenue ? grossProfit / netRevenue * 100 : null,
         netMargin: !isSegmented && netRevenue ? netProfit / netRevenue * 100 : null
       },
       channels: channelRows.map(row => ({ ...row, refunds: Number(channelRefunds.find(ret => ret.label === row.label)?.refunds || 0), revenue: Number(row.revenue || 0) - Number(channelRefunds.find(ret => ret.label === row.label)?.refunds || 0) })),
@@ -884,7 +889,8 @@ class AnalyticsService {
         const returned = returnedProducts.find(ret => row.product_id != null && Number(ret.product_id) === Number(row.product_id)) || {};
         const netSales = Number(row.sales || 0) - Number(returned.refunds || 0);
         const netCost = Number(row.cost || 0) - Number(returned.returned_cost || 0);
-        return { ...row, returnedUnits: Number(returned.units || 0), sales: netSales, cost: netCost, profit: netSales - netCost };
+        const costComplete = Number(row.cost_lines || 0) === Number(row.costed_lines || 0);
+        return { ...row, returnedUnits: Number(returned.units || 0), sales: netSales, cost: netCost, costComplete, profit: costComplete ? netSales - netCost : null };
       }).concat(returnedProducts.filter(ret => !productRows.some(row => row.product_id != null && Number(row.product_id) === Number(ret.product_id))).map(ret => ({
         product_id: ret.product_id, name: ret.name || 'Returned item', category: ret.category || 'General', units: 0,
         returnedUnits: Number(ret.units || 0), sales: -Number(ret.refunds || 0), cost: -Number(ret.returned_cost || 0),

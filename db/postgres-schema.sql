@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS shops (
   section_gap INTEGER DEFAULT 10,
   auto_calculate_damage_to_loss INTEGER DEFAULT 1,
   receipt_font_family TEXT DEFAULT 'monospace',
+  currency_code TEXT NOT NULL DEFAULT 'PKR',
   shop_type TEXT DEFAULT 'retail',
   receipt_extended_name TEXT,
   extended_name_font_size INTEGER DEFAULT 10,

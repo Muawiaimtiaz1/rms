@@ -34,7 +34,7 @@ function renderBarChart(containerId, dataPoints) {
     const barHeight = (dp.sales / maxVal) * chartHeight;
     const y = height - paddingY - barHeight;
 
-    const formattedSales = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(dp.sales);  
+    const formattedSales = formatShopCurrency(dp.sales, { maximumFractionDigits: 0 });
 
     const tooltip = `
       <div class="flex flex-col gap-0.5 z-[9999]">
@@ -166,7 +166,7 @@ function renderLineChart(containerId, dataPoints) {
       ${dataPoints.map((dp, i) => {
         const x = getX(i);
         const y = getY(dp.sales);
-        const formattedSales = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(dp.sales);  
+        const formattedSales = formatShopCurrency(dp.sales, { maximumFractionDigits: 0 });
         
         return `
           <g class="group/dot cursor-pointer select-none">
@@ -241,7 +241,7 @@ function renderDonutChart(containerId, slices, totalValue) {
     accumulatedPercent += pct;
     const color = colors[idx % colors.length];
  
-    const formattedSales = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(s.sales);  
+    const formattedSales = formatShopCurrency(s.sales);
     const displayPct = (pct * 100).toFixed(1);
 
     // Build the accompanying HTML tooltip to prevent SVG clipping
@@ -286,7 +286,7 @@ function renderDonutChart(containerId, slices, totalValue) {
   }).join('');
  
   // Format central inner sum
-  const formattedTotal = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(totalValue);
+  const formattedTotal = formatShopCurrency(totalValue);
 
   // Generate responsive legend
   const legendHtml = slices.map((s, idx) => {

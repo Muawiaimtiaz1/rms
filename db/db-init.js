@@ -241,6 +241,7 @@ async function initPostgres() {
 
     // Check for bill-printer routing columns in shops
     const shopPrinterColumns = [
+      ["currency_code", "TEXT NOT NULL DEFAULT 'PKR'"],
       ["customer_bill_printer", "TEXT"],
       ["unpaid_bill_printer", "TEXT"],
       ["logo_data", "TEXT"],

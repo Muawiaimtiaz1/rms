@@ -826,6 +826,7 @@ if (!tableExists) {
       { name: "receipt_policies", type: "TEXT" },
       { name: "use_logo_on_receipt", type: "INTEGER DEFAULT 1" },
       { name: "receipt_font_family", type: "TEXT DEFAULT 'monospace'" },
+      { name: "currency_code", type: "TEXT DEFAULT 'PKR'" },
       // Typography settings
       { name: "header_font_size", type: "INTEGER DEFAULT 18" },
       { name: "header_font_weight", type: "TEXT DEFAULT 'bold'" },

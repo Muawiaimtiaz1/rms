@@ -133,6 +133,23 @@ window.addEventListener("click", (e) => {
 
 // ─── State ──────────────────────────────────────────────────────────
 let currentUser = null;
+function getShopCurrencyCode() { return currentUser?.currency_code || _receiptSettings?.currency_code || 'PKR'; }
+function formatShopCurrency(value, options = {}) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: getShopCurrencyCode(), minimumFractionDigits: options.minimumFractionDigits ?? 0, maximumFractionDigits: options.maximumFractionDigits ?? 2 }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+async function saveShopCurrency() {
+  const currency = document.getElementById('shop-currency-code')?.value || 'PKR';
+  const formData = new FormData(); formData.append('currency_code', currency);
+  const response = await fetch('/api/shop-settings', { method: 'POST', body: formData });
+  const result = await response.json();
+  if (!response.ok || result.error) return toast(result.error || 'Failed to save currency', 'error');
+  currentUser.currency_code = currency;
+  if (_receiptSettings) _receiptSettings.currency_code = currency;
+  toast('Shop currency updated');
+  renderSettings('general');
+}
 let cart = [];
 let allProducts = [];
 let productMap = {}; // Index for O(1) lookups
@@ -911,6 +928,7 @@ const PLATFORM_OWNER_HIDDEN_SETTINGS_TABS = new Set(["receipt", "printer-routing
 
 function getSettingsNavItems() {
   const items = [
+    { id: 'general', label: 'General Settings', icon: 'M12 6V4m0 16v-2m6-6h2M4 12H2m15.071-5.071l1.414-1.414M5.515 18.485l1.414-1.414m10.142 1.414l1.414 1.414M5.515 5.515l1.414 1.414M16 12a4 4 0 11-8 0 4 4 0 018 0z' },
     { id: 'profile', label: 'Account Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
     { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
     { id: 'printer-routing', label: 'Printers & Routing', icon: 'M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z' }
@@ -933,7 +951,7 @@ async function renderSettings(tab) {
   }
 
   // Fetch receipt settings if on receipt tab
-  if (_activeSettingsTab === "receipt") {
+  if (_activeSettingsTab === "receipt" || _activeSettingsTab === "general") {
     await fetchReceiptSettings();
   }
 
@@ -1010,6 +1028,16 @@ async function renderSettings(tab) {
 
 
 async function renderActiveSettingsContent() {
+  if (_activeSettingsTab === "general") {
+    const settings = _receiptSettings || {};
+    const currencies = [['PKR','Pakistani Rupee'],['USD','US Dollar'],['INR','Indian Rupee'],['EUR','Euro'],['GBP','British Pound'],['AED','UAE Dirham'],['SAR','Saudi Riyal'],['BDT','Bangladeshi Taka'],['CAD','Canadian Dollar'],['AUD','Australian Dollar']];
+    return `<div class="max-w-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-sm">
+      <h3 class="text-xl font-black text-slate-900 dark:text-white">Shop Currency</h3><p class="text-sm text-slate-500 mt-1 mb-6">This currency is used in reports and newly generated receipts.</p>
+      <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Currency</label>
+      <select id="shop-currency-code" class="w-full px-5 py-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-bold">${currencies.map(([code,name])=>`<option value="${code}" ${(settings.currency_code||currentUser.currency_code||'PKR')===code?'selected':''}>${code} — ${name}</option>`).join('')}</select>
+      <button onclick="saveShopCurrency()" class="mt-6 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm">Save Currency</button>
+    </div>`;
+  }
   if (_activeSettingsTab === "profile") {
     return `
       <div class="w-full animate-in fade-in slide-in-from-right-4 duration-500">
@@ -3550,7 +3578,7 @@ function syncPOSCheckoutSummary(totalOverride) {
   const grandTotal = typeof totalOverride === "number"
     ? totalOverride
     : parseFloat($c("cart-total")?.dataset.total) || 0;
-  const totalText = "Rs. " + grandTotal.toFixed(2);
+  const totalText = formatShopCurrency(grandTotal, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const itemCount = cart.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
 
   const buttonTotal = $c("pos-checkout-total");
@@ -5222,9 +5250,9 @@ function calculateCartTotal() {
   const taxAmt = taxable > 0 ? taxable * (taxPct / 100) : 0;
   const grandTotal = taxable > 0 ? taxable + taxAmt : 0;
 
-  $c("cart-subtotal").textContent = "Rs. " + subtotal.toLocaleString();
-  $c("cart-tax-amt").textContent = "Rs. " + taxAmt.toFixed(2);
-  $c("cart-total").textContent = "Rs. " + grandTotal.toFixed(2);
+  $c("cart-subtotal").textContent = formatShopCurrency(subtotal);
+  $c("cart-tax-amt").textContent = formatShopCurrency(taxAmt);
+  $c("cart-total").textContent = formatShopCurrency(grandTotal);
   $c("cart-total").dataset.total = grandTotal;
   syncPOSCheckoutSummary(grandTotal);
 
@@ -5284,7 +5312,7 @@ function calculateRemaining() {
   const remainingSize = getPOSLayout() === "split" && _currentPage === "pos" ? "text-xs" : "text-xl";
 
   if (remaining <= 0) {
-    el.textContent = "Change: Rs. " + Math.abs(remaining).toFixed(2);
+    el.textContent = "Change: " + formatShopCurrency(Math.abs(remaining));
     el.className = `font-bold text-emerald-400 ${remainingSize}`;
     if (nameInp) {
       nameInp.placeholder = "Optional";
@@ -5297,7 +5325,7 @@ function calculateRemaining() {
     }
     if (phoneLabel) phoneLabel.classList.remove("text-rose-500");
   } else {
-    el.textContent = "Due: Rs. " + remaining.toFixed(2);
+    el.textContent = "Due: " + formatShopCurrency(remaining);
     el.className = `font-bold text-rose-400 ${remainingSize}`;
     if (nameInp) {
       nameInp.placeholder = "REQUIRED for Dues";
@@ -5603,7 +5631,7 @@ async function checkout(status = 'completed') {
       toast("Order updated successfully!");
       _editingOrderId = null;
     } else {
-      toast("Order placed! Rs. " + r.total);
+      toast("Order placed! " + formatShopCurrency(r.total));
     }
 
     closePOSCheckout(true);
@@ -5627,7 +5655,7 @@ async function checkout(status = 'completed') {
       `
       <div class="text-center space-y-4">
         <div class="text-5xl">${isEditing ? '📝' : '🎉'}</div>
-        <p class="text-slate-300">Order #${completedSaleId} — <span class="text-emerald-400 font-bold">Rs. ${r.total.toFixed(2)}</span></p>
+        <p class="text-slate-300">Order #${completedSaleId} — <span class="text-emerald-400 font-bold">${formatShopCurrency(r.total)}</span></p>
         ${orderType === 'takeaway' ? `<p class="text-amber-400 font-bold text-lg">Token: ${token_number}</p>` : ''}
         <div class="grid grid-cols-1 gap-2">
           <div class="grid ${window._posIsRetail ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'} gap-2">

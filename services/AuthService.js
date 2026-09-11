@@ -181,6 +181,7 @@ class AuthService {
     let shopCreatedAt = null;
     let shopPhone = '';
     let shopAddress = '';
+    let currencyCode = 'PKR';
 
     if (user.role !== 'superadmin') {
       const shop = await db('shops').where({ id: user.shop_id }).first();
@@ -192,6 +193,7 @@ class AuthService {
       shopCreatedAt = shop.created_at;
       shopPhone = shop.receipt_phone || '';
       shopAddress = shop.receipt_address || '';
+      currencyCode = shop.currency_code || 'PKR';
 
       const shopPanels = shop.allowed_panels ? JSON.parse(shop.allowed_panels) : [];
       if (user.role === 'admin') {
@@ -210,6 +212,7 @@ class AuthService {
       shop_created_at: shopCreatedAt,
       shop_phone: shopPhone,
       shop_address: shopAddress,
+      currency_code: currencyCode,
       subscription,
       allowed_panels: allowedPanels,
       can_manage_register: !!user.can_manage_register
