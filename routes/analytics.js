@@ -6,6 +6,7 @@ const db = require('../db/knex');
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
+const sharp = require('sharp');
 
 function reportPdfMoney(value, currency) {
     if (value === null || value === undefined) return 'N/A';
@@ -33,8 +34,10 @@ function writePdfTable(doc, title, headers, rows) {
     };
     const startSection = () => {
       if (doc.y > 690) doc.addPage();
-      doc.moveDown(0.7).fontSize(13).font('Helvetica-Bold').fillColor('#111827').text(title);
-      doc.moveDown(0.35); drawHeader();
+      const headingY = doc.y + 12;
+      doc.fontSize(13).font('Helvetica-Bold').fillColor('#111827').text(title, left, headingY, { width: tableWidth, align: 'left' });
+      doc.y = headingY + 22;
+      drawHeader();
     };
     startSection();
     if (!rows.length) rows = [['No records found', ...headers.slice(1).map(() => '')]];
@@ -42,7 +45,7 @@ function writePdfTable(doc, title, headers, rows) {
       const values = headers.map((_, i) => String(row[i] ?? ''));
       doc.font('Helvetica').fontSize(7.5);
       const rowHeight = Math.max(21, ...values.map((value, i) => doc.heightOfString(value, { width: widths[i] - 10, lineGap: 1 }) + 10));
-      if (doc.y + rowHeight > bottom) { doc.addPage(); doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155').text(`${title} - continued`); doc.moveDown(0.3); drawHeader(); }
+      if (doc.y + rowHeight > bottom) { doc.addPage(); doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155').text(`${title} - continued`, left, 40, { width: tableWidth, align: 'left' }); doc.y = 58; drawHeader(); }
       const y = doc.y;
       if (rowIndex % 2 === 1) doc.save().rect(left, y, tableWidth, rowHeight).fill('#f8fafc').restore();
       let x = left;
@@ -56,10 +59,11 @@ function writePdfTable(doc, title, headers, rows) {
     });
 }
 
-function getPdfLogoSource(shop) {
+async function getPdfLogoSource(shop) {
     try {
-      if (shop?.logo_data && /^data:image\/(png|jpe?g);base64,/i.test(shop.logo_data)) {
-        return Buffer.from(shop.logo_data.split(',')[1], 'base64');
+      if (shop?.logo_data && /^data:image\/(png|jpe?g|webp);base64,/i.test(shop.logo_data)) {
+        const source = Buffer.from(shop.logo_data.split(',')[1], 'base64');
+        return /^data:image\/webp/i.test(shop.logo_data) ? await sharp(source).png().toBuffer() : source;
       }
       if (shop?.logo_path) {
         const relative = String(shop.logo_path).replace(/^[/\\]+/, '');
@@ -73,8 +77,8 @@ function getPdfLogoSource(shop) {
     return null;
 }
 
-function drawPdfReportHeader(doc, shop, type, data) {
-    const top = 36, logo = getPdfLogoSource(shop);
+async function drawPdfReportHeader(doc, shop, type, data) {
+    const top = 36, logo = await getPdfLogoSource(shop);
     if (logo) {
       try { doc.image(logo, 40, top, { fit: [70, 52], align: 'center', valign: 'center' }); }
       catch (error) { console.warn('Report logo could not be rendered:', error.message); }
@@ -133,7 +137,7 @@ router.get('/reports.pdf', requireAuth, async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     doc.pipe(res);
-    drawPdfReportHeader(doc, shop, type, data);
+    await drawPdfReportHeader(doc, shop, type, data);
     const k = data.kpis;
     if (!k.isCostDataComplete) {
       doc.moveDown(0.5).font('Helvetica-Bold').fontSize(9).fillColor('#92400e').text(`DATA QUALITY WARNING: Profit is unavailable because only ${Number(k.costCoveragePct || 0).toFixed(1)}% of sold item rows contain historical buying cost.`);
