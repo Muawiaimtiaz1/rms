@@ -41,6 +41,15 @@ const upload = multer({
 
 // GET /api/products
 router.get('/', requireAuth, async (req, res) => {
+    if (req.query.paginated === 'true') {
+        const result = await productService.getPaginatedProducts(req.session.user.shop_id, {
+            page: req.query.page,
+            limit: req.query.limit,
+            search: req.query.search,
+            stock: req.query.stock
+        });
+        return res.json(result);
+    }
     const products = await productService.getAllProducts(req.session.user.shop_id);
     res.json(products);
 });

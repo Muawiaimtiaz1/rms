@@ -2060,6 +2060,11 @@ const INVENTORY_STOCK_FILTER_LABELS = {
   low: "low stock product(s)",
   out: "out of stock product(s)",
 };
+let _inventoryPage = 1;
+let _inventoryLimit = 25;
+let _inventorySearch = "";
+let _inventoryStockFilter = "all";
+let _inventoryLoadSequence = 0;
 
 function inventoryNumber(value) {
   const num = Number(value);
@@ -2089,18 +2094,32 @@ function inventoryStockFilterLabel(filter) {
   return INVENTORY_STOCK_FILTER_LABELS[filter] || INVENTORY_STOCK_FILTER_LABELS.all;
 }
 
-async function renderProducts(onlyLowStock = false) {
-  const [products, brands] = await Promise.all([
-    api("/api/products"),
-    api("/api/brands"),
+async function renderProducts(onlyLowStock = false, preserveFilters = false) {
+  if (!preserveFilters) {
+    _inventoryPage = 1;
+    _inventorySearch = "";
+    _inventoryStockFilter = onlyLowStock ? "low" : "all";
+  }
+  const requestSequence = ++_inventoryLoadSequence;
+  const params = new URLSearchParams({
+    paginated: "true",
+    page: String(_inventoryPage),
+    limit: String(_inventoryLimit),
+    search: _inventorySearch,
+    stock: _inventoryStockFilter,
+  });
+  const [result, brands] = await Promise.all([
+    api(`/api/products?${params.toString()}`),
+    window._productBrands ? Promise.resolve(window._productBrands) : api("/api/brands"),
   ]);
-  // Filter out components from global list for UI purposes
+  if (requestSequence !== _inventoryLoadSequence) return;
+  const products = Array.isArray(result?.products) ? result.products : [];
+  const pagination = result?.pagination || { page: 1, limit: _inventoryLimit, total: products.length, totalPages: 1 };
+  _inventoryPage = Number(pagination.page || 1);
   allProducts = products;
   syncProductMap(products);
-  const mainProducts = products.filter((p) => p.is_component !== 1);
-  updateLowStockBadge(mainProducts);
-
-  const selectedStockFilter = onlyLowStock ? "low" : "all";
+  const mainProducts = products;
+  const selectedStockFilter = _inventoryStockFilter;
 
   $c("page-content").innerHTML = `
     <div class="flex flex-col xl:flex-row xl:items-center gap-4 mb-8">
@@ -2108,14 +2127,14 @@ async function renderProducts(onlyLowStock = false) {
         <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         </div>
-        <input type="text" id="inventory-search" oninput="filterInventory()" 
+        <input type="text" id="inventory-search" value="${escapeOrderValue(_inventorySearch)}" oninput="inventorySearchChanged(this.value)"
                placeholder="Search by name or category..." 
                class="w-full pl-11 pr-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm" />
       </div>
 
       <div class="relative shrink-0 w-full sm:w-[180px]">
         <label for="inventory-stock-filter" class="sr-only">Stock filter</label>
-        <select id="inventory-stock-filter" onchange="filterInventory()" class="appearance-none w-full pl-4 pr-10 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm">
+        <select id="inventory-stock-filter" onchange="inventoryStockFilterChanged(this.value)" class="appearance-none w-full pl-4 pr-10 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-sm">
           <option value="all" ${selectedStockFilter === "all" ? "selected" : ""}>All Stock</option>
           <option value="low" ${selectedStockFilter === "low" ? "selected" : ""}>Low Stock</option>
           <option value="out" ${selectedStockFilter === "out" ? "selected" : ""}>Out of Stock</option>
@@ -2138,8 +2157,8 @@ async function renderProducts(onlyLowStock = false) {
     </div>
 
     <div class="flex items-center gap-3 mb-4 px-2">
-      <p class="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]"><span id="product-count">${mainProducts.length}</span> <span id="product-count-label">${inventoryStockFilterLabel(selectedStockFilter)}</span></p>
-      <button id="inventory-clear-filter" onclick="resetInventoryFilters()" class="hidden text-[10px] font-bold text-indigo-500 hover:text-indigo-600 transition-colors uppercase tracking-widest">Clear Filter</button>
+      <p class="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]"><span id="product-count">${Number(pagination.total || 0)}</span> <span id="product-count-label">${inventoryStockFilterLabel(selectedStockFilter)}</span></p>
+      <button id="inventory-clear-filter" onclick="resetInventoryFilters()" class="${!_inventorySearch && selectedStockFilter === 'all' ? 'hidden' : ''} text-[10px] font-bold text-indigo-500 hover:text-indigo-600 transition-colors uppercase tracking-widest">Clear Filter</button>
     </div>
     <div class="glass rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-800 transition-all">
       <table class="w-full text-sm" id="inventory-table">
@@ -2233,42 +2252,50 @@ async function renderProducts(onlyLowStock = false) {
     }
         </tbody>
       </table>
+    </div>
+    <div class="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <div class="text-xs font-bold text-slate-500">
+        Page ${pagination.page} of ${pagination.totalPages} &bull; ${pagination.total} total
+      </div>
+      <div class="flex items-center gap-2">
+        <select aria-label="Products per page" onchange="setInventoryPageSize(this.value)" class="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold">
+          ${[10, 25, 50, 100].map(size => `<option value="${size}" ${Number(pagination.limit) === size ? 'selected' : ''}>${size} per page</option>`).join('')}
+        </select>
+        <button onclick="goToInventoryPage(${pagination.page - 1})" ${pagination.page <= 1 ? 'disabled' : ''} class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold disabled:opacity-40">Previous</button>
+        <button onclick="goToInventoryPage(${pagination.page + 1})" ${pagination.page >= pagination.totalPages ? 'disabled' : ''} class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold disabled:opacity-40">Next</button>
+      </div>
     </div>`;
   window._productBrands = brands;
-  filterInventory();
 }
 
 
-function filterInventory() {
-  const searchEl = document.getElementById("inventory-search");
-  const stockFilterEl = document.getElementById("inventory-stock-filter");
-  const q = searchEl ? searchEl.value.toLowerCase().trim() : "";
-  const stockFilter = stockFilterEl ? stockFilterEl.value : "all";
-  const rows = document.querySelectorAll(".inventory-row");
-  let visibleCount = 0;
-
-  rows.forEach(row => {
-    const name = row.querySelector(".product-name").textContent.toLowerCase();
-    const cat = row.querySelector(".product-category").textContent.toLowerCase();
-    const status = row.dataset.stockStatus || "ok";
-    const barcode = row.dataset.barcode ? row.dataset.barcode.toLowerCase() : "";
-    const matchesText = name.includes(q) || cat.includes(q) || barcode.includes(q);
-    const matchesStock = inventoryMatchesStockFilter(status, stockFilter);
-
-    if (matchesText && matchesStock) {
-      row.classList.remove("hidden");
-      visibleCount++;
-    } else {
-      row.classList.add("hidden");
+const inventorySearchChanged = debounce((value) => {
+  _inventorySearch = String(value || "").trim();
+  _inventoryPage = 1;
+  renderProducts(false, true).then(() => {
+    const input = document.getElementById("inventory-search");
+    if (input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
     }
   });
+}, 300);
 
-  const countEl = document.getElementById("product-count");
-  if (countEl) countEl.textContent = visibleCount;
-  const countLabelEl = document.getElementById("product-count-label");
-  if (countLabelEl) countLabelEl.textContent = inventoryStockFilterLabel(stockFilter);
-  const clearFilterBtn = document.getElementById("inventory-clear-filter");
-  if (clearFilterBtn) clearFilterBtn.classList.toggle("hidden", !q && stockFilter === "all");
+function inventoryStockFilterChanged(value) {
+  _inventoryStockFilter = value || "all";
+  _inventoryPage = 1;
+  renderProducts(false, true);
+}
+
+function goToInventoryPage(page) {
+  _inventoryPage = Math.max(1, Number(page) || 1);
+  renderProducts(false, true);
+}
+
+function setInventoryPageSize(limit) {
+  _inventoryLimit = Number(limit) || 25;
+  _inventoryPage = 1;
+  renderProducts(false, true);
 }
 
 function resetInventoryFilters() {
@@ -2276,11 +2303,10 @@ function resetInventoryFilters() {
     navigate("products");
     return;
   }
-  const searchEl = document.getElementById("inventory-search");
-  const stockFilterEl = document.getElementById("inventory-stock-filter");
-  if (searchEl) searchEl.value = "";
-  if (stockFilterEl) stockFilterEl.value = "all";
-  filterInventory();
+  _inventorySearch = "";
+  _inventoryStockFilter = "all";
+  _inventoryPage = 1;
+  renderProducts(false, true);
 }
 
 

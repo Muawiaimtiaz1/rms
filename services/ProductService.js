@@ -24,18 +24,6 @@ class ProductService {
    * Get all products for a shop with their brands, components, ingredients, and batches.
    */
   async getAllProducts(shopId) {
-    const isPostgres = db.client.config.client === 'pg';
-
-    // Helper for JSON aggregation based on database engine
-    const jsonAgg = (sql, alias) => {
-      return isPostgres 
-        ? db.raw(`(SELECT json_agg(row_to_json(t)) FROM (${sql}) t) as ${alias}`)
-        : db.raw(`(SELECT json_group_array(json(t)) FROM (${sql}) t) as ${alias}`);
-    };
-
-    // Note: Due to the complexity of the existing subqueries, we'll start with clean Knex queries 
-    // but keep the same data structure.
-    
     const products = await db('products as p')
       .select('p.*', 'b.name as brand_name')
       .leftJoin('brands as b', 'p.brand_id', 'b.id')
@@ -43,32 +31,122 @@ class ProductService {
       .where('p.is_deleted', 0)
       .orderBy('p.name', 'asc');
 
-    // To prevent the "n+1" query problem while maintaining the complex structure, 
-    // we'll fetch related data in separate queries and merge them.
-    // In a mature ERP, we'd use more optimized joins or specialized views.
+    return this.hydrateProducts(products);
+  }
 
-    for (let p of products) {
-      // Components
-      p.components = await db('product_compositions as pc')
-        .select('pc.component_product_id as id', db.raw('COALESCE(cp.name, pc.custom_name) as name'), 'pc.quantity', 'pc.price', 'cp.sku', 'cp.stock')
+  async getPaginatedProducts(shopId, { page = 1, limit = 25, search = '', stock = 'all' } = {}) {
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safeLimit = Math.min(100, Math.max(10, Number.parseInt(limit, 10) || 25));
+    const term = String(search || '').trim().toLowerCase();
+    const stockFilter = ['all', 'low', 'out'].includes(stock) ? stock : 'all';
+
+    const applyFilters = (query) => {
+      query
+        .where('p.shop_id', shopId)
+        .where('p.is_deleted', 0)
+        .where(qb => qb.whereNull('p.is_component').orWhereNot('p.is_component', 1));
+
+      if (term) {
+        const pattern = `%${term}%`;
+        query.andWhere(qb => qb
+          .whereRaw('LOWER(COALESCE(p.name, ?)) LIKE ?', ['', pattern])
+          .orWhereRaw('LOWER(COALESCE(p.category, ?)) LIKE ?', ['', pattern])
+          .orWhereRaw('LOWER(COALESCE(p.barcode, ?)) LIKE ?', ['', pattern])
+          .orWhereRaw('LOWER(COALESCE(p.sku, ?)) LIKE ?', ['', pattern]));
+      }
+
+      if (stockFilter !== 'all') {
+        query.whereNotExists(function excludeRecipeProducts() {
+          this.select(db.raw('1'))
+            .from('product_recipe_links as inventory_prl')
+            .whereRaw('inventory_prl.product_id = p.id');
+        });
+        if (stockFilter === 'out') query.andWhere('p.stock', '<=', 0);
+        else query.andWhereRaw('COALESCE(p.stock, 0) <= COALESCE(p.min_stock_level, 0)');
+      }
+    };
+
+    const countQuery = db('products as p');
+    applyFilters(countQuery);
+    const countRow = await countQuery.count('p.id as total').first();
+    const total = Number(countRow?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / safeLimit));
+    const currentPage = Math.min(safePage, totalPages);
+
+    const productQuery = db('products as p')
+      .select('p.*', 'b.name as brand_name')
+      .leftJoin('brands as b', 'p.brand_id', 'b.id');
+    applyFilters(productQuery);
+    const products = await productQuery
+      .orderBy('p.name', 'asc')
+      .limit(safeLimit)
+      .offset((currentPage - 1) * safeLimit);
+
+    return {
+      products: await this.hydrateProducts(products),
+      pagination: { page: currentPage, limit: safeLimit, total, totalPages }
+    };
+  }
+
+  async hydrateProducts(products) {
+
+    if (products.length === 0) return products;
+    const productIds = products.map(product => product.id);
+
+    // Load every relation in bulk. The old implementation ran these three queries
+    // once per product, making both POS and inventory increasingly slow as the
+    // catalogue grew.
+    const [components, ingredients, batches] = await Promise.all([
+      db('product_compositions as pc')
         .leftJoin('products as cp', 'pc.component_product_id', 'cp.id')
-        .where('pc.parent_product_id', p.id);
-
-      // Ingredients
-      p.ingredients = await db('product_recipe_links as prl')
-        .select('ri.raw_stock_id as id', 'rs.name', 'rs.unit', 'rs.usage_unit', 'rs.conversion_factor', 'ri.quantity')
+        .select(
+          'pc.parent_product_id',
+          'pc.component_product_id as id',
+          db.raw('COALESCE(cp.name, pc.custom_name) as name'),
+          'pc.quantity',
+          'pc.price',
+          'cp.sku',
+          'cp.stock'
+        )
+        .whereIn('pc.parent_product_id', productIds),
+      db('product_recipe_links as prl')
         .join('recipe_ingredients as ri', 'prl.recipe_id', 'ri.recipe_id')
         .join('raw_stocks as rs', 'ri.raw_stock_id', 'rs.id')
-        .where('prl.product_id', p.id);
+        .select(
+          'prl.product_id',
+          'ri.raw_stock_id as id',
+          'rs.name',
+          'rs.unit',
+          'rs.usage_unit',
+          'rs.conversion_factor',
+          'ri.quantity'
+        )
+        .whereIn('prl.product_id', productIds),
+      db('product_batches as pb')
+        .select('pb.*')
+        .whereIn('pb.product_id', productIds)
+        .where('pb.quantity', '>', 0)
+        .orderBy('pb.created_at', 'asc')
+    ]);
 
-      // Batches
-      p.batches = await db('product_batches')
-        .where('product_id', p.id)
-        .where('quantity', '>', 0)
-        .orderBy('created_at', 'asc');
-      
-      // Formatting
-      if (p.image_path) p.image_url = p.image_path;
+    const groupByProduct = (rows, key, keepKey = false) => rows.reduce((groups, row) => {
+      const productId = row[key];
+      if (!groups.has(productId)) groups.set(productId, []);
+      const relatedRow = { ...row };
+      if (!keepKey) delete relatedRow[key];
+      groups.get(productId).push(relatedRow);
+      return groups;
+    }, new Map());
+
+    const componentsByProduct = groupByProduct(components, 'parent_product_id');
+    const ingredientsByProduct = groupByProduct(ingredients, 'product_id');
+    const batchesByProduct = groupByProduct(batches, 'product_id', true);
+
+    for (const product of products) {
+      product.components = componentsByProduct.get(product.id) || [];
+      product.ingredients = ingredientsByProduct.get(product.id) || [];
+      product.batches = batchesByProduct.get(product.id) || [];
+      if (product.image_path) product.image_url = product.image_path;
     }
 
     return products;
