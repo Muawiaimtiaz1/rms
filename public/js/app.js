@@ -2243,7 +2243,7 @@ async function renderProducts(onlyLowStock = false, preserveFilters = false) {
                   <button onclick="openRecoveryPopup(${p.id}, '${p.name.replace(/'/g, "\\'")}', ${p.damage_stock})" class="px-2 py-1 text-xs rounded-r-lg bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/50 transition-all border border-emerald-200 dark:border-emerald-900/50">Recov</button>
                 </div>
                 <button onclick="openEditProduct(${p.id})" class="px-2 py-1 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 transition-all border border-indigo-200 dark:border-indigo-900/50">Edit</button>
-                ${p.barcode ? `<button onclick="printBarcode('${p.barcode.replace(/'/g, "\\'")}')" title="Print barcode" aria-label="Print barcode" class="inline-flex shrink-0 items-center justify-center p-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-slate-200 dark:border-slate-900/50"><svg class="block shrink-0 overflow-visible" style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></button>` : ""}
+                ${p.barcode ? `<button onclick="printBarcode(decodeURIComponent('${encodeURIComponent(p.barcode).replace(/'/g, "%27")}'), decodeURIComponent('${encodeURIComponent(p.name).replace(/'/g, "%27")}'))" title="Print barcode" aria-label="Print barcode" class="inline-flex shrink-0 items-center justify-center p-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-slate-200 dark:border-slate-900/50"><svg class="block shrink-0 overflow-visible" style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></button>` : ""}
               </td>
             </tr>`,
         )
@@ -11056,12 +11056,18 @@ async function viewShiftAuditFlow(shiftId) {
 
 init();
 
-function printBarcode(barcode) {
+function printBarcode(barcode, productName = "") {
   if (!barcode) return toast("No barcode to print", "error");
   const container = document.getElementById("barcode-print-area");
   if (!container) return;
   
-  container.innerHTML = '<svg id="barcode-svg"></svg>';
+  container.innerHTML = `
+    <div id="barcode-product-name"></div>
+    <svg id="barcode-svg"></svg>
+    <div id="barcode-number"></div>
+  `;
+  document.getElementById("barcode-product-name").textContent = productName;
+  document.getElementById("barcode-number").textContent = barcode;
   
   // Inject print styles for specific barcode dimensions (30mm x 15mm)
   const printStyle = document.createElement('style');
@@ -11080,14 +11086,44 @@ function printBarcode(barcode) {
         width: 30mm;
         height: 15mm;
         display: flex !important;
+        flex-direction: column;
         justify-content: center;
         align-items: center;
         overflow: hidden;
         background: white;
+        padding: 0.5mm 1mm;
+        box-sizing: border-box;
+        color: #000 !important;
+        font-family: Arial, sans-serif !important;
+        line-height: 1;
+      }
+      #barcode-product-name,
+      #barcode-number {
+        width: 100%;
+        overflow: hidden;
+        text-align: center;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        color: #000 !important;
+        font-family: Arial, sans-serif !important;
+      }
+      #barcode-product-name {
+        margin-bottom: 0.4mm;
+        font-size: 7pt;
+        font-weight: 700;
+      }
+      #barcode-number {
+        margin-top: 0.3mm;
+        font-size: 6.5pt;
+        font-weight: 600;
+        letter-spacing: 0.15mm;
       }
       #barcode-svg {
-        max-width: 95%;
-        max-height: 95%;
+        display: block;
+        width: auto;
+        max-width: 100%;
+        height: 7.5mm;
+        flex: 0 1 7.5mm;
       }
     }
   `;
@@ -11102,7 +11138,7 @@ function printBarcode(barcode) {
       format: "CODE128",
       displayValue: false,
       width: 1.5,
-      height: 40,
+      height: 30,
       margin: 0
     });
   } catch(e) {
