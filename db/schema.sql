@@ -552,3 +552,6 @@ CREATE INDEX IF NOT EXISTS idx_cash_drops_shift_id ON cash_drops(shift_id);
 CREATE INDEX IF NOT EXISTS idx_cash_drops_status ON cash_drops(status);
 CREATE INDEX IF NOT EXISTS idx_third_party_persons_shop_id ON third_party_persons(shop_id);
 CREATE INDEX IF NOT EXISTS idx_sale_items_third_party_person_id ON sale_items(third_party_person_id);
+CREATE INDEX IF NOT EXISTS idx_sales_reporting ON sales(shop_id, order_status, created_at, order_type, payment_method);
+CREATE INDEX IF NOT EXISTS idx_expenses_reporting ON expenses(shop_id, date, category);
+CREATE INDEX IF NOT EXISTS idx_returns_reporting ON returns(shop_id, created_at, sale_id);

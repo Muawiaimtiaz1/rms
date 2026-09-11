@@ -18,6 +18,17 @@ router.get('/dashboard-data', requireAuth, async (req, res) => {
     res.json(data);
 });
 
+// Database-aggregated operational and financial reports with server-side filters.
+router.get('/reports', requireAuth, async (req, res) => {
+    const user = req.session.user;
+    const targetShopId = user.role === 'superadmin' && req.query.shop_id
+      ? parseInt(req.query.shop_id, 10)
+      : user.shop_id;
+    if (!targetShopId) return res.status(400).json({ error: 'Shop ID required' });
+    const data = await analyticsService.getReportsData(targetShopId, req.query);
+    res.json(data);
+});
+
 // GET /api/analytics - Global Overview (Superadmin)
 router.get('/', requireAuth, async (req, res) => {
     if (req.session.user.role === 'superadmin') {

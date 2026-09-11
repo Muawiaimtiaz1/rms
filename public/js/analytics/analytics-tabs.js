@@ -438,14 +438,19 @@ function renderSpecificSubTab(tabId, data) {
     tabHtml = `
       <div class="space-y-6 animate-[fadeIn_0.2s_ease-out]">
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
-          <div class="flex items-center justify-between mb-6">
-            ${analyticsPanelTitle("Transactional Ledger Statement", "Report/export area for transaction registers. Uses the selected analytics period when report generation is connected.")}
+          <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
+            ${analyticsPanelTitle("Business Reports", "Database-aggregated, shop-scoped reports based on completed orders in the selected period.")}
+            <div class="flex flex-wrap gap-2">
+              <select id="report-channel" onchange="loadBusinessReports()" class="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold"><option value="">All channels</option><option value="dine_in">In shop</option><option value="takeaway">Takeaway</option><option value="delivery">Delivery</option></select>
+              <select id="report-payment" onchange="loadBusinessReports()" class="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold"><option value="">All payments</option><option value="cash">Cash</option><option value="card">Card</option><option value="online">Online</option></select>
+              <button onclick="exportBusinessReportCsv()" class="px-3.5 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl">Export CSV</button>
             <button onclick="window.print()" class="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition-all shadow-sm">
               Print Statement
             </button>
+            </div>
           </div>
           
-          <div class="p-8 text-center bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60 rounded-2xl flex flex-col items-center justify-center gap-2">
+          <div id="business-reports-content" class="p-8 text-center bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60 rounded-2xl flex flex-col items-center justify-center gap-2">
             <span class="text-2xl">📄</span>
             <span class="text-sm font-bold text-slate-700 dark:text-slate-300">Transaction ledger compiled.</span>
             <p class="text-xs text-slate-400 max-w-sm">Detailed invoice registries can be printed dynamically. Use the Export Report button in the header toolbar to trigger a full report download.</p>
@@ -456,4 +461,37 @@ function renderSpecificSubTab(tabId, data) {
   }
 
   viewport.innerHTML = tabHtml;
+  if (tabId === "reports" || tabId === "custom_reports") loadBusinessReports();
+}
+
+let businessReportsData = null;
+function reportMoney(value) { return formatCurrency(Number(value || 0)); }
+function reportLabel(value) { return ({ dine_in: 'In shop', takeaway: 'Takeaway', delivery: 'Delivery', cash: 'Cash', card: 'Card', online: 'Online' })[value] || value || 'Other'; }
+function reportTable(title, headers, body) { return `<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm overflow-x-auto"><h5 class="text-xs font-black uppercase tracking-wider text-slate-500 mb-3">${title}</h5><table class="w-full text-xs"><thead><tr class="border-b-2 border-slate-200 dark:border-slate-700">${headers.map((h,i)=>`<th class="py-2 px-2 ${i?'text-right':''}">${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`; }
+
+async function loadBusinessReports() {
+  const target = document.getElementById('business-reports-content'); if (!target) return;
+  const params = new URLSearchParams({ period: analyticsPeriod });
+  if (analyticsPeriod === 'custom') { params.set('from', analyticsCustomFrom); params.set('to', analyticsCustomTo); }
+  const channel = document.getElementById('report-channel')?.value, payment = document.getElementById('report-payment')?.value;
+  if (channel) params.set('channel', channel); if (payment) params.set('payment_method', payment);
+  target.innerHTML = 'Loading database reports...';
+  try { businessReportsData = await api(`/api/analytics/reports?${params}`); renderBusinessReports(businessReportsData); }
+  catch (err) { target.innerHTML = `<div class="text-rose-600 font-bold">Unable to load reports: ${analyticsEscapeInfo(err.message)}</div>`; }
+}
+
+function renderBusinessReports(data) {
+  const target = document.getElementById('business-reports-content'); if (!target) return; const k = data.kpis || {};
+  const card = (label,value,note,tone='blue') => `<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm text-left"><div class="text-[10px] uppercase tracking-widest font-black text-slate-400">${label}</div><div class="text-xl font-black text-${tone}-600 dark:text-${tone}-400 mt-1">${value}</div><div class="text-[10px] text-slate-400 mt-1">${note}</div></div>`;
+  const rows = (list, cols, empty) => list?.length ? list.map(r => `<tr class="border-b border-slate-100 dark:border-slate-800">${cols.map(c=>`<td class="py-3 px-2 ${c.right?'text-right':''}">${c.render(r)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}" class="p-6 text-center text-slate-400">${empty}</td></tr>`;
+  target.className = 'space-y-5';
+  target.innerHTML = `<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">${card('Net Revenue',reportMoney(k.netRevenue),'Sales less refunds')}${card('Orders',Number(k.orders||0).toLocaleString(),`${Number(k.unitsSold||0).toLocaleString()} units`,'indigo')}${card('Average Order',reportMoney(k.averageOrderValue),'Net revenue / orders','sky')}${card('COGS',reportMoney(k.cogs),'Net product cost','amber')}${card('Gross Profit',reportMoney(k.grossProfit),`${Number(k.grossMargin||0).toFixed(1)}% margin`,'emerald')}${card('Expenses',reportMoney(k.operatingExpenses),k.isSegmented?'Shop-wide; not allocated to segment':'Operating costs','rose')}${card('Damage / Loss',reportMoney(k.damageLoss),'Damaged returns','orange')}${k.isSegmented?card('Segment Contribution',reportMoney(k.segmentContribution),'Before unallocated shop expenses',Number(k.segmentContribution||0)>=0?'teal':'rose'):card('Net Profit',reportMoney(k.netProfit),`${Number(k.netMargin||0).toFixed(1)}% margin`,Number(k.netProfit||0)>=0?'teal':'rose')}${card('Refunds',reportMoney(k.refunds),'Returned sales','pink')}${card('Outstanding',reportMoney(k.outstanding),`${reportMoney(k.received)} received`,'violet')}</div>
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">${reportTable('Sales by Channel',['Channel','Orders','Revenue'],rows(data.channels,[{render:r=>reportLabel(r.label)},{right:true,render:r=>Number(r.orders||0).toLocaleString()},{right:true,render:r=>reportMoney(r.revenue)}],'No channel sales'))}${reportTable('Sales by Payment Method',['Method','Orders','Revenue','Received'],rows(data.payments,[{render:r=>reportLabel(r.label)},{right:true,render:r=>Number(r.orders||0).toLocaleString()},{right:true,render:r=>reportMoney(r.revenue)},{right:true,render:r=>reportMoney(r.received)}],'No payment data'))}${reportTable('Expenses by Category',['Category','Entries','Amount'],rows(data.expenses,[{render:r=>analyticsEscapeInfo(r.category||'Other')},{right:true,render:r=>Number(r.count||0).toLocaleString()},{right:true,render:r=>reportMoney(r.amount)}],'No expenses'))}${reportTable('Daily Sales',['Date','Orders','Revenue'],rows(data.daily,[{render:r=>analyticsEscapeInfo(r.date)},{right:true,render:r=>Number(r.orders||0).toLocaleString()},{right:true,render:r=>reportMoney(r.revenue)}],'No sales'))}</div>
+  ${reportTable('Product Sales, Cost and Profit',['Product','Category','Units','Sales','Cost','Profit'],rows(data.products,[{render:r=>analyticsEscapeInfo(r.name)},{render:r=>analyticsEscapeInfo(r.category)},{right:true,render:r=>Number(r.units||0).toLocaleString()},{right:true,render:r=>reportMoney(r.sales)},{right:true,render:r=>reportMoney(r.cost)},{right:true,render:r=>`<span class="font-black ${Number(r.profit)>=0?'text-emerald-600':'text-rose-600'}">${reportMoney(r.profit)}</span>`}],'No products sold'))}<p class="text-[10px] text-slate-400">Period: ${analyticsEscapeInfo(data.bounds?.start)} to ${analyticsEscapeInfo(data.bounds?.end)}. Completed orders only; refunds and returned COGS are netted.</p>`;
+}
+
+function exportBusinessReportCsv() {
+  if (!businessReportsData) return toast('Load the report first','error');
+  const lines=[['Product','Category','Units','Sales','Cost','Profit'],...(businessReportsData.products||[]).map(r=>[r.name,r.category,r.units,r.sales,r.cost,r.profit])];
+  const csv=lines.map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n'); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); link.download=`business-report-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href);
 }

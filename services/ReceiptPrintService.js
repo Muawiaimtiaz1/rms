@@ -296,10 +296,11 @@ function renderDeliveryReceipt(details) {
         <div class="bold">Order #${escapeHtml(sale.id)}</div>
       </div>
       <hr class="divider" />
-      <div class="party-details">
-        <div><strong>Supplier:</strong> ${escapeHtml(supplierName)}</div>
-        ${shop?.receipt_phone ? `<div><strong>Supplier phone:</strong> ${escapeHtml(shop.receipt_phone)}</div>` : ""}
-        ${shop?.receipt_address ? `<div><strong>Supplier address:</strong> ${escapeHtml(shop.receipt_address)}</div>` : ""}
+      <div class="party-details sender-details">
+        <div class="bold">SENDER / SHOP DETAILS</div>
+        <div><strong>Shop:</strong> ${escapeHtml(supplierName)}</div>
+        <div><strong>Shop phone:</strong> ${escapeHtml(shop?.receipt_phone || "Not provided")}</div>
+        <div><strong>Shop address:</strong> ${escapeHtml(shop?.receipt_address || "Not provided")}</div>
       </div>
       <hr class="divider" />
       <div class="party-details">

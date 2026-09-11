@@ -1370,6 +1370,9 @@ try {
     -- Dates (Used heavily in reporting and dashboards)
     CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
     CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+    CREATE INDEX IF NOT EXISTS idx_sales_reporting ON sales(shop_id, order_status, created_at, order_type, payment_method);
+    CREATE INDEX IF NOT EXISTS idx_expenses_reporting ON expenses(shop_id, date, category);
+    CREATE INDEX IF NOT EXISTS idx_returns_reporting ON returns(shop_id, created_at, sale_id);
     CREATE INDEX IF NOT EXISTS idx_customer_ledger_created_at ON customer_ledger(created_at);
   `);
   console.log("✅ Database performance indexes are ready.");
