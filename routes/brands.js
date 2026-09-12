@@ -5,6 +5,14 @@ const PDFDocument = require('pdfkit');
 const router = express.Router();
 const db = require('../db/knex');
 
+function requireShopAdmin(req, res, next) {
+    if (!req.session?.user) return res.status(401).json({ error: 'Unauthorized' });
+    if (req.session.user.role !== 'admin' || !req.session.user.shop_id) {
+        return res.status(403).json({ error: 'Only the shop admin can manage business partners in Shop Settings' });
+    }
+    next();
+}
+
 // GET /api/brands
 router.get('/', requireAuth, async (req, res) => {
     let shopId = req.session.user.shop_id;
@@ -16,23 +24,20 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // POST /api/brands
-router.post('/', requireAuth, async (req, res) => {
-    if (req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Only Master Admins can create brands' });
-    const id = await brandService.createBrand(req.body.name, req.body.shopId, req.session.user.id, req.body.ownership_percent, req.body.partner_type);
+router.post('/', requireShopAdmin, async (req, res) => {
+    const id = await brandService.createBrand(req.body.name, req.session.user.shop_id, req.session.user.id, req.body.ownership_percent, 'share_based');
     res.json({ ok: true, id });
 });
 
 // PUT /api/brands/:id
-router.put('/:id', requireAuth, async (req, res) => {
-    if (req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Only Master Admins can edit brands' });
-    await brandService.updateBrand(req.params.id, req.body.name, req.body.shopId, req.body.ownership_percent, req.body.partner_type);
+router.put('/:id', requireShopAdmin, async (req, res) => {
+    await brandService.updateBrand(req.params.id, req.body.name, req.session.user.shop_id, req.body.ownership_percent, 'share_based');
     res.json({ ok: true });
 });
 
 // DELETE /api/brands/:id
-router.delete('/:id', requireAuth, async (req, res) => {
-    if (req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Only Master Admins can delete brands' });
-    await brandService.deleteBrand(req.params.id, req.query.shopId);
+router.delete('/:id', requireShopAdmin, async (req, res) => {
+    await brandService.deleteBrand(req.params.id, req.session.user.shop_id);
     res.json({ ok: true });
 });
 

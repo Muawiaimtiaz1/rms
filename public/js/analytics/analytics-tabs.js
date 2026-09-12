@@ -153,8 +153,10 @@ function renderSpecificSubTab(tabId, data) {
 
   } else if (tabId === "profit") {
     // ─── PROFIT ANALYTICS ───
-    const brandRows = Array.isArray(data.brandPerformance) ? data.brandPerformance : [];
+    const brandRows = Array.isArray(data.brandPerformance) ? data.brandPerformance.filter(row => row.partner_type === 'product_based') : [];
     const partnerShares = Array.isArray(data.partnerProfitShares) ? data.partnerProfitShares : [];
+    const commissionPartners = Array.isArray(data.commissionPartnerBalances) ? data.commissionPartnerBalances : [];
+    const profitDataComplete = data.costDataQuality?.complete !== false;
     const shopProfitValue = Number(data.shopProfit ?? data.partnerProfitPool ?? s.shopProfit ?? s.grossProfit ?? 0);
     const shopProfitMargin = Number(s.shopProfitMargin ?? (Number(data.totalRevenue || 0) > 0 ? (shopProfitValue / Number(data.totalRevenue || 0)) * 100 : 0));
     const selectedPartnerAudit = data.selectedPartnerAudit || null;
@@ -193,7 +195,7 @@ function renderSpecificSubTab(tabId, data) {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
             ${renderMetricLabel("Shop Profit", "Shop Profit = revenue - COGS - damage/loss. Partner shares add up to this amount.")}
-            <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${formatCurrency(shopProfitValue)}</h4>
+            <h4 class="text-2xl font-black text-slate-800 dark:text-white mt-1">${profitDataComplete ? formatCurrency(shopProfitValue) : 'N/A'}</h4>
             <span class="text-[10px] font-bold text-emerald-500 block mt-1">Sum of configured partner shares</span>
           </div>
           <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-5 rounded-3xl shadow-sm">
@@ -210,8 +212,8 @@ function renderSpecificSubTab(tabId, data) {
 
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
           <div class="mb-4 flex items-center justify-between gap-3">
-            ${analyticsPanelTitle("Whole Business Partner Split", "Shop profit allocated across partners. Product-based partners use assigned product profit; share-based partners split the remaining shop profit by percentage.")}
-            <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${formatCurrency(Number(data.totalPartnerProfit ?? shopProfitValue))} allocated</span>
+            ${analyticsPanelTitle("Whole Business Partner Split", "Business profit, including net commission earned from third-party sales, is split by ownership percentage.")}
+            <div class="flex items-center gap-2"><span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${profitDataComplete ? `${formatCurrency(Number(data.totalPartnerProfit ?? shopProfitValue))} allocated for selected period` : 'Profit unavailable - incomplete historical cost'}</span><button onclick="downloadPartnerReportPdf()" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black uppercase">Download Partner PDF</button></div>
           </div>
           ${selectedPartnerAuditHtml}
           <div class="overflow-x-auto">
@@ -223,6 +225,7 @@ function renderSpecificSubTab(tabId, data) {
                   <th class="py-3 text-right">Ownership</th>
                   <th class="py-3 text-right">Profit Basis</th>
                   <th class="py-3 text-right">Partner Profit</th>
+                  <th class="py-3 text-right">Report</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50 dark:divide-slate-800/40">
@@ -238,12 +241,13 @@ function renderSpecificSubTab(tabId, data) {
                       </td>
                       <td class="py-3 text-slate-700 dark:text-slate-300 font-bold">${type === "product_based" ? "Product Based" : "Share Based"}</td>
                       <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${type === "product_based" ? "Products" : `${Number(share.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}%`}</td>
-                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${formatCurrency(Number(share.profit_pool || 0))}</td>
-                      <td class="py-3 text-right ${tone} font-extrabold">${formatCurrency(amount)}</td>
+                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${profitDataComplete ? formatCurrency(Number(share.profit_pool || 0)) : 'N/A'}</td>
+                      <td class="py-3 text-right ${tone} font-extrabold">${profitDataComplete ? formatCurrency(amount) : 'N/A'}</td>
+                      <td class="py-3 text-right"><button onclick="downloadBusinessPartnerReportPdf(${share.brand_id})" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black uppercase">PDF</button></td>
                     </tr>
                   `;
                 }).join('')}
-                ${partnerShares.length === 0 ? `<tr><td colspan="5" class="py-6 text-center text-slate-400 italic">No partner split configured.</td></tr>` : ''}
+                ${partnerShares.length === 0 ? `<tr><td colspan="6" class="py-6 text-center text-slate-400 italic">No partner split configured.</td></tr>` : ''}
               </tbody>
             </table>
           </div>
@@ -251,43 +255,36 @@ function renderSpecificSubTab(tabId, data) {
 
         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 p-6 rounded-3xl shadow-sm">
           <div class="mb-4">
-            ${analyticsPanelTitle("Product Brand Sales & Cost", "Product-assignment breakdown by brand. Partner profit is calculated from shop profit in the partner split table.")}
+            ${analyticsPanelTitle("Commission Partner Settlements", "Third-party product proceeds are kept separate. Only the shop commission enters whole-business profit.")}
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-xs text-left">
               <thead>
                 <tr class="border-b border-slate-100 dark:border-slate-800 text-slate-400 uppercase tracking-widest text-[9px] font-black">
-                  <th class="py-3 pl-2">Product Brand</th>
-                  <th class="py-3 text-right">Net Revenue</th>
-                  <th class="py-3 text-right">COGS</th>
-                  <th class="py-3 text-right">Gross Profit</th>
-                  <th class="py-3 text-right">Damage / Loss</th>
-                  <th class="py-3 text-right">After Loss</th>
-                  <th class="py-3 text-right">Margin</th>
+                  <th class="py-3 pl-2">Commission Partner</th>
+                  <th class="py-3 text-right">Net Product Sales</th>
+                  <th class="py-3 text-right">Shop Commission</th>
+                  <th class="py-3 text-right">Partner Cost</th>
+                  <th class="py-3 text-right">Partner Payable</th>
+                  <th class="py-3 text-right">Partner Profit</th>
+                  <th class="py-3 text-right">Report</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50 dark:divide-slate-800/40">
-                ${brandRows.map((brand) => {
-                  const afterLoss = Number(brand.netAfterDamage || 0);
-                  const profit = Number(brand.grossProfit || 0);
-                  const profitTone = profit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
-                  const afterLossTone = afterLoss >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+                ${commissionPartners.map((partner) => {
                   return `
                     <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all font-semibold">
-                      <td class="py-3 pl-2">
-                        <div class="font-black text-slate-800 dark:text-white">${brand.brand_name}</div>
-                        <div class="text-[10px] text-slate-400">${formatNum(Number(brand.orders || 0))} order${Number(brand.orders || 0) === 1 ? "" : "s"}</div>
-                      </td>
-                      <td class="py-3 text-right text-blue-600 dark:text-blue-400 font-extrabold">${formatCurrency(Number(brand.netRevenue || 0))}</td>
-                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${formatCurrency(Number(brand.netCogs || 0))}</td>
-                      <td class="py-3 text-right ${profitTone} font-extrabold">${formatCurrency(profit)}</td>
-                      <td class="py-3 text-right text-rose-600 dark:text-rose-400 font-bold">${formatCurrency(Number(brand.damageLoss || 0))}</td>
-                      <td class="py-3 text-right ${afterLossTone} font-extrabold">${formatCurrency(afterLoss)}</td>
-                      <td class="py-3 text-right font-black text-slate-900 dark:text-white">${Number(brand.profitMargin || 0).toFixed(1)}%</td>
+                      <td class="py-3 pl-2 font-black text-slate-800 dark:text-white">${partner.partner_name}</td>
+                      <td class="py-3 text-right text-blue-600 dark:text-blue-400 font-extrabold">${formatCurrency(Number(partner.net_sales || 0))}</td>
+                      <td class="py-3 text-right text-emerald-600 dark:text-emerald-400 font-extrabold">${formatCurrency(Number(partner.shop_commission || 0))}</td>
+                      <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-bold">${partner.maintain_cost_price ? formatCurrency(Number(partner.partner_cogs || 0)) : 'Not maintained'}</td>
+                      <td class="py-3 text-right text-slate-900 dark:text-white font-black">${formatCurrency(Number(partner.partner_payable || 0))}</td>
+                      <td class="py-3 text-right text-blue-600 dark:text-blue-400 font-black">${partner.maintain_cost_price ? formatCurrency(Number(partner.partner_profit || 0)) : 'Not calculated'}</td>
+                      <td class="py-3 text-right"><button onclick="downloadCommissionPartnerReportPdf(${partner.partner_id})" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[9px] font-black uppercase">PDF</button></td>
                     </tr>
                   `;
                 }).join('')}
-                ${brandRows.length === 0 ? `<tr><td colspan="7" class="py-6 text-center text-slate-400 italic">No brand profit/loss data available.</td></tr>` : ''}
+                ${commissionPartners.length === 0 ? `<tr><td colspan="7" class="py-6 text-center text-slate-400 italic">No commission-partner sales in this period.</td></tr>` : ''}
               </tbody>
             </table>
           </div>
@@ -517,4 +514,22 @@ function downloadBusinessReportPdf() {
   const channel=document.getElementById('report-channel')?.value, payment=document.getElementById('report-payment')?.value;
   if(channel) params.set('channel',channel); if(payment) params.set('payment_method',payment);
   window.location.href=`/api/analytics/reports.pdf?${params}`;
+}
+
+function downloadPartnerReportPdf() {
+  const params = new URLSearchParams({ period: analyticsPeriod, type: 'partners' });
+  if (analyticsPeriod === 'custom') { params.set('from', analyticsCustomFrom); params.set('to', analyticsCustomTo); }
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
+}
+
+function downloadCommissionPartnerReportPdf(partnerId) {
+  const params = new URLSearchParams({ period: analyticsPeriod, type: 'commission_partner', partner_id: String(partnerId) });
+  if (analyticsPeriod === 'custom') { params.set('from', analyticsCustomFrom); params.set('to', analyticsCustomTo); }
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
+}
+
+function downloadBusinessPartnerReportPdf(partnerId) {
+  const params = new URLSearchParams({ period: analyticsPeriod, type: 'business_partner', partner_id: String(partnerId) });
+  if (analyticsPeriod === 'custom') { params.set('from', analyticsCustomFrom); params.set('to', analyticsCustomTo); }
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
 }

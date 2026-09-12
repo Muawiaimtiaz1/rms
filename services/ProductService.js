@@ -16,6 +16,9 @@ const productSchema = z.object({
   image_path: z.string().nullable().optional(),
   components: z.array(z.any()).nullable().optional(),
   ingredients: z.array(z.any()).nullable().optional(),
+  is_commission_based: z.number().int().min(0).max(1).optional().default(0),
+  third_party_person_id: z.number().int().positive().nullable().optional(),
+  commission_percentage: z.number().min(0).max(100).optional().default(0),
 });
 
 
@@ -160,6 +163,7 @@ class ProductService {
     
     return await db.transaction(async (trx) => {
       const { components, ingredients, ...productData } = validatedData;
+      await this.validateCommissionPartner(trx, shopId, productData);
       
       // 1. Insert Product
       const [productIdObj] = await trx('products')
@@ -278,6 +282,11 @@ class ProductService {
       const { components, ingredients, ...productData } = validatedData;
       const product = await trx('products').where({ id: productId, shop_id: shopId }).first();
       if (!product) throw new Error('Product not found');
+      const effectiveCommissionData = { ...product, ...productData };
+      await this.validateCommissionPartner(trx, shopId, effectiveCommissionData, { allowInactiveId: product.third_party_person_id });
+      if (Number(effectiveCommissionData.is_commission_based || 0) === 1) {
+        productData.buying_price = effectiveCommissionData.buying_price;
+      }
 
       // Update basic fields
       await trx('products')
@@ -336,6 +345,25 @@ class ProductService {
         }
       }
     });
+  }
+
+  async validateCommissionPartner(trx, shopId, productData, { allowInactiveId = null } = {}) {
+    const enabled = Number(productData.is_commission_based || 0) === 1;
+    if (!enabled) {
+      productData.is_commission_based = 0;
+      productData.third_party_person_id = null;
+      productData.commission_percentage = 0;
+      return;
+    }
+    if (!productData.third_party_person_id) throw new Error('Commission partner is required');
+    const partnerQuery = trx('third_party_persons').where({ id: productData.third_party_person_id, shop_id: shopId });
+    if (String(productData.third_party_person_id) !== String(allowInactiveId || '')) partnerQuery.andWhere('status', 'active');
+    const partner = await partnerQuery.first();
+    if (!partner) throw new Error('Commission partner not found');
+    if (!partner.maintain_cost_price) productData.buying_price = 0;
+    productData.commission_percentage = Number.isFinite(Number(productData.commission_percentage))
+      ? Number(productData.commission_percentage)
+      : Number(partner.default_commission_percentage || 0);
   }
 
 

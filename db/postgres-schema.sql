@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS third_party_persons (
   name TEXT NOT NULL,
   phone TEXT,
   notes TEXT,
+  default_commission_percentage DOUBLE PRECISION NOT NULL DEFAULT 0,
+  maintain_cost_price BOOLEAN NOT NULL DEFAULT TRUE,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -308,6 +310,21 @@ CREATE TABLE IF NOT EXISTS brand_expense_payments (
   month TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS partner_allocation_configs (
+  shop_id INTEGER PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+  expense_mode TEXT NOT NULL DEFAULT 'ownership' CHECK (expense_mode IN ('ownership','custom')),
+  inventory_mode TEXT NOT NULL DEFAULT 'ownership' CHECK (inventory_mode IN ('ownership','custom')),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS partner_allocation_shares (
+  shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+  allocation_type TEXT NOT NULL CHECK (allocation_type IN ('expense','inventory')),
+  percentage DOUBLE PRECISION NOT NULL CHECK (percentage >= 0 AND percentage <= 100),
+  PRIMARY KEY (shop_id, brand_id, allocation_type)
 );
 
 CREATE TABLE IF NOT EXISTS raw_stocks (

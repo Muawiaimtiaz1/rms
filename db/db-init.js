@@ -202,6 +202,35 @@ async function initPostgres() {
       }
     }
     await query("CREATE INDEX IF NOT EXISTS idx_sale_items_third_party_person_id ON sale_items(third_party_person_id)");
+    await query(`
+      CREATE TABLE IF NOT EXISTS partner_allocation_configs (
+        shop_id INTEGER PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+        expense_mode TEXT NOT NULL DEFAULT 'ownership' CHECK (expense_mode IN ('ownership','custom')),
+        inventory_mode TEXT NOT NULL DEFAULT 'ownership' CHECK (inventory_mode IN ('ownership','custom')),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS partner_allocation_shares (
+        shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+        brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+        allocation_type TEXT NOT NULL CHECK (allocation_type IN ('expense','inventory')),
+        percentage DOUBLE PRECISION NOT NULL CHECK (percentage >= 0 AND percentage <= 100),
+        PRIMARY KEY (shop_id, brand_id, allocation_type)
+      );
+    `);
+    const partnerCommissionCheck = await query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'third_party_persons' AND column_name = 'default_commission_percentage'
+    `);
+    if (partnerCommissionCheck.rows.length === 0) {
+      await query("ALTER TABLE third_party_persons ADD COLUMN default_commission_percentage DOUBLE PRECISION NOT NULL DEFAULT 0");
+    }
+    const partnerCostCheck = await query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'third_party_persons' AND column_name = 'maintain_cost_price'
+    `);
+    if (partnerCostCheck.rows.length === 0) {
+      await query("ALTER TABLE third_party_persons ADD COLUMN maintain_cost_price BOOLEAN NOT NULL DEFAULT TRUE");
+    }
     await query("CREATE INDEX IF NOT EXISTS idx_sales_reporting ON sales(shop_id, order_status, created_at, order_type, payment_method)");
     await query("CREATE INDEX IF NOT EXISTS idx_expenses_reporting ON expenses(shop_id, date, category)");
     await query("CREATE INDEX IF NOT EXISTS idx_returns_reporting ON returns(shop_id, created_at, sale_id)");

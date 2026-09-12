@@ -133,6 +133,7 @@ class AnalyticsService {
       const itemCogsExpr = `si.quantity * si.buying_price_at_sale`;
       const returnCogsExpr = `ri.quantity * ri.buying_price_at_sale`;
       const allocatedSalesExpr = `CASE WHEN COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * COALESCE(s.total, 0) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
+      const allocatedCommissionBaseExpr = `CASE WHEN COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * (COALESCE(item_totals.item_subtotal, 0) - COALESCE(s.discount, 0)) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
       const allocatedDiscountExpr = `CASE WHEN COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * COALESCE(s.discount, 0) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
       const allocatedDueExpr = `CASE WHEN (COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) > 0.01 AND COALESCE(item_totals.item_subtotal, 0) > 0 THEN (si.quantity * si.price_at_sale) * (COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) / COALESCE(item_totals.item_subtotal, 0) ELSE 0 END`;
       const pendingDueCondition = '(COALESCE(s.total, 0) - COALESCE(s.amount_received, 0)) > 0.01';
@@ -232,8 +233,9 @@ class AnalyticsService {
         .modify(qb => applyShopScope(qb, 's.shop_id'))
         .modify(qb => applyBrandScope(qb))
         .where('s.order_status', 'completed')
+        .whereNull('si.third_party_person_id')
         .whereBetween('s.created_at', [bounds.start, bounds.end])
-        .select(db.raw(`SUM(${itemCogsExpr}) as val`)).first();
+        .select(db.raw(`SUM(${itemCogsExpr}) as val`), db.raw('COUNT(*) as cost_lines'), db.raw('SUM(CASE WHEN COALESCE(si.buying_price_at_sale, 0) > 0 THEN 1 ELSE 0 END) as costed_lines')).first();
 
       const returnedCogs = await db('return_items as ri')
         .join('returns as r', 'ri.return_id', 'r.id')
@@ -242,10 +244,24 @@ class AnalyticsService {
         .modify(qb => applyShopScope(qb, 'r.shop_id'))
         .modify(qb => applyBrandScope(qb))
         .whereBetween('r.created_at', [bounds.start, bounds.end])
+        .whereNull('si.third_party_person_id')
         .select(db.raw(`SUM(${returnCogsExpr}) as val`)).first();
 
-      const commissionIncomeStats = { val: 0 };
-      const returnedCommissionStats = { val: 0 };
+      const commissionIncomeStats = await db('sale_items as si')
+        .join('sales as s', 'si.sale_id', 's.id')
+        .leftJoin(makeItemTotals(), 'si.sale_id', 'item_totals.sale_id')
+        .modify(qb => applyShopScope(qb, 's.shop_id'))
+        .where('s.order_status', 'completed')
+        .whereNotNull('si.third_party_person_id')
+        .whereBetween('s.created_at', [bounds.start, bounds.end])
+        .select(db.raw(`COALESCE(SUM((${allocatedCommissionBaseExpr}) * si.commission_percentage_at_sale / 100), 0) as val`)).first();
+      const returnedCommissionStats = await db('return_items as ri')
+        .join('returns as r', 'ri.return_id', 'r.id')
+        .leftJoin('sale_items as si', 'ri.sale_item_id', 'si.id')
+        .modify(qb => applyShopScope(qb, 'r.shop_id'))
+        .whereNotNull('si.third_party_person_id')
+        .whereBetween('r.created_at', [bounds.start, bounds.end])
+        .select(db.raw('COALESCE(SUM(ri.quantity * ri.refund_price * si.commission_percentage_at_sale / 100), 0) as val')).first();
 
       const stockValueResult = await db('products as p')
         .modify(qb => applyShopScope(qb, 'p.shop_id'))
@@ -259,6 +275,8 @@ class AnalyticsService {
       const adjustedRevenue = totalSalesVal - totalRefundsVal;
       
       const cogsVal = Number(cogsStats ? cogsStats.val : 0);
+      const costCoveragePct = Number(cogsStats?.cost_lines || 0) ? Number(cogsStats.costed_lines || 0) / Number(cogsStats.cost_lines) * 100 : 100;
+      const costDataComplete = costCoveragePct === 100;
       const retCogsVal = Number(returnedCogs ? returnedCogs.val : 0);
       const adjustedCOGS = cogsVal - retCogsVal;
       
@@ -519,12 +537,27 @@ class AnalyticsService {
       const damageTotalResult = await db('products as p')
         .modify(qb => applyShopScope(qb, 'p.shop_id'))
         .modify(qb => applyBrandScope(qb))
+        .where(qb => qb.whereNull('p.is_commission_based').orWhere('p.is_commission_based', 0))
         .sum('p.manual_damage_loss as val').first();
       const totalDamageLoss = Number(damageTotalResult ? (damageTotalResult.val || 0) : 0);
 
-      let businessAdjustedRevenue = adjustedRevenue;
+      const ownedSalesStats = await db('sale_items as si')
+        .join('sales as s', 'si.sale_id', 's.id')
+        .leftJoin(makeItemTotals(), 'si.sale_id', 'item_totals.sale_id')
+        .modify(qb => applyShopScope(qb, 's.shop_id'))
+        .where('s.order_status', 'completed').whereNull('si.third_party_person_id')
+        .whereBetween('s.created_at', [bounds.start, bounds.end])
+        .select(db.raw(`COALESCE(SUM(${allocatedSalesExpr}), 0) as val`)).first();
+      const ownedReturnsStats = await db('return_items as ri')
+        .join('returns as r', 'ri.return_id', 'r.id')
+        .leftJoin('sale_items as si', 'ri.sale_item_id', 'si.id')
+        .modify(qb => applyShopScope(qb, 'r.shop_id'))
+        .whereNull('si.third_party_person_id').whereBetween('r.created_at', [bounds.start, bounds.end])
+        .select(db.raw('COALESCE(SUM(ri.quantity * ri.refund_price), 0) as val')).first();
+      const netCommissionIncome = Number(commissionIncomeStats.val || 0) - Number(returnedCommissionStats.val || 0);
+      let businessAdjustedRevenue = Number(ownedSalesStats.val || 0) - Number(ownedReturnsStats.val || 0) + netCommissionIncome;
       let businessAdjustedCOGS = adjustedCOGS;
-      let businessGrossProfit = grossProfit;
+      let businessGrossProfit = businessAdjustedRevenue - businessAdjustedCOGS;
       let businessDamageLoss = totalDamageLoss;
       let businessOrderCount = totalOrderCount;
 
@@ -585,6 +618,8 @@ class AnalyticsService {
         .leftJoin(makeItemTotals(), 'si.sale_id', 'item_totals.sale_id')
         .modify(qb => applyShopScope(qb, 's.shop_id'))
         .where('s.order_status', 'completed')
+        .whereNull('si.third_party_person_id')
+        .where(qb => qb.whereNull('p.is_commission_based').orWhere('p.is_commission_based', 0))
         .whereBetween('s.created_at', [bounds.start, bounds.end])
         .select('p.brand_id', 'b.name as brand_name')
         .select(db.raw(`COALESCE(SUM(${allocatedSalesExpr}), 0) as revenue`))
@@ -597,6 +632,8 @@ class AnalyticsService {
         .leftJoin('products as p', 'ri.product_id', 'p.id')
         .leftJoin('brands as b', 'p.brand_id', 'b.id')
         .modify(qb => applyShopScope(qb, 'r.shop_id'))
+        .whereNull('si.third_party_person_id')
+        .where(qb => qb.whereNull('p.is_commission_based').orWhere('p.is_commission_based', 0))
         .whereBetween('r.created_at', [bounds.start, bounds.end])
         .select('p.brand_id', 'b.name as brand_name')
         .select(db.raw('COALESCE(SUM(ri.quantity * ri.refund_price), 0) as refunds'))
@@ -605,6 +642,7 @@ class AnalyticsService {
       const brandDamageRows = await db('products as p')
         .leftJoin('brands as b', 'p.brand_id', 'b.id')
         .modify(qb => applyShopScope(qb, 'p.shop_id'))
+        .where(qb => qb.whereNull('p.is_commission_based').orWhere('p.is_commission_based', 0))
         .select('p.brand_id', 'b.name as brand_name')
         .select(db.raw('COALESCE(SUM(p.manual_damage_loss), 0) as damage_loss'))
         .groupBy('p.brand_id', 'b.name');
@@ -669,7 +707,8 @@ class AnalyticsService {
           businessProfitShare: 0,
           profitMargin: netRevenue > 0 ? (grossProfitValue / netRevenue) * 100 : 0
         };
-      }).sort((a, b) => b.netRevenue - a.netRevenue);
+      }).filter(row => row.revenue !== 0 || row.refunds !== 0 || row.cogs !== 0 || row.returnedCogs !== 0 || row.damageLoss !== 0)
+        .sort((a, b) => b.netRevenue - a.netRevenue);
 
       const performanceByBrandId = new Map(brandPerformance.map((row) => [Number(row.brand_id), row]));
       const productBasedProfitTotal = brands
@@ -697,8 +736,8 @@ class AnalyticsService {
           allocation_method: partnerType,
           is_selected: selectedBrandId ? Number(brand.id) === selectedBrandId : false,
           ownership_percent: ownershipPercent,
-          profit_pool: profitPool,
-          profit_share: profitShare,
+          profit_pool: costDataComplete ? profitPool : null,
+          profit_share: costDataComplete ? profitShare : null,
           product_profit: productProfit
         };
       });
@@ -749,6 +788,46 @@ class AnalyticsService {
       }));
       const totalPaymentsReceived = staffPerformance.reduce((sum, row) => sum + row.received_sales, 0);
 
+      const commissionSalesRows = await db('sale_items as si')
+        .join('sales as s', 'si.sale_id', 's.id')
+        .join('third_party_persons as tp', 'si.third_party_person_id', 'tp.id')
+        .leftJoin(makeItemTotals(), 'si.sale_id', 'item_totals.sale_id')
+        .modify(qb => applyShopScope(qb, 's.shop_id'))
+        .where('s.order_status', 'completed').whereBetween('s.created_at', [bounds.start, bounds.end])
+        .select('tp.id', 'tp.name', 'tp.maintain_cost_price')
+        .select(db.raw(`COALESCE(SUM(${allocatedCommissionBaseExpr}), 0) as net_sales`))
+        .select(db.raw(`COALESCE(SUM((${allocatedCommissionBaseExpr}) * si.commission_percentage_at_sale / 100), 0) as shop_commission`))
+        .select(db.raw('COALESCE(SUM(si.quantity * si.buying_price_at_sale), 0) as partner_cogs'))
+        .groupBy('tp.id', 'tp.name', 'tp.maintain_cost_price');
+      const commissionReturnRows = await db('return_items as ri')
+        .join('returns as r', 'ri.return_id', 'r.id')
+        .join('sale_items as si', 'ri.sale_item_id', 'si.id')
+        .join('third_party_persons as tp', 'si.third_party_person_id', 'tp.id')
+        .modify(qb => applyShopScope(qb, 'r.shop_id'))
+        .whereBetween('r.created_at', [bounds.start, bounds.end])
+        .select('tp.id')
+        .select(db.raw('COALESCE(SUM(ri.quantity * ri.refund_price), 0) as refunds'))
+        .select(db.raw('COALESCE(SUM(ri.quantity * ri.refund_price * si.commission_percentage_at_sale / 100), 0) as reversed_commission'))
+        .select(db.raw('COALESCE(SUM(ri.quantity * ri.buying_price_at_sale), 0) as returned_partner_cogs'))
+        .groupBy('tp.id');
+      const commissionReturnMap = new Map(commissionReturnRows.map(row => [Number(row.id), row]));
+      const commissionSalesMap = new Map(commissionSalesRows.map(row => [Number(row.id), row]));
+      const commissionPartnerIds = new Set([...commissionSalesMap.keys(), ...commissionReturnMap.keys()]);
+      const commissionPartnerDetails = new Map((await db('third_party_persons').where({ shop_id: shopId }).select('id','name','maintain_cost_price')).map(row => [Number(row.id), row]));
+      const commissionPartnerBalances = Array.from(commissionPartnerIds).map(partnerId => {
+        const row = commissionSalesMap.get(partnerId) || {};
+        const returned = commissionReturnMap.get(partnerId) || {};
+        const netSales = Number(row.net_sales || 0) - Number(returned.refunds || 0);
+        const shopCommission = Number(row.shop_commission || 0) - Number(returned.reversed_commission || 0);
+        const partnerCogs = Number(row.partner_cogs || 0) - Number(returned.returned_partner_cogs || 0);
+        const partnerPayable = netSales - shopCommission;
+        const details = commissionPartnerDetails.get(partnerId) || {};
+        const maintainsCost = row.maintain_cost_price ?? details.maintain_cost_price ?? true;
+        return { partner_id: partnerId, partner_name: row.name || details.name || 'Commission Partner', maintain_cost_price: Boolean(maintainsCost), net_sales: netSales,
+          shop_commission: shopCommission, partner_cogs: partnerCogs,
+          partner_payable: partnerPayable, partner_profit: maintainsCost ? partnerPayable - partnerCogs : null };
+      });
+
       return {
         bounds,
         activePeriod: period,
@@ -764,6 +843,8 @@ class AnalyticsService {
         shareBasedProfitPool,
         productBasedProfitTotal,
         totalPartnerProfit,
+        commissionPartnerBalances,
+        commissionIncome: netCommissionIncome,
         kpi: { 
           totalSales: adjustedRevenue, 
           totalOrders: totalOrderCount,
@@ -790,6 +871,7 @@ class AnalyticsService {
           shopProfitMargin,
           profitMargin: profitMargin,
           stockValue: Number(stockValueResult ? (stockValueResult.val || 0) : 0)
+          ,commissionIncome: netCommissionIncome
         },
         trendSeries,
         paymentBreakdown,
@@ -809,6 +891,7 @@ class AnalyticsService {
         netProfit: shopProfit,
         totalSales: totalOrderCount,
         damageTotal: totalDamageLoss
+        ,costDataQuality: { complete: costDataComplete, coveragePercent: costCoveragePct }
       };
     } catch (e) {
       console.error("Critical Analytics Service Error:", e);

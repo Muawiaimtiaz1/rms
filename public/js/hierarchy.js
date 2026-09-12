@@ -1039,8 +1039,7 @@ async function renderShopManagement(shopId) {
           <!-- Brands Tab -->
           <div id="shop-tab-brands" class="space-y-6 hidden">
              <div class="flex items-center justify-between">
-                <h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Partner Brands</h4>
-                <button onclick="managedShopId=${shop.id}; openAddBrand()" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md">+ Add Brand</button>
+                <div><h4 class="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Business Partners</h4><p class="text-xs text-slate-500 mt-1">Read only for platform administration. The shop admin manages partners in Shop Settings.</p></div>
              </div>
              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 ${shopBrands.map(b => {
@@ -1059,10 +1058,7 @@ async function renderShopManagement(shopId) {
                          <div class="text-[10px] ${partnerType === "share_based" ? "text-emerald-600 dark:text-emerald-400" : "text-blue-600 dark:text-blue-400"} font-black uppercase tracking-widest mt-1">${partnerType === "share_based" ? `${Number(b.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}% ${isOwnerPartner ? "Auto Share" : "Share"}` : "Product Profit"}</div>
                        </div>
                     </div>
-                    <div class="flex items-center gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60">
-                       <button onclick="managedShopId=${b.shop_id}; openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}', ${Number(b.ownership_percent || 0)}, ${isOwnerPartner ? "true" : "false"}, '${partnerType}')" class="flex-1 py-2 text-xs font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">Edit</button>
-                       ${isOwnerPartner ? "" : `<button onclick="deleteBrand(${b.id})" class="flex-1 py-2 text-xs font-bold rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors">Delete</button>`}
-                    </div>
+                    <div class="mt-auto pt-2 border-t border-slate-100 dark:border-slate-800/60 text-[10px] font-black uppercase tracking-widest text-slate-400">Managed by shop admin</div>
                   </div>
                 `}).join('')}
                 ${shopBrands.length === 0 ? `<div class="col-span-full p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800"><p class="text-slate-500 text-sm font-medium italic">No brands found.</p></div>` : ''}

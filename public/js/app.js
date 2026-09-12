@@ -931,6 +931,9 @@ function getSettingsNavItems() {
     { id: 'general', label: 'General Settings', icon: 'M12 6V4m0 16v-2m6-6h2M4 12H2m15.071-5.071l1.414-1.414M5.515 18.485l1.414-1.414m10.142 1.414l1.414 1.414M5.515 5.515l1.414 1.414M16 12a4 4 0 11-8 0 4 4 0 018 0z' },
     { id: 'profile', label: 'Account Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
     { id: 'receipt', label: 'Receipt Settings', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    { id: 'commission-partners', label: 'Commission Partners', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
+    { id: 'business-partners', label: 'Business Partners', icon: 'M12 8c-1.657 0-3-.895-3-2s1.343-2 3-2 3 .895 3 2-1.343 2-3 2zm-6 8c0-2 2.686-3 6-3s6 1 6 3v2H6v-2z' },
+    { id: 'partner-allocations', label: 'Partner Allocations', icon: 'M11 11V3H5a2 2 0 00-2 2v6h8zm0 2H3v6a2 2 0 002 2h6v-8zm2 8h6a2 2 0 002-2v-6h-8v8zm0-10h8V5a2 2 0 00-2-2h-6v8z' },
     { id: 'printer-routing', label: 'Printers & Routing', icon: 'M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z' }
   ];
 
@@ -1146,9 +1149,197 @@ async function renderActiveSettingsContent() {
   if (_activeSettingsTab === "printer-routing") {
     return await renderPrinterRouting();
   }
+  if (_activeSettingsTab === "commission-partners") {
+    return await renderCommissionPartnerSettings();
+  }
+  if (_activeSettingsTab === "partner-allocations") {
+    return await renderPartnerAllocationSettings();
+  }
+  if (_activeSettingsTab === "business-partners") {
+    return await renderBusinessPartnerSettings();
+  }
 
 
   return "";
+}
+
+async function renderCommissionPartnerSettings() {
+  const partners = await api('/api/shop-settings/commission-partners').catch(() => []);
+  return `<div class="space-y-6">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+      <h3 class="text-xl font-black text-slate-900 dark:text-white">Add Commission Partner</h3>
+      <p class="text-sm text-slate-500 mt-1 mb-5">The percentage is the shop's commission on this partner's product sales.</p>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input id="cp-name" placeholder="Partner name" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700" />
+        <input id="cp-phone" placeholder="Phone (optional)" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700" />
+        <input id="cp-rate" type="number" min="0" max="100" step="0.01" placeholder="Shop commission %" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700" />
+        <button onclick="saveCommissionPartner()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black">Add Partner</button>
+        <label class="md:col-span-4 flex items-center gap-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"><input id="cp-maintain-cost" type="checkbox" checked class="w-5 h-5 rounded text-indigo-600"/><span><span class="block font-black text-sm">Maintain cost price for this commission partner</span><span class="block text-xs text-slate-500">Turn off when only selling price, commission, and payable balance should be tracked.</span></span></label>
+      </div>
+    </div>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden">
+      <div class="p-6 border-b border-slate-200 dark:border-slate-800"><h3 class="text-xl font-black">Commission Partners</h3></div>
+      <div class="divide-y divide-slate-100 dark:divide-slate-800">${partners.map(p => `<div class="p-5 flex flex-col md:flex-row md:items-center gap-3">
+        <div class="flex-1"><div class="font-black">${p.name}</div><div class="text-xs text-slate-500">${p.phone || 'No phone'} · ${p.status}</div></div>
+        <div><div class="font-black text-emerald-600">${Number(p.default_commission_percentage || 0)}% shop commission</div><div class="text-[10px] font-bold text-slate-400 uppercase">${p.maintain_cost_price ? 'Cost maintained' : 'No cost tracking'}</div></div>
+        <button onclick="downloadSettingsCommissionPartnerPdf(${p.id})" class="px-4 py-2 rounded-lg bg-rose-600 text-white text-xs font-bold">PDF Report</button>
+        <button onclick="editCommissionPartner(decodeURIComponent('${encodeURIComponent(JSON.stringify(p))}'))" class="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold">Edit</button>
+        <button onclick="deleteCommissionPartner(${p.id})" class="px-4 py-2 rounded-lg bg-rose-50 text-rose-600 text-xs font-bold">Delete</button>
+      </div>`).join('') || '<div class="p-8 text-center text-slate-500">No commission partners configured.</div>'}</div>
+    </div>
+  </div>`;
+}
+
+async function renderBusinessPartnerSettings() {
+  const partners = await api('/api/brands');
+  return `<div class="space-y-6">
+    <div class="rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-4 text-sm text-emerald-800 dark:text-emerald-300">These partners own the shop profit. Commission suppliers are managed separately. The owner/admin automatically receives the percentage remaining after other partners.</div>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+      <h3 class="text-xl font-black mb-5">Add Business Partner</h3>
+      <div class="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-3">
+        <input id="bp-name" placeholder="Partner name" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700" />
+        <input id="bp-share" type="number" min="0" max="100" step="0.01" placeholder="Business share %" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700" />
+        <button onclick="saveBusinessPartner()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black">Add Partner</button>
+      </div>
+    </div>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden">
+      ${partners.map(p => `<div class="p-5 flex flex-col md:flex-row md:items-center gap-4 border-b border-slate-100 dark:border-slate-800 last:border-0">
+        <div class="flex-1"><div class="font-black">${p.name}</div><div class="text-xs text-slate-500">${p.is_owner_partner ? 'Owner/Admin · share calculated automatically' : 'Business partner'}</div></div>
+        <div class="text-lg font-black text-emerald-600">${Number(p.ownership_percent || 0).toFixed(2).replace(/\.00$/, '')}%</div>
+        <button onclick="downloadSettingsBusinessPartnerPdf(${p.id})" class="px-4 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold">PDF Report</button>
+        ${p.is_owner_partner ? '' : `<button onclick="editBusinessPartner(decodeURIComponent('${encodeURIComponent(JSON.stringify(p))}'))" class="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold">Edit</button><button onclick="deleteBusinessPartner(${p.id})" class="px-4 py-2 rounded-lg bg-rose-50 text-rose-600 text-xs font-bold">Delete</button>`}
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function saveBusinessPartner(id = null) {
+  const name = document.getElementById(id ? 'bp-edit-name' : 'bp-name')?.value?.trim();
+  const ownership = Number(document.getElementById(id ? 'bp-edit-share' : 'bp-share')?.value);
+  if (!name || !Number.isFinite(ownership) || ownership < 0 || ownership > 100) return toast('Enter a name and a business share from 0 to 100', 'error');
+  try { await api(`/api/brands${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', { name, ownership_percent: ownership, partner_type: 'share_based' }); closeModal(); toast('Business partner saved'); renderSettings('business-partners'); }
+  catch (e) { toast(e.message || 'Could not save business partner', 'error'); }
+}
+
+function editBusinessPartner(partner) {
+  if (typeof partner === 'string') partner = JSON.parse(partner);
+  openModal('Edit Business Partner', `<div class="space-y-3"><input id="bp-edit-name" value="${partner.name || ''}" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border"/><input id="bp-edit-share" type="number" min="0" max="100" step="0.01" value="${Number(partner.ownership_percent || 0)}" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border"/><button onclick="saveBusinessPartner(${partner.id})" class="w-full py-3 rounded-xl bg-indigo-600 text-white font-black">Save</button></div>`);
+}
+
+async function deleteBusinessPartner(id) {
+  if (!confirm('Delete this business partner?')) return;
+  try { await api(`/api/brands/${id}`, 'DELETE'); toast('Business partner deleted'); renderSettings('business-partners'); }
+  catch (e) { toast(e.message || 'Reallocate this partner before deleting', 'error'); }
+}
+
+function downloadSettingsBusinessPartnerPdf(partnerId) {
+  const params = new URLSearchParams({ period: 'all', type: 'business_partner', partner_id: String(partnerId) });
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
+}
+
+async function renderPartnerAllocationSettings() {
+  const data = await api('/api/shop-settings/partner-allocations');
+  const section = (type, title, description) => {
+    const config = data[type];
+    return `<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+        <div><h3 class="text-xl font-black">${title}</h3><p class="text-sm text-slate-500 mt-1">${description}</p></div>
+        <select id="${type}-allocation-mode" onchange="partnerAllocationModeChanged('${type}')" class="px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 font-bold">
+          <option value="ownership" ${config.mode === 'ownership' ? 'selected' : ''}>Follow business ownership</option>
+          <option value="custom" ${config.mode === 'custom' ? 'selected' : ''}>Custom percentages</option>
+        </select>
+      </div>
+      <div id="${type}-allocation-shares" class="space-y-3 ${config.mode === 'custom' ? '' : 'opacity-60'}">
+        ${config.shares.map(row => `<div class="grid grid-cols-[1fr_140px] items-center gap-4"><div class="font-bold">${row.brand_name}</div>
+          <div class="relative"><input data-${type}-brand-id="${row.brand_id}" type="number" min="0" max="100" step="0.01" value="${Number(row.percentage)}" oninput="updatePartnerAllocationTotal('${type}')" ${config.mode === 'custom' ? '' : 'disabled'} class="w-full px-4 py-2 pr-8 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-right font-black"/><span class="absolute right-3 top-2.5 text-slate-400">%</span></div></div>`).join('')}
+      </div>
+      <div class="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 text-sm font-black">Total: <span id="${type}-allocation-total">${config.shares.reduce((s,r)=>s+Number(r.percentage),0).toFixed(2)}%</span></div>
+    </div>`;
+  };
+  return `<div class="space-y-6">
+    <div class="rounded-2xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 p-4 text-sm text-blue-800 dark:text-blue-300">Ownership profit, expense funding, and inventory funding are independent. A custom split may assign 100% to one partner, but every custom category must total exactly 100%.</div>
+    ${section('expense','Operating Expense Funding','Choose who funds rent, utilities, salaries, and other operating expenses.')}
+    ${section('inventory','Shop Inventory Funding',`Choose who funds shop-owned inventory. Current inventory value: ${formatShopCurrency(Number(data.inventoryValue || 0))}. Commission-partner inventory is excluded.`)}
+    <button onclick="savePartnerAllocations()" class="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black">Save Partner Allocations</button>
+  </div>`;
+}
+
+function partnerAllocationModeChanged(type) {
+  const custom = document.getElementById(`${type}-allocation-mode`)?.value === 'custom';
+  const wrap = document.getElementById(`${type}-allocation-shares`);
+  if (wrap) wrap.classList.toggle('opacity-60', !custom);
+  document.querySelectorAll(`[data-${type}-brand-id]`).forEach(input => { input.disabled = !custom; });
+  updatePartnerAllocationTotal(type);
+}
+
+function updatePartnerAllocationTotal(type) {
+  const inputs = Array.from(document.querySelectorAll(`[data-${type}-brand-id]`));
+  const total = inputs.reduce((sum, input) => sum + (Number(input.value) || 0), 0);
+  const output = document.getElementById(`${type}-allocation-total`);
+  if (output) { output.textContent = `${total.toFixed(2)}%`; output.className = Math.abs(total - 100) <= 0.001 ? 'text-emerald-600' : 'text-rose-600'; }
+}
+
+async function savePartnerAllocations() {
+  const readShares = type => Array.from(document.querySelectorAll(`[data-${type}-brand-id]`)).map(input => ({ brand_id: Number(input.dataset[`${type}BrandId`]), percentage: Number(input.value) }));
+  const payload = {
+    expense_mode: document.getElementById('expense-allocation-mode').value,
+    inventory_mode: document.getElementById('inventory-allocation-mode').value,
+    expense_shares: readShares('expense'), inventory_shares: readShares('inventory')
+  };
+  try { await api('/api/shop-settings/partner-allocations', 'PUT', payload); toast('Partner allocations saved'); renderSettings('partner-allocations'); }
+  catch (e) { toast(e.message || 'Allocation percentages must total 100%', 'error'); }
+}
+
+async function saveCommissionPartner(id = null) {
+  const payload = {
+    name: document.getElementById(id ? 'cp-edit-name' : 'cp-name')?.value?.trim(),
+    phone: document.getElementById(id ? 'cp-edit-phone' : 'cp-phone')?.value?.trim(),
+    default_commission_percentage: Number(document.getElementById(id ? 'cp-edit-rate' : 'cp-rate')?.value),
+    maintain_cost_price: document.getElementById(id ? 'cp-edit-maintain-cost' : 'cp-maintain-cost')?.checked !== false,
+    status: document.getElementById('cp-edit-status')?.value || 'active'
+  };
+  if (!payload.name || !Number.isFinite(payload.default_commission_percentage)) return toast('Name and commission percentage are required', 'error');
+  await api(`/api/shop-settings/commission-partners${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', payload);
+  closeModal();
+  toast('Commission partner saved');
+  renderSettings('commission-partners');
+}
+
+function editCommissionPartner(p) {
+  if (typeof p === 'string') p = JSON.parse(p);
+  openModal('Edit Commission Partner', `<div class="space-y-3">
+    <input id="cp-edit-name" value="${p.name || ''}" placeholder="Name" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border" />
+    <input id="cp-edit-phone" value="${p.phone || ''}" placeholder="Phone" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border" />
+    <input id="cp-edit-rate" type="number" min="0" max="100" step="0.01" value="${Number(p.default_commission_percentage || 0)}" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border" />
+    <label class="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border"><input id="cp-edit-maintain-cost" type="checkbox" ${p.maintain_cost_price ? 'checked' : ''} class="w-5 h-5 rounded text-indigo-600"/><span class="text-sm font-bold">Maintain cost price for this partner</span></label>
+    <select id="cp-edit-status" class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border"><option value="active" ${p.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${p.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
+    <button onclick="saveCommissionPartner(${p.id})" class="w-full py-3 rounded-xl bg-indigo-600 text-white font-black">Save</button>
+  </div>`);
+}
+
+async function deleteCommissionPartner(id) {
+  if (!confirm('Delete this commission partner?')) return;
+  try { await api(`/api/shop-settings/commission-partners/${id}`, 'DELETE'); toast('Commission partner deleted'); renderSettings('commission-partners'); }
+  catch (e) { toast(e.message || 'Cannot delete partner', 'error'); }
+}
+
+function downloadSettingsCommissionPartnerPdf(partnerId) {
+  const params = new URLSearchParams({ period: 'all', type: 'commission_partner', partner_id: String(partnerId) });
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
+}
+
+function commissionPartnerChanged(applyDefault = true) {
+  const select = document.getElementById('pf-commission-partner');
+  const wrap = document.getElementById('pf-commission-wrap');
+  const rate = document.getElementById('pf-commission');
+  const costWrap = document.getElementById('pricing-cost-container');
+  const costInput = document.getElementById('pf-buy');
+  if (!select || !wrap) return;
+  wrap.classList.toggle('hidden', !select.value);
+  const maintainCost = !select.value || select.selectedOptions[0]?.dataset.maintainCost !== '0';
+  if (costWrap) costWrap.classList.toggle('hidden', !maintainCost);
+  if (costInput) costInput.disabled = !maintainCost;
+  if (select.value && rate && applyDefault) rate.value = select.selectedOptions[0]?.dataset.rate || 0;
 }
 
 function toggleAddCategoryMenu() {
@@ -1600,6 +1791,7 @@ async function renderDashboard(period, brandId, from, to) {
     (_dashPeriod === "custom" && (_dashFrom !== "" || _dashTo !== ""));
   const brandPerformance = Array.isArray(data.brandPerformance) ? data.brandPerformance : [];
   const partnerProfitShares = Array.isArray(data.partnerProfitShares) ? data.partnerProfitShares : [];
+  const commissionPartnerBalances = Array.isArray(data.commissionPartnerBalances) ? data.commissionPartnerBalances : [];
   const shopProfitValue = Number(data.shopProfit ?? data.partnerProfitPool ?? data.netProfit ?? 0);
   const selectedPartnerAudit = data.selectedPartnerAudit || null;
   const selectedPartnerType = selectedPartnerAudit?.partner_type === "product_based" ? "product_based" : "share_based";
@@ -1653,6 +1845,7 @@ async function renderDashboard(period, brandId, from, to) {
               <th class="px-6 py-3 text-right">Ownership</th>
               <th class="px-6 py-3 text-right">Profit Basis</th>
               <th class="px-6 py-3 text-right">Partner Profit</th>
+              <th class="px-6 py-3 text-right">Report</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1668,6 +1861,7 @@ async function renderDashboard(period, brandId, from, to) {
                 <td class="px-6 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">${type === "product_based" ? "Products" : `${Number(share.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}%`}</td>
                 <td class="px-6 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">Rs. ${Number(share.profit_pool || 0).toLocaleString()}</td>
                 <td class="px-6 py-3 text-right text-xs font-black ${Number(share.profit_share || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}">Rs. ${Number(share.profit_share || 0).toLocaleString()}</td>
+                <td class="px-6 py-3 text-right"><button onclick="downloadDashboardBusinessPartnerPdf(${share.brand_id})" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black uppercase">PDF</button></td>
               </tr>
             `}).join("")}
           </tbody>
@@ -1725,6 +1919,21 @@ async function renderDashboard(period, brandId, from, to) {
       </div>
     </div>`
     : "";
+  const commissionPartnerHtml = commissionPartnerBalances.length ? `
+    <div class="glass rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden mb-8">
+      <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800">
+        <h3 class="font-bold text-gray-700 dark:text-gray-200 text-sm">Commission Partner Sales</h3>
+        <p class="text-[10px] text-slate-400 mt-1">Only shop commission is included in business profit. The balance remains payable to the product owner.</p>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full text-left text-xs">
+        <thead><tr class="bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black text-slate-400 uppercase">
+          <th class="px-6 py-3">Commission Partner</th><th class="px-6 py-3 text-right">Net Sales</th><th class="px-6 py-3 text-right">Shop Commission</th><th class="px-6 py-3 text-right">Partner Cost</th><th class="px-6 py-3 text-right">Partner Payable</th><th class="px-6 py-3 text-right">Partner Profit</th><th class="px-6 py-3 text-right">Report</th>
+        </tr></thead>
+        <tbody>${commissionPartnerBalances.map(row => `<tr class="border-t border-slate-100 dark:border-slate-800">
+          <td class="px-6 py-3 font-black">${row.partner_name}</td><td class="px-6 py-3 text-right">${formatShopCurrency(Number(row.net_sales || 0))}</td><td class="px-6 py-3 text-right font-black text-emerald-600">${formatShopCurrency(Number(row.shop_commission || 0))}</td><td class="px-6 py-3 text-right">${row.maintain_cost_price ? formatShopCurrency(Number(row.partner_cogs || 0)) : 'Not maintained'}</td><td class="px-6 py-3 text-right font-black">${formatShopCurrency(Number(row.partner_payable || 0))}</td><td class="px-6 py-3 text-right font-black text-blue-600">${row.maintain_cost_price ? formatShopCurrency(Number(row.partner_profit || 0)) : 'Not calculated'}</td><td class="px-6 py-3 text-right"><button onclick="downloadDashboardCommissionPartnerPdf(${row.partner_id})" class="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[9px] font-black">PDF</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : "";
 
   $c("page-content").innerHTML = `
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -1779,6 +1988,7 @@ async function renderDashboard(period, brandId, from, to) {
     </div>` : ''}
 
     ${partnerSplitHtml}
+    ${commissionPartnerHtml}
     ${brandProfitHtml}
 
     <!-- Tables -->
@@ -1845,6 +2055,24 @@ async function renderDashboard(period, brandId, from, to) {
         </div>
       </div>
     </div>`;
+}
+
+function downloadDashboardCommissionPartnerPdf(partnerId) {
+  const params = new URLSearchParams({ period: _dashPeriod || 'all', type: 'commission_partner', partner_id: String(partnerId) });
+  if (_dashPeriod === 'custom') {
+    if (_dashFrom) params.set('from', _dashFrom);
+    if (_dashTo) params.set('to', _dashTo);
+  }
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
+}
+
+function downloadDashboardBusinessPartnerPdf(partnerId) {
+  const params = new URLSearchParams({ period: _dashPeriod || 'all', type: 'business_partner', partner_id: String(partnerId) });
+  if (_dashPeriod === 'custom') {
+    if (_dashFrom) params.set('from', _dashFrom);
+    if (_dashTo) params.set('to', _dashTo);
+  }
+  window.location.href = `/api/analytics/reports.pdf?${params}`;
 }
 
 function renderGlobalDashboard(data) {
@@ -1930,7 +2158,7 @@ async function renderBrands(shopId = null) {
               <span class="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Registered</span>
               <span class="text-xs text-gray-600 dark:text-gray-400 font-medium">${new Date(b.created_at).toLocaleDateString(undefined, { month: "short", year: "numeric", day: "numeric" })}</span>
             </div>
-            ${currentUser.role === "superadmin"
+            ${false
           ? `
             <div class="flex gap-2">
                <button onclick="openEditBrand(${b.id}, '${b.name.replace(/'/g, "\\'")}', ${ownershipPercent}, ${isOwnerPartner ? "true" : "false"}, '${partnerType}')" class="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-transparent hover:bg-indigo-100 transition-all">
@@ -1957,7 +2185,7 @@ async function renderBrands(shopId = null) {
         <h3 class="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight">Partner Brands${shopName}</h3>
         <p class="text-gray-500 dark:text-gray-400 text-sm font-medium mt-1">Directory of ${brands.length} official brands in the system</p>
       </div>
-      ${currentUser.role === "superadmin"
+      ${false
       ? `
         <button onclick="openAddBrand()" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/20 text-white text-sm font-bold transition-all active:scale-95">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
@@ -1999,12 +2227,7 @@ function openAddBrand() {
     <div class="space-y-4">
       <div><label class="block text-xs text-slate-400 mb-1.5">Brand Name</label>
         <input id="brand-name" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="e.g. Nike" /></div>
-      <div><label class="block text-xs text-slate-400 mb-1.5">Partner Type</label>
-        <select id="brand-partner-type" onchange="toggleBrandPartnerTypeFields()" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all">
-          <option value="share_based">Share Based</option>
-          <option value="product_based">Product Based</option>
-        </select>
-        <p class="mt-1 text-[10px] text-slate-500">Share based splits shop profit by percentage. Product based uses products assigned to this partner.</p></div>
+      <input id="brand-partner-type" type="hidden" value="share_based" />
       <div id="brand-share-wrap"><label class="block text-xs text-slate-400 mb-1.5">Business Share (%)</label>
         <input id="brand-ownership-percent" type="number" min="0" max="100" step="0.01" value="0" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" placeholder="e.g. 50" />
         <p class="mt-1 text-[10px] text-slate-500">Owner/admin share is recalculated as the remaining percentage.</p></div>
@@ -2023,12 +2246,7 @@ function openEditBrand(id, name, ownershipPercent = 0, isOwnerPartner = false, p
     <div class="space-y-4">
       <div><label class="block text-xs text-slate-400 mb-1.5">Brand Name</label>
         <input id="brand-name" value="${name}" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all" /></div>
-      <div><label class="block text-xs text-slate-400 mb-1.5">Partner Type</label>
-        <select id="brand-partner-type" onchange="toggleBrandPartnerTypeFields()" ${isOwnerPartner ? "disabled" : ""} class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
-          <option value="share_based" ${normalizedPartnerType === "share_based" ? "selected" : ""}>Share Based</option>
-          <option value="product_based" ${normalizedPartnerType === "product_based" ? "selected" : ""}>Product Based</option>
-        </select>
-        <p class="mt-1 text-[10px] text-slate-500">${isOwnerPartner ? "Owner/admin is always share based." : "Share based splits shop profit. Product based uses assigned products."}</p></div>
+      <input id="brand-partner-type" type="hidden" value="share_based" />
       <div id="brand-share-wrap" class="${normalizedPartnerType === "product_based" ? "hidden" : ""}"><label class="block text-xs text-slate-400 mb-1.5">Business Share (%)</label>
         <input id="brand-ownership-percent" data-owner-partner="${isOwnerPartner ? "1" : "0"}" type="number" min="0" max="100" step="0.01" value="${Number(ownershipPercent || 0)}" ${isOwnerPartner || normalizedPartnerType === "product_based" ? "disabled" : ""} class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-indigo-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed" />
         <p class="mt-1 text-[10px] text-slate-500">${isOwnerPartner ? "Owner/admin share is calculated from the remaining share-based partner percentage." : "Owner/admin share is recalculated as the remaining percentage."}</p></div>
@@ -2339,7 +2557,8 @@ function resetInventoryFilters() {
 
 
 
-function productFormHtml(p = {}, brands = []) {
+function productFormHtml(p = {}, brands = [], commissionPartners = []) {
+  const businessOwner = brands.find(b => b.is_owner_partner) || brands.find(b => b.partner_type === 'share_based') || brands[0];
   const brandOptions = brands
     .map(
       (b) =>
@@ -2414,11 +2633,17 @@ function productFormHtml(p = {}, brands = []) {
         </div>
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Product Name *</label>
           <input id="pf-name" value="${p.name || ""}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Product name" /></div>
-        ${(isRestaurant || brands.length <= 1)
-      ? `<input type="hidden" id="pf-brand" value="${brands[0] ? brands[0].id : ""}" />`
-      : `<div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Brand *</label>
-             <select id="pf-brand" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm"><option value="">Select brand</option>${brandOptions}</select></div>`
-    }
+        <input type="hidden" id="pf-brand" value="${p.brand_id || (businessOwner ? businessOwner.id : "")}" />
+        <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Product Ownership</label>
+          <select id="pf-commission-partner" onchange="commissionPartnerChanged()" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100">
+            <option value="">Shop-owned product</option>
+            ${commissionPartners.filter(x => x.status === 'active' || Number(x.id) === Number(p.third_party_person_id)).map(x => `<option value="${x.id}" data-rate="${Number(x.default_commission_percentage || 0)}" data-maintain-cost="${x.maintain_cost_price ? '1' : '0'}" ${Number(p.third_party_person_id) === Number(x.id) ? 'selected' : ''}>${x.name} — ${Number(x.default_commission_percentage || 0)}% shop commission</option>`).join('')}
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1">Only commission partners from Shop Settings appear here. Business owners are not product suppliers.</p>
+        </div>
+        <div id="pf-commission-wrap" class="col-span-2 sm:col-span-1 ${p.third_party_person_id ? '' : 'hidden'}">
+          ${numInput("pf-commission", "Shop Commission (%)", p.commission_percentage ?? "")}
+        </div>
         <div class="col-span-2"><label class="block text-xs text-slate-400 mb-1">Description</label>
           <input id="pf-desc" value="${p.description || ""}" class="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 transition-all shadow-sm" placeholder="Optional description" /></div>
 
@@ -2427,7 +2652,7 @@ function productFormHtml(p = {}, brands = []) {
         </div>
 
         <div id="pricing-cost-container" class="col-span-2 sm:col-span-1">
-          ${numInput("pf-buy", "Cost Price", p.buying_price ?? "")}
+          ${numInput("pf-buy", "Cost Price (Optional for commission products)", p.buying_price ?? "")}
         </div>
         <div id="pricing-sell-container" class="col-span-2 sm:col-span-1">
           ${numInput("pf-sell", "Selling Price", p.selling_price ?? "")}
@@ -2516,6 +2741,7 @@ function productFormHtml(p = {}, brands = []) {
 
 async function openAddProduct() {
   let brands = window._productBrands || (await api("/api/brands"));
+  const commissionPartners = await api('/api/shop-settings/commission-partners').catch(() => []);
 
   // GET /api/brands auto-creates a default brand if none exist
   if (!brands.length) {
@@ -2527,7 +2753,7 @@ async function openAddProduct() {
   const randomSku = 'SKU-' + Math.random().toString(36).substring(2, 10).toUpperCase();
   openModal(
     "Add Product",
-    productFormHtml({ sku: randomSku }, brands) +
+    productFormHtml({ sku: randomSku }, brands, commissionPartners) +
     `<button onclick="saveProduct()" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Save Product</button>`,
     "max-w-xl",
   );
@@ -2537,10 +2763,12 @@ async function openAddProduct() {
   const sellEl = document.getElementById("pf-sell");
   if (buyEl) buyEl.addEventListener("input", recalculateComponentPrices);
   if (sellEl) sellEl.addEventListener("input", recalculateComponentPrices);
+  commissionPartnerChanged(false);
 }
 
 async function openEditProduct(id) {
   const brands = window._productBrands || (await api("/api/brands"));
+  const commissionPartners = await api('/api/shop-settings/commission-partners').catch(() => []);
   const product = allProducts.find((p) => p.id === id) || {};
   window.ProductImageTools?.resetState?.();
 
@@ -2553,7 +2781,7 @@ async function openEditProduct(id) {
 
   openModal(
     "Edit Product",
-    productFormHtml(product, brands) +
+    productFormHtml(product, brands, commissionPartners) +
     `<button onclick="saveProduct(${id})" class="w-full mt-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Update Product</button>`,
     "max-w-xl",
   );
@@ -2565,6 +2793,7 @@ async function openEditProduct(id) {
   const sellEl = document.getElementById("pf-sell");
   if (buyEl) buyEl.addEventListener("input", recalculateComponentPrices);
   if (sellEl) sellEl.addEventListener("input", recalculateComponentPrices);
+  commissionPartnerChanged(false);
 }
 
 async function saveProduct(id) {
@@ -2605,6 +2834,10 @@ async function saveProduct(id) {
     formData.append('category', category);
     formData.append('description', $c("pf-desc").value.trim());
     formData.append('brand_id', brand_id);
+    const commissionPartnerId = parseInt(document.getElementById('pf-commission-partner')?.value || '');
+    formData.append('is_commission_based', commissionPartnerId ? '1' : '0');
+    formData.append('third_party_person_id', commissionPartnerId ? String(commissionPartnerId) : '');
+    formData.append('commission_percentage', commissionPartnerId ? String(parseFloat(document.getElementById('pf-commission')?.value) || 0) : '0');
     if (document.getElementById("pf-barcode")) formData.append('barcode', document.getElementById("pf-barcode").value.trim());
     formData.append('buying_price', parseFloat($c("pf-buy").value) || 0);
     formData.append('selling_price', parseFloat($c("pf-sell").value) || 0);
@@ -6966,7 +7199,7 @@ async function renderExpenses() {
         </div>
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-100 dark:border-gray-800">
           ${statCard("Total Month Expenses", "Rs. " + Number(sharesRes.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), "Operating costs", "rose", "All expense records dated inside the selected month, before brand payment settlement.")}
-          ${statCard("Ownership Split", `${Number(sharesRes.totalOwnershipPercent || 0).toFixed(2).replace(/\.00$/, "")}% configured`, `${sharesRes.brandCount} share partners`, "blue", "Selected month's expenses split by share-based partner percentages. Product-based partners are audited through product profit.")}
+          ${statCard("Expense Split", sharesRes.allocationMode === 'custom' ? "Custom percentages" : "Business ownership", `${sharesRes.brandCount} business partners`, "blue", "Selected month's expenses use the independently configured expense funding allocation.")}
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -6985,7 +7218,7 @@ async function renderExpenses() {
           (s) => `
                 <tr class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                   <td class="px-6 py-4 font-medium">${s.brand_name}</td>
-                  <td class="px-6 py-4 text-right text-gray-500">${Number(s.ownership_percent || 0).toFixed(2).replace(/\.00$/, "")}%</td>
+                  <td class="px-6 py-4 text-right text-gray-500">${Number(s.expense_percentage || 0).toFixed(2).replace(/\.00$/, "")}%</td>
                   <td class="px-6 py-4 text-right text-gray-500">Rs. ${parseFloat(s.total_share).toFixed(2)}</td>
                   <td class="px-6 py-4 text-right">
                     <div class="flex items-center justify-end gap-2 group">

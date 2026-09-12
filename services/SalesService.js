@@ -34,6 +34,18 @@ const checkoutSchema = z.object({
 });
 
 class SalesService {
+  getCommissionSnapshot(product, quantity, priceAtSale) {
+    if (!product || Number(product.is_commission_based || 0) !== 1 || !product.third_party_person_id) {
+      return { third_party_person_id: null, commission_percentage_at_sale: 0, commission_amount_at_sale: 0 };
+    }
+    const percentage = Math.max(0, Math.min(100, Number(product.commission_percentage || 0)));
+    return {
+      third_party_person_id: product.third_party_person_id,
+      commission_percentage_at_sale: percentage,
+      commission_amount_at_sale: Number(quantity || 0) * Number(priceAtSale || 0) * percentage / 100
+    };
+  }
+
   async getPrinterRouting(dbInstance, shopId) {
     const printers = await dbInstance('printers')
       .where({ shop_id: shopId })
@@ -547,7 +559,8 @@ class SalesService {
               await trx('sale_items').insert({
                 sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
                 quantity: take, price_at_sale: priceAtSale, buying_price_at_sale: b.buying_price, batch_id: b.id,
-                special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+                special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json,
+                ...this.getCommissionSnapshot(item.product, take, priceAtSale)
               });
               await trx('product_batches').where({ id: b.id }).update({ quantity: db.raw('quantity - ?', [take]) });
               remainingToDeduct -= take;
@@ -561,7 +574,8 @@ class SalesService {
                     sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
                     quantity: remainingToDeduct, price_at_sale: priceAtSale, buying_price_at_sale: cost,
                     batch_id: lastBatch ? lastBatch.id : null,
-                    special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+                    special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json,
+                    ...this.getCommissionSnapshot(item.product, remainingToDeduct, priceAtSale)
                 });
                 if (lastBatch) await trx('product_batches').where({ id: lastBatch.id }).update({ quantity: db.raw('quantity - ?', [remainingToDeduct]) });
             }
@@ -762,7 +776,8 @@ class SalesService {
              await trx('sale_items').insert({
                sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
                quantity: item.quantity, price_at_sale: priceAtSale, buying_price_at_sale: item.product.buying_price || 0,
-               special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+               special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json,
+               ...this.getCommissionSnapshot(item.product, item.quantity, priceAtSale)
              });
 
              for (const link of activeLinks) {
@@ -790,7 +805,8 @@ class SalesService {
                await trx('sale_items').insert({
                  sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
                  quantity: take, price_at_sale: priceAtSale, buying_price_at_sale: b.buying_price, batch_id: b.id,
-                 special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+                 special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json,
+                 ...this.getCommissionSnapshot(item.product, take, priceAtSale)
                });
                await trx('product_batches').where({ id: b.id }).update({ quantity: db.raw('quantity - ?', [take]) });
                remainingToDeduct -= take;
@@ -801,7 +817,8 @@ class SalesService {
                await trx('sale_items').insert({
                  sale_id: saleId, product_id: item.product.id, parent_id: item.parent_id || null,
                  quantity: remainingToDeduct, price_at_sale: priceAtSale, buying_price_at_sale: cost, batch_id: lastBatch ? lastBatch.id : null,
-                 special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json
+                 special_instructions: item.special_instructions, variants_json: item.variants_json, addons_json: item.addons_json,
+                 ...this.getCommissionSnapshot(item.product, remainingToDeduct, priceAtSale)
                });
                if (lastBatch) await trx('product_batches').where({ id: lastBatch.id }).update({ quantity: db.raw('quantity - ?', [remainingToDeduct]) });
              }
@@ -1084,7 +1101,7 @@ class SalesService {
 
         const originalCogs = original ? original.buying_price_at_sale : 0;
         await trx('return_items').insert({
-          return_id: returnId, sale_item_id: item.sale_item_id || null, product_id: item.product_id || null,
+          return_id: returnId, sale_item_id: original?.sale_item_id || item.sale_item_id || null, product_id: item.product_id || null,
           quantity: item.quantity, refund_price: item.refund_price, buying_price_at_sale: originalCogs, is_damage: item.is_damage ? 1 : 0
         });
 

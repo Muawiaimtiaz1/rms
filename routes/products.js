@@ -79,7 +79,9 @@ router.post('/', requireAuth, (req, res, next) => {
       selling_price: parseFloat(req.body.selling_price),
       stock: parseInt(req.body.stock) || 0,
       min_stock_level: parseInt(req.body.min_stock_level) || 0,
-      min_stock_level: parseInt(req.body.min_stock_level) || 0,
+      is_commission_based: req.body.is_commission_based === '1' ? 1 : 0,
+      third_party_person_id: req.body.third_party_person_id ? parseInt(req.body.third_party_person_id) : null,
+      commission_percentage: parseFloat(req.body.commission_percentage) || 0,
       components: parse(components),
       ingredients: parse(ingredients),
       image_path: req.file ? "/uploads/products/" + req.file.filename : null
@@ -112,7 +114,9 @@ router.put('/:id', requireAuth, upload.single('image'), async (req, res) => {
         selling_price: parseFloat(req.body.selling_price),
         stock: req.body.stock !== undefined ? parseInt(req.body.stock) : undefined,
         min_stock_level: parseInt(req.body.min_stock_level) || 0,
-        min_stock_level: parseInt(req.body.min_stock_level) || 0,
+        is_commission_based: req.body.is_commission_based === '1' ? 1 : 0,
+        third_party_person_id: req.body.third_party_person_id ? parseInt(req.body.third_party_person_id) : null,
+        commission_percentage: parseFloat(req.body.commission_percentage) || 0,
         components: parse(components),
         ingredients: parse(ingredients),
     };

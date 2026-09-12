@@ -9,7 +9,7 @@ function normalizePercent(value, fallback = 0) {
 }
 
 function normalizePartnerType(value) {
-  return value === 'product_based' ? 'product_based' : 'share_based';
+  return 'share_based';
 }
 
 function sameId(a, b) {
@@ -61,9 +61,9 @@ class BrandService {
       .where({ id: owner.id, shop_id: shopId })
       .update({ partner_type: 'share_based' });
 
-    await trx('brands')
-      .where({ shop_id: shopId, partner_type: 'product_based' })
-      .update({ ownership_percent: 0 });
+    // Product suppliers live in third_party_persons. Brands are business owners only.
+    await trx('brands').where({ shop_id: shopId, partner_type: 'product_based' })
+      .update({ partner_type: 'share_based', ownership_percent: 0 });
 
     brands = await trx('brands').where({ shop_id: shopId }).orderBy('id', 'asc');
 
@@ -94,11 +94,13 @@ class BrandService {
   }
 
   async createBrand(name, targetShopId, creatorId, ownershipPercent = null, partnerType = 'share_based') {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) throw new Error('Business partner name is required.');
     return db.transaction(async (trx) => {
       await this.ensureOwnerBrand(targetShopId, trx);
       const normalizedPartnerType = normalizePartnerType(partnerType);
       const [idObj] = await trx('brands').insert({
-        name,
+        name: cleanName,
         partner_type: normalizedPartnerType,
         ownership_percent: normalizedPartnerType === 'share_based' ? normalizePercent(ownershipPercent, 0) : 0,
         user_id: creatorId,
@@ -111,13 +113,15 @@ class BrandService {
   }
 
   async updateBrand(id, name, targetShopId, ownershipPercent = null, partnerType = null) {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) throw new Error('Business partner name is required.');
     return db.transaction(async (trx) => {
       const brand = await trx('brands').where({ id, shop_id: targetShopId }).first();
       if (!brand) throw new Error('Brand not found');
 
       const { owner } = await this.ensureOwnerBrand(targetShopId, trx);
       const isOwnerBrand = owner && sameId(brand.id, owner.id);
-      const updates = { name };
+      const updates = { name: cleanName };
       const nextPartnerType = isOwnerBrand ? 'share_based' : normalizePartnerType(partnerType || brand.partner_type);
       updates.partner_type = nextPartnerType;
 
@@ -142,6 +146,12 @@ class BrandService {
         throw new Error('Owner/admin partner cannot be deleted. Adjust partner shares instead.');
       }
 
+      const fundedAllocation = await trx('partner_allocation_shares')
+        .where({ shop_id: targetShopId, brand_id: id }).where('percentage', '>', 0).first();
+      if (fundedAllocation) {
+        throw new Error('This partner has a custom expense or inventory allocation. Reallocate it before deleting the partner.');
+      }
+
       await trx('brands').where({ id, shop_id: targetShopId }).delete();
       await this.rebalanceOwnerShare(targetShopId, trx, { strict: false });
     });
@@ -157,11 +167,15 @@ class BrandService {
       .first();
     
     const totalExp = parseFloat(totalExpRes.val || 0);
+    const allocation = await this.getAllocationSettings(shopId);
     const brands = await db('brands').where({ shop_id: shopId, partner_type: 'share_based' });
     const brandCount = brands.length;
     const totalOwnershipPercent = brands.reduce((sum, brand) => sum + normalizePercent(brand.ownership_percent), 0);
-    const useWeightedSplit = totalOwnershipPercent > 0.0001;
+    const expenseMap = new Map(allocation.expense.shares.map(row => [Number(row.brand_id), Number(row.percentage)]));
+    const useCustomSplit = allocation.expense.mode === 'custom';
+    const useWeightedSplit = useCustomSplit || totalOwnershipPercent > 0.0001;
     const shareForBrand = (brand) => {
+      if (useCustomSplit) return totalExp * (Number(expenseMap.get(Number(brand.id)) || 0) / 100);
       if (useWeightedSplit) return totalExp * (normalizePercent(brand.ownership_percent) / 100);
       return brandCount > 0 ? (totalExp / brandCount) : 0;
     };
@@ -181,12 +195,77 @@ class BrandService {
       brand_id: b.id,
       brand_name: b.name,
       ownership_percent: normalizePercent(b.ownership_percent),
+      expense_percentage: useCustomSplit ? Number(expenseMap.get(Number(b.id)) || 0) : normalizePercent(b.ownership_percent),
       total_share: shareForBrand(b),
       paid: paymentMap[b.id] || 0,
       due: shareForBrand(b) - (paymentMap[b.id] || 0)
     }));
 
-    return { month, totalExpenses: totalExp, brandCount, totalOwnershipPercent, weightedSplit: useWeightedSplit, shares };
+    return { month, totalExpenses: totalExp, brandCount, totalOwnershipPercent, allocationMode: allocation.expense.mode, weightedSplit: useWeightedSplit, shares };
+  }
+
+  async getAllocationSettings(shopId) {
+    await this.rebalanceOwnerShare(shopId, db, { strict: false });
+    const brands = await db('brands').where({ shop_id: shopId, partner_type: 'share_based' }).orderBy('name');
+    const config = await db('partner_allocation_configs').where({ shop_id: shopId }).first();
+    const rows = await db('partner_allocation_shares').where({ shop_id: shopId });
+    const makeSection = (type, mode) => ({
+      mode,
+      shares: brands.map(brand => {
+        const custom = rows.find(row => Number(row.brand_id) === Number(brand.id) && row.allocation_type === type);
+        return { brand_id: brand.id, brand_name: brand.name,
+          percentage: mode === 'custom' ? Number(custom?.percentage || 0) : normalizePercent(brand.ownership_percent) };
+      })
+    });
+    return {
+      expense: makeSection('expense', config?.expense_mode === 'custom' ? 'custom' : 'ownership'),
+      inventory: makeSection('inventory', config?.inventory_mode === 'custom' ? 'custom' : 'ownership')
+    };
+  }
+
+  async saveAllocationSettings(shopId, payload) {
+    const modes = ['ownership', 'custom'];
+    const expenseMode = modes.includes(payload.expense_mode) ? payload.expense_mode : 'ownership';
+    const inventoryMode = modes.includes(payload.inventory_mode) ? payload.inventory_mode : 'ownership';
+    await db.transaction(async trx => {
+      await this.rebalanceOwnerShare(shopId, trx, { strict: false });
+      const brands = await trx('brands').where({ shop_id: shopId, partner_type: 'share_based' }).select('id');
+      const validIds = new Set(brands.map(row => Number(row.id)));
+      const validateShares = (mode, values, label) => {
+        if (mode !== 'custom') return [];
+        const normalized = brands.map(brand => {
+          const match = (Array.isArray(values) ? values : []).find(row => Number(row.brand_id) === Number(brand.id));
+          const percentage = Number(match?.percentage);
+          if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) throw new Error(`${label} percentages must be between 0 and 100.`);
+          return { brand_id: Number(brand.id), percentage };
+        });
+        if ((Array.isArray(values) ? values : []).some(row => !validIds.has(Number(row.brand_id)))) throw new Error(`${label} contains an invalid business partner.`);
+        const total = normalized.reduce((sum, row) => sum + row.percentage, 0);
+        if (Math.abs(total - 100) > 0.001) throw new Error(`${label} percentages must total exactly 100%. Current total: ${total.toFixed(2)}%.`);
+        return normalized;
+      };
+      const expenseShares = validateShares(expenseMode, payload.expense_shares, 'Expense allocation');
+      const inventoryShares = validateShares(inventoryMode, payload.inventory_shares, 'Inventory allocation');
+      await trx('partner_allocation_configs').insert({ shop_id: shopId, expense_mode: expenseMode, inventory_mode: inventoryMode, updated_at: trx.fn.now() })
+        .onConflict('shop_id').merge();
+      await trx('partner_allocation_shares').where({ shop_id: shopId }).delete();
+      const rows = [
+        ...expenseShares.map(row => ({ shop_id: shopId, allocation_type: 'expense', ...row })),
+        ...inventoryShares.map(row => ({ shop_id: shopId, allocation_type: 'inventory', ...row }))
+      ];
+      if (rows.length) await trx('partner_allocation_shares').insert(rows);
+    });
+    return this.getAllocationSettings(shopId);
+  }
+
+  async getInventoryShares(shopId) {
+    const allocation = await this.getAllocationSettings(shopId);
+    const totalRow = await db('products').where({ shop_id: shopId, is_deleted: 0 })
+      .where(qb => qb.whereNull('is_commission_based').orWhere('is_commission_based', 0))
+      .select(db.raw('COALESCE(SUM(stock * buying_price), 0) as val')).first();
+    const total = Number(totalRow?.val || 0);
+    return { totalInventoryValue: total, allocationMode: allocation.inventory.mode,
+      shares: allocation.inventory.shares.map(row => ({ ...row, inventory_share: total * Number(row.percentage) / 100 })) };
   }
 
   async recordPayment(brandId, userId, amount, month, shopId) {

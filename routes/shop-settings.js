@@ -5,6 +5,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const router = express.Router();
+const brandService = require('../services/BrandService');
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -225,6 +226,90 @@ router.delete("/images/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // --- Discounts & Taxes Prefab Logic ---
+
+// Commission partners are deliberately separate from whole-business partners.
+router.get("/partner-allocations", requireAuth, async (req, res) => {
+  try {
+    const settings = await brandService.getAllocationSettings(req.session.user.shop_id);
+    const inventory = await brandService.getInventoryShares(req.session.user.shop_id);
+    res.json({ ...settings, inventoryValue: inventory.totalInventoryValue });
+  } catch (e) { res.status(500).json({ error: e.message || 'Failed to load partner allocations' }); }
+});
+
+router.put("/partner-allocations", requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await brandService.saveAllocationSettings(req.session.user.shop_id, req.body)); }
+  catch (e) { res.status(400).json({ error: e.message || 'Failed to save partner allocations' }); }
+});
+
+router.get("/commission-partners", requireAuth, async (req, res) => {
+  try {
+    const rows = await require("../db/knex")('third_party_persons')
+      .where({ shop_id: req.session.user.shop_id })
+      .orderBy('name', 'asc');
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch commission partners" });
+  }
+});
+
+router.post("/commission-partners", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const db = require("../db/knex");
+    const name = String(req.body.name || '').trim();
+    const percentage = Number(req.body.default_commission_percentage);
+    if (!name) return res.status(400).json({ error: "Partner name is required" });
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+      return res.status(400).json({ error: "Commission must be between 0 and 100" });
+    }
+    const [idObj] = await db('third_party_persons').insert({
+      shop_id: req.session.user.shop_id,
+      name,
+      phone: String(req.body.phone || '').trim() || null,
+      notes: String(req.body.notes || '').trim() || null,
+      default_commission_percentage: percentage,
+      maintain_cost_price: req.body.maintain_cost_price !== false,
+      status: 'active'
+    }).returning('id');
+    res.json({ ok: true, id: typeof idObj === 'object' ? idObj.id : idObj });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed to save commission partner" });
+  }
+});
+
+router.put("/commission-partners/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const db = require("../db/knex");
+    const name = String(req.body.name || '').trim();
+    const percentage = Number(req.body.default_commission_percentage);
+    if (!name) return res.status(400).json({ error: "Partner name is required" });
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+      return res.status(400).json({ error: "Commission must be between 0 and 100" });
+    }
+    const updated = await db('third_party_persons')
+      .where({ id: req.params.id, shop_id: req.session.user.shop_id })
+      .update({ name, phone: req.body.phone || null, notes: req.body.notes || null,
+        default_commission_percentage: percentage, maintain_cost_price: req.body.maintain_cost_price !== false,
+        status: req.body.status === 'inactive' ? 'inactive' : 'active', updated_at: db.fn.now() });
+    if (!updated) return res.status(404).json({ error: "Commission partner not found" });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed to update commission partner" });
+  }
+});
+
+router.delete("/commission-partners/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const db = require("../db/knex");
+    const inUse = await db('products').where({ shop_id: req.session.user.shop_id, third_party_person_id: req.params.id }).first();
+    const hasHistory = await db('sale_items as si').join('sales as s', 'si.sale_id', 's.id')
+      .where({ 's.shop_id': req.session.user.shop_id, 'si.third_party_person_id': req.params.id }).first();
+    if (inUse || hasHistory) return res.status(409).json({ error: "This partner has products or sales history. Mark it inactive to preserve reports." });
+    await db('third_party_persons').where({ id: req.params.id, shop_id: req.session.user.shop_id }).delete();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to delete commission partner" });
+  }
+});
 
 // GET /api/shop-settings/discounts
 router.get("/discounts", requireAuth, async (req, res) => {

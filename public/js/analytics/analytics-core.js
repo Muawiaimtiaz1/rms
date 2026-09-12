@@ -227,7 +227,7 @@ async function loadAnalyticsData() {
   `;
 
   try {
-    let url = `/api/analytics/dashboard-data?period=${analyticsPeriod}&t=${Date.now()}`;
+    let url = `/api/analytics/dashboard-data?period=${analyticsPeriod}`;
     if (analyticsPeriod === 'custom') {
       url += `&from=${analyticsCustomFrom}&to=${analyticsCustomTo}`;
     }
