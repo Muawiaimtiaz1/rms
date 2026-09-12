@@ -610,6 +610,9 @@ class AnalyticsService {
 
       const shopProfit = businessGrossProfit - businessDamageLoss;
       const shopProfitMargin = businessAdjustedRevenue > 0 ? (shopProfit / businessAdjustedRevenue) * 100 : 0;
+      const historicalProfitRows = shopId
+        ? await brandService.getHistoricalProfitShares(shopId, bounds, businessDamageLoss)
+        : [];
 
       const brandRevenueRows = await db('sale_items as si')
         .join('sales as s', 'si.sale_id', 's.id')
@@ -711,36 +714,31 @@ class AnalyticsService {
         .sort((a, b) => b.netRevenue - a.netRevenue);
 
       const performanceByBrandId = new Map(brandPerformance.map((row) => [Number(row.brand_id), row]));
-      const productBasedProfitTotal = brands
-        .filter((brand) => brand.partner_type === 'product_based')
-        .reduce((sum, brand) => {
-          const performance = performanceByBrandId.get(Number(brand.id));
-          return sum + Number(performance ? performance.netAfterDamage : 0);
-        }, 0);
-      const shareBasedProfitPool = shopProfit - productBasedProfitTotal;
+      const productBasedProfitTotal = 0;
+      const shareBasedProfitPool = shopProfit;
       const shareBasedPartners = brands.filter((brand) => brand.partner_type !== 'product_based');
       const totalOwnershipPercent = shareBasedPartners.reduce((sum, brand) => sum + Number(brand.ownership_percent || 0), 0);
-      const partnerProfitShares = brands.map((brand) => {
-        const partnerType = brand.partner_type === 'product_based' ? 'product_based' : 'share_based';
-        const ownershipPercent = partnerType === 'share_based' ? Number(brand.ownership_percent || 0) : 0;
-        const performance = performanceByBrandId.get(Number(brand.id));
-        const productProfit = Number(performance ? performance.netAfterDamage : 0);
-        const profitPool = partnerType === 'product_based' ? productProfit : shareBasedProfitPool;
-        const profitShare = partnerType === 'product_based'
-          ? productProfit
-          : shareBasedProfitPool * (ownershipPercent / 100);
+      const currentBrandMap = new Map(brands.map(brand => [Number(brand.id), brand]));
+      const historicalShareMap = new Map(historicalProfitRows.map(row => [Number(row.brand_id), row]));
+      const partnerIds = new Set([...currentBrandMap.keys(), ...historicalShareMap.keys()]);
+      const partnerProfitShares = Array.from(partnerIds).map((partnerId) => {
+        const brand = currentBrandMap.get(partnerId);
+        const historical = historicalShareMap.get(partnerId);
+        const ownershipPercent = Number(brand?.ownership_percent || 0);
+        const profitShare = Number(historical?.profit_share || 0);
         return {
-          brand_id: Number(brand.id),
-          brand_name: brand.name,
-          partner_type: partnerType,
-          allocation_method: partnerType,
-          is_selected: selectedBrandId ? Number(brand.id) === selectedBrandId : false,
+          brand_id: partnerId,
+          brand_name: brand?.name || historical?.partner_name || 'Former business partner',
+          partner_type: 'share_based',
+          allocation_method: 'effective_dated_ownership',
+          is_selected: selectedBrandId ? partnerId === selectedBrandId : false,
           ownership_percent: ownershipPercent,
-          profit_pool: costDataComplete ? profitPool : null,
+          profit_pool: costDataComplete ? shareBasedProfitPool : null,
           profit_share: costDataComplete ? profitShare : null,
-          product_profit: productProfit
+          commission_share: Number(historical?.commission_share || 0),
+          product_profit: 0
         };
-      });
+      }).sort((a, b) => a.brand_name.localeCompare(b.brand_name));
       const partnerShareMap = new Map(partnerProfitShares.map((share) => [Number(share.brand_id), share]));
       brandPerformance.forEach((row) => {
         const share = partnerShareMap.get(Number(row.brand_id));

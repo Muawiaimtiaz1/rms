@@ -230,7 +230,7 @@ router.get('/reports.pdf', requireAuth, async (req, res) => {
         const expense = funding.expense.shares.find(row => Number(row.brand_id) === partnerId) || {};
         const inventoryShare = inventory.shares.find(row => Number(row.brand_id) === partnerId) || {};
         const expenseAmount = Number(data.kpis.operatingExpenses || 0) * Number(expense.percentage || 0) / 100;
-        const commissionContribution = Number(dashboard.commissionIncome || 0) * Number(allocation.ownership_percent || 0) / 100;
+        const commissionContribution = Number(allocation.commission_share || 0);
         doc.font('Helvetica-Bold').fontSize(14).fillColor('#0f172a').text(`BUSINESS PARTNER STATEMENT: ${partner.name}`);
         doc.font('Helvetica').fontSize(8.5).fillColor('#64748b').text('Profit ownership and independently configured funding responsibilities');
         writePdfTable(doc, 'Profit Allocation', ['Metric','Amount'], [

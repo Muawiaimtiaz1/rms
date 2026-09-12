@@ -1193,7 +1193,7 @@ async function renderCommissionPartnerSettings() {
 async function renderBusinessPartnerSettings() {
   const partners = await api('/api/brands');
   return `<div class="space-y-6">
-    <div class="rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-4 text-sm text-emerald-800 dark:text-emerald-300">These partners own the shop profit. Commission suppliers are managed separately. The owner/admin automatically receives the percentage remaining after other partners.</div>
+    <div class="rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-4 text-sm text-emerald-800 dark:text-emerald-300">These partners own the shop profit. Commission suppliers are managed separately. The owner/admin automatically receives the percentage remaining after other partners. New partners and percentage changes apply from the time they are saved; previous transactions keep the split active at that time.</div>
     <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
       <h3 class="text-xl font-black mb-5">Add Business Partner</h3>
       <div class="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-3">

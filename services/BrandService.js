@@ -21,6 +21,39 @@ function extractInsertedId(idObj) {
 }
 
 class BrandService {
+  async ensureOwnershipHistory(shopId, trx = db) {
+    const existing = await trx('partner_ownership_history').where({ shop_id: shopId }).first();
+    if (existing) return;
+    const brands = await trx('brands').where({ shop_id: shopId }).select('id', 'name', 'ownership_percent');
+    if (brands.length) {
+      await trx('partner_ownership_history').insert(brands.map(brand => ({
+        shop_id: shopId,
+        brand_id: brand.id,
+        partner_name: brand.name,
+        ownership_percent: normalizePercent(brand.ownership_percent),
+        effective_from: new Date('2000-01-01T00:00:00.000Z')
+      })));
+    }
+  }
+
+  async recordOwnershipSnapshot(shopId, trx = db, effectiveFrom = new Date()) {
+    await this.ensureOwnershipHistory(shopId, trx);
+    let timestamp = effectiveFrom instanceof Date ? effectiveFrom : new Date(effectiveFrom);
+    const latest = await trx('partner_ownership_history').where({ shop_id: shopId }).max('effective_from as value').first();
+    if (latest?.value && timestamp <= new Date(latest.value)) timestamp = new Date(new Date(latest.value).getTime() + 1);
+    await trx('partner_ownership_history').where({ shop_id: shopId }).whereNull('effective_to').update({ effective_to: timestamp });
+    const brands = await trx('brands').where({ shop_id: shopId }).select('id', 'name', 'ownership_percent');
+    if (brands.length) {
+      await trx('partner_ownership_history').insert(brands.map(brand => ({
+        shop_id: shopId,
+        brand_id: brand.id,
+        partner_name: brand.name,
+        ownership_percent: normalizePercent(brand.ownership_percent),
+        effective_from: timestamp
+      })));
+    }
+  }
+
   pickOwnerBrand(brands, adminUser = null) {
     if (!brands.length) return null;
     if (adminUser) {
@@ -85,6 +118,7 @@ class BrandService {
 
   async listBrands(shopId) {
     const ownerShare = shopId ? await this.rebalanceOwnerShare(shopId, db, { strict: false }) : null;
+    if (shopId) await this.ensureOwnershipHistory(shopId);
     const brands = await db('brands').where({ shop_id: shopId }).orderBy('name', 'asc');
     return brands.map((brand) => ({
       ...brand,
@@ -98,6 +132,7 @@ class BrandService {
     if (!cleanName) throw new Error('Business partner name is required.');
     return db.transaction(async (trx) => {
       await this.ensureOwnerBrand(targetShopId, trx);
+      await this.ensureOwnershipHistory(targetShopId, trx);
       const normalizedPartnerType = normalizePartnerType(partnerType);
       const [idObj] = await trx('brands').insert({
         name: cleanName,
@@ -108,6 +143,7 @@ class BrandService {
       }).returning('id');
 
       await this.rebalanceOwnerShare(targetShopId, trx, { strict: true });
+      await this.recordOwnershipSnapshot(targetShopId, trx);
       return extractInsertedId(idObj);
     });
   }
@@ -118,6 +154,7 @@ class BrandService {
     return db.transaction(async (trx) => {
       const brand = await trx('brands').where({ id, shop_id: targetShopId }).first();
       if (!brand) throw new Error('Brand not found');
+      await this.ensureOwnershipHistory(targetShopId, trx);
 
       const { owner } = await this.ensureOwnerBrand(targetShopId, trx);
       const isOwnerBrand = owner && sameId(brand.id, owner.id);
@@ -133,6 +170,7 @@ class BrandService {
 
       await trx('brands').where({ id, shop_id: targetShopId }).update(updates);
       await this.rebalanceOwnerShare(targetShopId, trx, { strict: true });
+      await this.recordOwnershipSnapshot(targetShopId, trx);
     });
   }
 
@@ -140,6 +178,7 @@ class BrandService {
     return db.transaction(async (trx) => {
       const brand = await trx('brands').where({ id, shop_id: targetShopId }).first();
       if (!brand) throw new Error('Brand not found');
+      await this.ensureOwnershipHistory(targetShopId, trx);
 
       const { owner } = await this.ensureOwnerBrand(targetShopId, trx);
       if (owner && sameId(brand.id, owner.id)) {
@@ -154,7 +193,81 @@ class BrandService {
 
       await trx('brands').where({ id, shop_id: targetShopId }).delete();
       await this.rebalanceOwnerShare(targetShopId, trx, { strict: false });
+      await this.recordOwnershipSnapshot(targetShopId, trx);
     });
+  }
+
+  async getHistoricalProfitShares(shopId, bounds, damageLoss = 0) {
+    await this.ensureOwnershipHistory(shopId);
+    const result = await db.raw(`
+      WITH item_totals AS (
+        SELECT sale_id, SUM(quantity * price_at_sale) AS subtotal
+        FROM sale_items GROUP BY sale_id
+      ), profit_events AS (
+        SELECT s.created_at AS occurred_at,
+          CASE WHEN si.third_party_person_id IS NULL
+            THEN CASE WHEN COALESCE(it.subtotal, 0) > 0
+              THEN (si.quantity * si.price_at_sale) * COALESCE(s.total, 0) / it.subtotal
+              ELSE 0 END - (si.quantity * si.buying_price_at_sale)
+            ELSE CASE WHEN COALESCE(it.subtotal, 0) > 0
+              THEN (si.quantity * si.price_at_sale) * (it.subtotal - COALESCE(s.discount, 0)) / it.subtotal
+                   * si.commission_percentage_at_sale / 100
+              ELSE 0 END
+          END AS profit,
+          CASE WHEN si.third_party_person_id IS NOT NULL AND COALESCE(it.subtotal, 0) > 0
+            THEN (si.quantity * si.price_at_sale) * (it.subtotal - COALESCE(s.discount, 0)) / it.subtotal
+                 * si.commission_percentage_at_sale / 100
+            ELSE 0 END AS commission_profit
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        LEFT JOIN item_totals it ON it.sale_id = s.id
+        WHERE s.shop_id = ? AND s.order_status = 'completed'
+          AND s.created_at BETWEEN ? AND ?
+        UNION ALL
+        SELECT r.created_at AS occurred_at,
+          CASE WHEN si.third_party_person_id IS NULL
+            THEN (ri.quantity * COALESCE(ri.buying_price_at_sale, 0)) - (ri.quantity * ri.refund_price)
+            ELSE -(ri.quantity * ri.refund_price * si.commission_percentage_at_sale / 100)
+          END AS profit,
+          CASE WHEN si.third_party_person_id IS NOT NULL
+            THEN -(ri.quantity * ri.refund_price * si.commission_percentage_at_sale / 100)
+            ELSE 0 END AS commission_profit
+        FROM return_items ri
+        JOIN returns r ON r.id = ri.return_id
+        LEFT JOIN sale_items si ON si.id = ri.sale_item_id
+        WHERE r.shop_id = ? AND r.created_at BETWEEN ? AND ?
+      ), allocated AS (
+        SELECT h.brand_id, MAX(h.partner_name) AS partner_name,
+          SUM(e.profit * h.ownership_percent / 100.0) AS transaction_profit,
+          SUM(e.commission_profit * h.ownership_percent / 100.0) AS commission_share
+        FROM profit_events e
+        JOIN partner_ownership_history h
+          ON h.shop_id = ?
+         AND e.occurred_at >= h.effective_from
+         AND (h.effective_to IS NULL OR e.occurred_at < h.effective_to)
+        GROUP BY h.brand_id
+      ), period_partners AS (
+        SELECT DISTINCT ON (brand_id) brand_id, partner_name
+        FROM partner_ownership_history
+        WHERE shop_id = ? AND effective_from <= ?
+          AND (effective_to IS NULL OR effective_to > ?)
+        ORDER BY brand_id, effective_from DESC
+      ), closing_split AS (
+        SELECT brand_id, ownership_percent
+        FROM partner_ownership_history
+        WHERE shop_id = ? AND effective_from <= ?
+          AND (effective_to IS NULL OR effective_to > ?)
+      )
+      SELECT p.brand_id, p.partner_name,
+        COALESCE(a.transaction_profit, 0) - COALESCE(c.ownership_percent, 0) * ? / 100.0 AS profit_share,
+        COALESCE(a.commission_share, 0) AS commission_share
+      FROM period_partners p
+      LEFT JOIN allocated a ON a.brand_id = p.brand_id
+      LEFT JOIN closing_split c ON c.brand_id = p.brand_id
+      ORDER BY p.partner_name
+    `, [shopId, bounds.start, bounds.end, shopId, bounds.start, bounds.end,
+      shopId, shopId, bounds.end, bounds.start, shopId, bounds.end, bounds.end, Number(damageLoss || 0)]);
+    return result.rows || result;
   }
 
   async getExpenseShares(shopId, month) {
